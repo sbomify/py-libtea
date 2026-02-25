@@ -167,7 +167,7 @@ class Release(_TeaModel):
 
 class ComponentReleaseWithCollection(_TeaModel):
     release: Release
-    latest_collection: Collection
+    latest_collection: Collection | None = None
 
 
 class Product(_TeaModel):

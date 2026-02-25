@@ -1,9 +1,16 @@
 """TEI parsing, .well-known/tea fetching, and endpoint selection."""
 
+import re
+
 import requests
 
 from libtea.exceptions import TeaDiscoveryError
 from libtea.models import TeaEndpoint, TeaWellKnown
+
+_VALID_TEI_TYPES = frozenset({"uuid", "purl", "hash", "swid", "eanupc", "gtin", "asin", "udi"})
+_DOMAIN_RE = re.compile(
+    r"^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$"
+)
 
 
 def parse_tei(tei: str) -> tuple[str, str, str]:
@@ -17,7 +24,13 @@ def parse_tei(tei: str) -> tuple[str, str, str]:
         raise TeaDiscoveryError(f"Invalid TEI: {tei!r}. Expected format: urn:tei:<type>:<domain>:<identifier>")
 
     tei_type = parts[2]
+    if tei_type not in _VALID_TEI_TYPES:
+        raise TeaDiscoveryError(
+            f"Invalid TEI type: {tei_type!r}. Must be one of: {', '.join(sorted(_VALID_TEI_TYPES))}"
+        )
     domain = parts[3]
+    if not domain or not _DOMAIN_RE.match(domain):
+        raise TeaDiscoveryError(f"Invalid domain in TEI: {domain!r}")
     identifier = ":".join(parts[4:])
     return tei_type, domain, identifier
 

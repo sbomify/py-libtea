@@ -17,6 +17,7 @@ from libtea.models import (
     ComponentReleaseWithCollection,
     DiscoveryInfo,
     PaginatedProductReleaseResponse,
+    PaginatedProductResponse,
     Product,
     ProductRelease,
     Release,
@@ -77,6 +78,16 @@ class TeaClient:
 
     # --- Products ---
 
+    def search_products(
+        self, id_type: str, id_value: str, *, page_offset: int = 0, page_size: int = 100
+    ) -> PaginatedProductResponse:
+        """Search for products by identifier (e.g. PURL, CPE, TEI)."""
+        data = self._http.get_json(
+            "/products",
+            params={"idType": id_type, "idValue": id_value, "pageOffset": page_offset, "pageSize": page_size},
+        )
+        return _validate(PaginatedProductResponse, data)
+
     def get_product(self, uuid: str) -> Product:
         data = self._http.get_json(f"/product/{uuid}")
         return _validate(Product, data)
@@ -91,6 +102,16 @@ class TeaClient:
         return _validate(PaginatedProductReleaseResponse, data)
 
     # --- Product Releases ---
+
+    def search_product_releases(
+        self, id_type: str, id_value: str, *, page_offset: int = 0, page_size: int = 100
+    ) -> PaginatedProductReleaseResponse:
+        """Search for product releases by identifier (e.g. PURL, CPE, TEI)."""
+        data = self._http.get_json(
+            "/productReleases",
+            params={"idType": id_type, "idValue": id_value, "pageOffset": page_offset, "pageSize": page_size},
+        )
+        return _validate(PaginatedProductReleaseResponse, data)
 
     def get_product_release(self, uuid: str) -> ProductRelease:
         data = self._http.get_json(f"/productRelease/{uuid}")

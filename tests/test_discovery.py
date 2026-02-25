@@ -45,6 +45,34 @@ class TestParseTei:
         with pytest.raises(TeaDiscoveryError, match="Invalid TEI"):
             parse_tei("")
 
+    def test_invalid_tei_unknown_type(self):
+        with pytest.raises(TeaDiscoveryError, match="Invalid TEI type"):
+            parse_tei("urn:tei:unknown:example.com:some-id")
+
+    def test_all_valid_tei_types(self):
+        for tei_type in ("uuid", "purl", "hash", "swid", "eanupc", "gtin", "asin", "udi"):
+            _, _, _ = parse_tei(f"urn:tei:{tei_type}:example.com:some-id")
+
+    def test_invalid_tei_empty_domain(self):
+        with pytest.raises(TeaDiscoveryError, match="Invalid domain"):
+            parse_tei("urn:tei:uuid::some-id")
+
+    def test_invalid_tei_bad_domain_format(self):
+        with pytest.raises(TeaDiscoveryError, match="Invalid domain"):
+            parse_tei("urn:tei:uuid:-invalid.com:some-id")
+
+    def test_invalid_tei_domain_with_underscore(self):
+        with pytest.raises(TeaDiscoveryError, match="Invalid domain"):
+            parse_tei("urn:tei:uuid:bad_domain.com:some-id")
+
+    def test_valid_tei_subdomain(self):
+        _, domain, _ = parse_tei("urn:tei:uuid:products.tea.example.com:some-id")
+        assert domain == "products.tea.example.com"
+
+    def test_valid_tei_single_label_domain(self):
+        _, domain, _ = parse_tei("urn:tei:uuid:localhost:some-id")
+        assert domain == "localhost"
+
     def test_tei_with_slash_in_purl_identifier(self):
         tei = "urn:tei:purl:cyclonedx.org:pkg:maven/org.apache/log4j@2.24.3"
         tei_type, domain, identifier = parse_tei(tei)
@@ -76,6 +104,12 @@ class TestFetchWellKnown:
     @responses.activate
     def test_fetch_well_known_connection_error(self):
         responses.get("https://example.com/.well-known/tea", body=requests.ConnectionError("refused"))
+        with pytest.raises(TeaDiscoveryError, match="Failed to connect"):
+            fetch_well_known("example.com")
+
+    @responses.activate
+    def test_fetch_well_known_timeout_error(self):
+        responses.get("https://example.com/.well-known/tea", body=requests.Timeout("timed out"))
         with pytest.raises(TeaDiscoveryError, match="Failed to connect"):
             fetch_well_known("example.com")
 

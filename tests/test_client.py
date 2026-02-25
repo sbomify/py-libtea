@@ -8,11 +8,102 @@ from libtea.models import (
     Component,
     ComponentReleaseWithCollection,
     PaginatedProductReleaseResponse,
+    PaginatedProductResponse,
     Product,
     ProductRelease,
     Release,
 )
 from tests.conftest import BASE_URL as BASE
+
+
+class TestSearchProducts:
+    @responses.activate
+    def test_search_products_by_purl(self, client):
+        responses.get(
+            f"{BASE}/products",
+            json={
+                "timestamp": "2024-03-20T15:30:00Z",
+                "pageStartIndex": 0,
+                "pageSize": 100,
+                "totalResults": 1,
+                "results": [
+                    {
+                        "uuid": "abc-123",
+                        "name": "Test Product",
+                        "identifiers": [{"idType": "PURL", "idValue": "pkg:pypi/foo"}],
+                    },
+                ],
+            },
+        )
+        resp = client.search_products("PURL", "pkg:pypi/foo")
+        assert isinstance(resp, PaginatedProductResponse)
+        assert resp.total_results == 1
+        assert resp.results[0].name == "Test Product"
+        request = responses.calls[0].request
+        assert "idType=PURL" in str(request.url)
+        assert "idValue=pkg" in str(request.url)
+
+    @responses.activate
+    def test_search_products_pagination(self, client):
+        responses.get(
+            f"{BASE}/products",
+            json={
+                "timestamp": "2024-03-20T15:30:00Z",
+                "pageStartIndex": 10,
+                "pageSize": 25,
+                "totalResults": 50,
+                "results": [],
+            },
+        )
+        resp = client.search_products("CPE", "cpe:2.3:a:vendor:product", page_offset=10, page_size=25)
+        request = responses.calls[0].request
+        assert "pageOffset=10" in str(request.url)
+        assert "pageSize=25" in str(request.url)
+        assert resp.page_start_index == 10
+
+    @responses.activate
+    def test_search_products_empty(self, client):
+        responses.get(
+            f"{BASE}/products",
+            json={
+                "timestamp": "2024-03-20T15:30:00Z",
+                "pageStartIndex": 0,
+                "pageSize": 100,
+                "totalResults": 0,
+                "results": [],
+            },
+        )
+        resp = client.search_products("PURL", "pkg:pypi/nonexistent")
+        assert resp.total_results == 0
+        assert resp.results == []
+
+
+class TestSearchProductReleases:
+    @responses.activate
+    def test_search_product_releases_by_purl(self, client):
+        responses.get(
+            f"{BASE}/productReleases",
+            json={
+                "timestamp": "2024-03-20T15:30:00Z",
+                "pageStartIndex": 0,
+                "pageSize": 100,
+                "totalResults": 1,
+                "results": [
+                    {
+                        "uuid": "rel-1",
+                        "version": "1.0.0",
+                        "createdDate": "2024-01-01T00:00:00Z",
+                        "components": [{"uuid": "comp-1"}],
+                    }
+                ],
+            },
+        )
+        resp = client.search_product_releases("PURL", "pkg:pypi/foo@1.0.0")
+        assert isinstance(resp, PaginatedProductReleaseResponse)
+        assert resp.total_results == 1
+        assert resp.results[0].version == "1.0.0"
+        request = responses.calls[0].request
+        assert "idType=PURL" in str(request.url)
 
 
 class TestProduct:
@@ -125,6 +216,21 @@ class TestComponentRelease:
         result = client.get_component_release("cr-1")
         assert isinstance(result, ComponentReleaseWithCollection)
         assert result.release.version == "1.0.0"
+        assert result.latest_collection is not None
+
+    @responses.activate
+    def test_get_component_release_without_collection(self, client):
+        responses.get(
+            f"{BASE}/componentRelease/cr-2",
+            json={
+                "release": {"uuid": "cr-2", "version": "2.0.0", "createdDate": "2024-01-01T00:00:00Z"},
+                "latestCollection": None,
+            },
+        )
+        result = client.get_component_release("cr-2")
+        assert isinstance(result, ComponentReleaseWithCollection)
+        assert result.release.version == "2.0.0"
+        assert result.latest_collection is None
 
     @responses.activate
     def test_get_component_release_collection_latest(self, client):
@@ -273,6 +379,53 @@ class TestPagination:
         assert "pageOffset=50" in str(request.url)
         assert "pageSize=25" in str(request.url)
         assert resp.page_start_index == 50
+
+
+class TestProductReleaseCollections:
+    @responses.activate
+    def test_get_product_release_collections(self, client):
+        responses.get(
+            f"{BASE}/productRelease/rel-1/collections",
+            json=[
+                {"uuid": "rel-1", "version": 1, "artifacts": []},
+                {"uuid": "rel-1", "version": 2, "artifacts": []},
+            ],
+        )
+        collections = client.get_product_release_collections("rel-1")
+        assert len(collections) == 2
+        assert collections[0].version == 1
+
+    @responses.activate
+    def test_get_product_release_collection_by_version(self, client):
+        responses.get(
+            f"{BASE}/productRelease/rel-1/collection/5",
+            json={"uuid": "rel-1", "version": 5, "artifacts": []},
+        )
+        collection = client.get_product_release_collection("rel-1", 5)
+        assert collection.version == 5
+
+
+class TestValidationErrors:
+    @responses.activate
+    def test_validate_raises_tea_validation_error(self, client):
+        from libtea.exceptions import TeaValidationError
+
+        # Missing required fields triggers Pydantic ValidationError → TeaValidationError
+        responses.get(f"{BASE}/product/abc", json={"bad": "data"})
+        with pytest.raises(TeaValidationError, match="Invalid Product response"):
+            client.get_product("abc")
+
+    @responses.activate
+    def test_validate_list_raises_tea_validation_error(self, client):
+        from libtea.exceptions import TeaValidationError
+
+        # List with invalid items triggers Pydantic ValidationError → TeaValidationError
+        responses.get(
+            f"{BASE}/component/comp-1/releases",
+            json=[{"bad": "data"}],
+        )
+        with pytest.raises(TeaValidationError, match="Invalid Release response"):
+            client.get_component_releases("comp-1")
 
 
 class TestContextManager:

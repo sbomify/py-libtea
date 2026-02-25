@@ -1,8 +1,11 @@
+import hashlib
+from unittest.mock import patch
+
 import pytest
 import requests
 import responses
 
-from libtea._http import TeaHttpClient
+from libtea._http import TeaHttpClient, _get_package_version
 from libtea.exceptions import (
     TeaAuthenticationError,
     TeaConnectionError,
@@ -130,3 +133,76 @@ class TestTeaHttpClient:
         assert ua.startswith("py-libtea/")
         assert "hello@sbomify.com" in ua
         client.close()
+
+    @responses.activate
+    def test_context_manager(self, base_url):
+        responses.get(f"{base_url}/product/abc", json={"uuid": "abc"})
+        with TeaHttpClient(base_url=base_url) as client:
+            data = client.get_json("/product/abc")
+            assert data["uuid"] == "abc"
+
+    @responses.activate
+    def test_download_blake2b_256(self, http_client, tmp_path):
+        content = b"blake2b test content"
+        responses.get("https://artifacts.example.com/file.bin", body=content)
+        dest = tmp_path / "file.bin"
+        digests = http_client.download_with_hashes(
+            url="https://artifacts.example.com/file.bin",
+            dest=dest,
+            algorithms=["BLAKE2b-256"],
+        )
+        expected = hashlib.blake2b(content, digest_size=32).hexdigest()
+        assert digests["BLAKE2b-256"] == expected
+
+    @responses.activate
+    def test_download_generic_exception_cleans_up(self, http_client, tmp_path):
+        responses.get("https://artifacts.example.com/file.bin", status=500)
+        dest = tmp_path / "file.bin"
+        with pytest.raises(TeaServerError):
+            http_client.download_with_hashes(url="https://artifacts.example.com/file.bin", dest=dest)
+        assert not dest.exists()
+
+
+class TestBaseUrlValidation:
+    def test_rejects_ftp_scheme(self):
+        with pytest.raises(ValueError, match="http or https scheme"):
+            TeaHttpClient(base_url="ftp://example.com/api")
+
+    def test_rejects_empty_scheme(self):
+        with pytest.raises(ValueError, match="http or https scheme"):
+            TeaHttpClient(base_url="example.com/api")
+
+    def test_rejects_missing_hostname(self):
+        with pytest.raises(ValueError, match="must include a hostname"):
+            TeaHttpClient(base_url="http:///path/only")
+
+    def test_accepts_http(self):
+        client = TeaHttpClient(base_url="http://example.com/api")
+        assert client._base_url == "http://example.com/api"
+        client.close()
+
+    def test_accepts_https(self):
+        client = TeaHttpClient(base_url="https://example.com/api")
+        assert client._base_url == "https://example.com/api"
+        client.close()
+
+    def test_strips_trailing_slash(self):
+        client = TeaHttpClient(base_url="https://example.com/api/")
+        assert client._base_url == "https://example.com/api"
+        client.close()
+
+
+class TestGetPackageVersion:
+    def test_fallback_to_tomllib(self):
+        with patch("importlib.metadata.version", side_effect=Exception("not installed")):
+            result = _get_package_version()
+            # Falls back to tomllib parsing of pyproject.toml
+            assert isinstance(result, str)
+
+    def test_fallback_to_unknown(self):
+        with (
+            patch("importlib.metadata.version", side_effect=Exception("not installed")),
+            patch("tomllib.load", side_effect=Exception("parse error")),
+        ):
+            result = _get_package_version()
+            assert result == "unknown"

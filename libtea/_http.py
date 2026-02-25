@@ -3,6 +3,7 @@
 import hashlib
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -49,7 +50,12 @@ class TeaHttpClient:
         token: str | None = None,
         timeout: float = 30.0,
     ):
-        self._base_url = base_url.rstrip("/")
+        parsed = urlparse(base_url)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(f"base_url must use http or https scheme, got {parsed.scheme!r}")
+        if not parsed.hostname:
+            raise ValueError(f"base_url must include a hostname: {base_url!r}")
+        self._base_url = parsed.geturl().rstrip("/")
         self._timeout = timeout
         self._session = requests.Session()
         self._session.headers["user-agent"] = USER_AGENT
