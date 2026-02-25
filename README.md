@@ -106,7 +106,7 @@ from libtea.exceptions import (
 ## Requirements
 
 - Python >= 3.11
-- [httpx](https://www.python-httpx.org/) for HTTP
+- [requests](https://requests.readthedocs.io/) for HTTP
 - [Pydantic](https://docs.pydantic.dev/) v2 for data models
 
 ## Development

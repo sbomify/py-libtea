@@ -20,7 +20,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "httpx>=0.27.0,<1",
+    "requests>=2.31.0,<3",
     "pydantic>=2.1.0,<3",
 ]
 
@@ -37,7 +37,7 @@ dev = [
     "pytest-cov>=4.1.0,<5",
     "ruff>=0.12.0,<0.13",
     "pre-commit>=4.2.0,<5",
-    "respx>=0.22.0,<1",
+    "responses>=0.25.0,<1",
 ]
 
 [tool.hatch.build.targets.wheel]

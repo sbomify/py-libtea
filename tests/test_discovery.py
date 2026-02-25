@@ -1,6 +1,6 @@
-import httpx
 import pytest
-import respx
+import requests
+import responses
 
 from libtea.discovery import fetch_well_known, parse_tei, select_endpoint
 from libtea.exceptions import TeaDiscoveryError
@@ -54,48 +54,46 @@ class TestParseTei:
 
 
 class TestFetchWellKnown:
-    @respx.mock
+    @responses.activate
     def test_fetch_well_known_success(self):
-        respx.get("https://example.com/.well-known/tea").mock(
-            return_value=httpx.Response(
-                200,
-                json={
-                    "schemaVersion": 1,
-                    "endpoints": [{"url": "https://api.example.com", "versions": ["1.0.0"]}],
-                },
-            )
+        responses.get(
+            "https://example.com/.well-known/tea",
+            json={
+                "schemaVersion": 1,
+                "endpoints": [{"url": "https://api.example.com", "versions": ["1.0.0"]}],
+            },
         )
         wk = fetch_well_known("example.com")
         assert wk.schema_version == 1
         assert len(wk.endpoints) == 1
 
-    @respx.mock
+    @responses.activate
     def test_fetch_well_known_404_raises_discovery_error(self):
-        respx.get("https://example.com/.well-known/tea").mock(return_value=httpx.Response(404))
+        responses.get("https://example.com/.well-known/tea", status=404)
         with pytest.raises(TeaDiscoveryError, match="HTTP 404"):
             fetch_well_known("example.com")
 
-    @respx.mock
+    @responses.activate
     def test_fetch_well_known_connection_error(self):
-        respx.get("https://example.com/.well-known/tea").mock(side_effect=httpx.ConnectError("refused"))
+        responses.get("https://example.com/.well-known/tea", body=requests.ConnectionError("refused"))
         with pytest.raises(TeaDiscoveryError, match="Failed to connect"):
             fetch_well_known("example.com")
 
-    @respx.mock
+    @responses.activate
     def test_fetch_well_known_500_raises_discovery_error(self):
-        respx.get("https://example.com/.well-known/tea").mock(return_value=httpx.Response(500))
+        responses.get("https://example.com/.well-known/tea", status=500)
         with pytest.raises(TeaDiscoveryError):
             fetch_well_known("example.com")
 
-    @respx.mock
+    @responses.activate
     def test_fetch_well_known_non_json_raises_discovery_error(self):
-        respx.get("https://example.com/.well-known/tea").mock(return_value=httpx.Response(200, content=b"not json"))
+        responses.get("https://example.com/.well-known/tea", body="not json")
         with pytest.raises(TeaDiscoveryError, match="Invalid JSON"):
             fetch_well_known("example.com")
 
-    @respx.mock
+    @responses.activate
     def test_fetch_well_known_invalid_schema_raises_discovery_error(self):
-        respx.get("https://example.com/.well-known/tea").mock(return_value=httpx.Response(200, json={"bad": "data"}))
+        responses.get("https://example.com/.well-known/tea", json={"bad": "data"})
         with pytest.raises(TeaDiscoveryError, match="Invalid .well-known/tea"):
             fetch_well_known("example.com")
 

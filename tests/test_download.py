@@ -1,8 +1,7 @@
 import hashlib
 
-import httpx
 import pytest
-import respx
+import responses
 
 from libtea.exceptions import TeaChecksumError
 from libtea.models import Checksum, ChecksumAlgorithm
@@ -12,17 +11,17 @@ ARTIFACT_CONTENT = b'{"bomFormat": "CycloneDX", "specVersion": "1.5"}'
 
 
 class TestDownloadArtifact:
-    @respx.mock
+    @responses.activate
     def test_download_without_checksum(self, client, tmp_path):
-        respx.get(ARTIFACT_URL).mock(return_value=httpx.Response(200, content=ARTIFACT_CONTENT))
+        responses.get(ARTIFACT_URL, body=ARTIFACT_CONTENT)
         dest = tmp_path / "sbom.json"
         result = client.download_artifact(ARTIFACT_URL, dest)
         assert result == dest
         assert dest.read_bytes() == ARTIFACT_CONTENT
 
-    @respx.mock
+    @responses.activate
     def test_download_with_valid_checksum(self, client, tmp_path):
-        respx.get(ARTIFACT_URL).mock(return_value=httpx.Response(200, content=ARTIFACT_CONTENT))
+        responses.get(ARTIFACT_URL, body=ARTIFACT_CONTENT)
         sha256 = hashlib.sha256(ARTIFACT_CONTENT).hexdigest()
         checksums = [Checksum(alg_type=ChecksumAlgorithm.SHA_256, alg_value=sha256)]
         dest = tmp_path / "sbom.json"
@@ -30,18 +29,18 @@ class TestDownloadArtifact:
         assert result == dest
         assert dest.exists()
 
-    @respx.mock
+    @responses.activate
     def test_download_with_invalid_checksum_deletes_file(self, client, tmp_path):
-        respx.get(ARTIFACT_URL).mock(return_value=httpx.Response(200, content=ARTIFACT_CONTENT))
+        responses.get(ARTIFACT_URL, body=ARTIFACT_CONTENT)
         checksums = [Checksum(alg_type=ChecksumAlgorithm.SHA_256, alg_value="badhash")]
         dest = tmp_path / "sbom.json"
         with pytest.raises(TeaChecksumError, match="SHA-256"):
             client.download_artifact(ARTIFACT_URL, dest, verify_checksums=checksums)
         assert not dest.exists()
 
-    @respx.mock
+    @responses.activate
     def test_download_with_multiple_checksums(self, client, tmp_path):
-        respx.get(ARTIFACT_URL).mock(return_value=httpx.Response(200, content=ARTIFACT_CONTENT))
+        responses.get(ARTIFACT_URL, body=ARTIFACT_CONTENT)
         sha256 = hashlib.sha256(ARTIFACT_CONTENT).hexdigest()
         sha1 = hashlib.sha1(ARTIFACT_CONTENT).hexdigest()
         checksums = [
@@ -52,9 +51,9 @@ class TestDownloadArtifact:
         result = client.download_artifact(ARTIFACT_URL, dest, verify_checksums=checksums)
         assert result == dest
 
-    @respx.mock
+    @responses.activate
     def test_download_checksum_uppercase_hex_accepted(self, client, tmp_path):
-        respx.get(ARTIFACT_URL).mock(return_value=httpx.Response(200, content=ARTIFACT_CONTENT))
+        responses.get(ARTIFACT_URL, body=ARTIFACT_CONTENT)
         sha256 = hashlib.sha256(ARTIFACT_CONTENT).hexdigest().upper()
         checksums = [Checksum(alg_type=ChecksumAlgorithm.SHA_256, alg_value=sha256)]
         dest = tmp_path / "sbom.json"
@@ -67,17 +66,12 @@ class TestDownloadArtifact:
         with pytest.raises(TeaChecksumError, match="BLAKE3"):
             client.download_artifact(ARTIFACT_URL, dest, verify_checksums=checksums)
 
-    @respx.mock
+    @responses.activate
     def test_download_with_unknown_algorithm_raises_clear_error(self, client, tmp_path):
         """If an algorithm has no hashlib mapping, verification should raise explicitly."""
-        respx.get(ARTIFACT_URL).mock(return_value=httpx.Response(200, content=ARTIFACT_CONTENT))
+        responses.get(ARTIFACT_URL, body=ARTIFACT_CONTENT)
         checksums = [Checksum(alg_type=ChecksumAlgorithm.BLAKE3, alg_value="abc123")]
         dest = tmp_path / "sbom.json"
-        # BLAKE3 raises before download, so test with a checksum whose algorithm
-        # was silently skipped during hashing (simulated by providing BLAKE3 in
-        # verify_checksums but not in the download algorithms list).
-        # Instead, we test the path by calling download_artifact with a checksum
-        # that has an algorithm not in the computed dict.
         from unittest.mock import patch
 
         # Patch download_with_hashes to return empty dict (no algorithms computed)

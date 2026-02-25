@@ -1,6 +1,6 @@
 """TEI parsing, .well-known/tea fetching, and endpoint selection."""
 
-import httpx
+import requests
 
 from libtea.exceptions import TeaDiscoveryError
 from libtea.models import TeaEndpoint, TeaWellKnown
@@ -26,12 +26,15 @@ def fetch_well_known(domain: str, *, timeout: float = 10.0) -> TeaWellKnown:
     """Fetch and parse the .well-known/tea document from a domain via HTTPS."""
     url = f"https://{domain}/.well-known/tea"
     try:
-        response = httpx.get(url, timeout=timeout, follow_redirects=True)
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        raise TeaDiscoveryError(f"Failed to fetch {url}: HTTP {exc.response.status_code}") from exc
-    except httpx.TransportError as exc:
+        response = requests.get(url, timeout=timeout, allow_redirects=True)
+        if response.status_code >= 400:
+            raise TeaDiscoveryError(f"Failed to fetch {url}: HTTP {response.status_code}")
+    except requests.ConnectionError as exc:
         raise TeaDiscoveryError(f"Failed to connect to {url}: {exc}") from exc
+    except requests.Timeout as exc:
+        raise TeaDiscoveryError(f"Failed to connect to {url}: {exc}") from exc
+    except TeaDiscoveryError:
+        raise
 
     try:
         data = response.json()

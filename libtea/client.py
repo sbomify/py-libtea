@@ -71,7 +71,7 @@ class TeaClient:
     # --- Discovery ---
 
     def discover(self, tei: str) -> list[DiscoveryInfo]:
-        # httpx auto-encodes query params — do NOT pre-encode with quote()
+        # requests auto-encodes query params — do NOT pre-encode with quote()
         data = self._http.get_json("/discovery", params={"tei": tei})
         return _validate_list(DiscoveryInfo, data)
 

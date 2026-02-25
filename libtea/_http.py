@@ -1,10 +1,10 @@
-"""Internal HTTP client wrapping httpx with TEA error handling."""
+"""Internal HTTP client wrapping requests with TEA error handling."""
 
 import hashlib
 from pathlib import Path
 from typing import Any
 
-import httpx
+import requests
 
 from libtea.exceptions import (
     TeaAuthenticationError,
@@ -49,23 +49,21 @@ class TeaHttpClient:
         token: str | None = None,
         timeout: float = 30.0,
     ):
-        headers = {"user-agent": USER_AGENT}
-        if token:
-            headers["authorization"] = f"Bearer {token}"
-
+        self._base_url = base_url.rstrip("/")
         self._timeout = timeout
-        self._client = httpx.Client(
-            base_url=base_url,
-            headers=headers,
-            timeout=timeout,
-            follow_redirects=True,
-        )
+        self._session = requests.Session()
+        self._session.headers["user-agent"] = USER_AGENT
+        if token:
+            self._session.headers["authorization"] = f"Bearer {token}"
 
     def get_json(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
         """Send GET request and return parsed JSON."""
+        url = f"{self._base_url}{path}"
         try:
-            response = self._client.get(path, params=params)
-        except httpx.TransportError as exc:
+            response = self._session.get(url, params=params, timeout=self._timeout)
+        except requests.ConnectionError as exc:
+            raise TeaConnectionError(str(exc)) from exc
+        except requests.Timeout as exc:
             raise TeaConnectionError(str(exc)) from exc
 
         self._raise_for_status(response)
@@ -77,7 +75,7 @@ class TeaHttpClient:
     def download_with_hashes(self, url: str, dest: Path, algorithms: list[str] | None = None) -> dict[str, str]:
         """Download a file and compute checksums on-the-fly. Returns {algorithm: hex_digest}.
 
-        Uses a separate unauthenticated httpx client so that the bearer token
+        Uses a separate unauthenticated session so that the bearer token
         is not leaked to third-party artifact hosts (CDNs, Maven Central, etc.).
         """
         from libtea.exceptions import TeaChecksumError
@@ -113,19 +111,16 @@ class TeaHttpClient:
 
         dest.parent.mkdir(parents=True, exist_ok=True)
         try:
-            with httpx.Client(
-                headers={"user-agent": USER_AGENT},
-                timeout=self._timeout,
-                follow_redirects=True,
-            ) as download_client:
-                with download_client.stream("GET", url) as response:
-                    self._raise_for_status(response)
-                    with open(dest, "wb") as f:
-                        for chunk in response.iter_bytes(chunk_size=8192):
-                            f.write(chunk)
-                            for h in hashers.values():
-                                h.update(chunk)
-        except httpx.TransportError as exc:
+            with requests.Session() as download_session:
+                download_session.headers["user-agent"] = USER_AGENT
+                response = download_session.get(url, stream=True, timeout=self._timeout)
+                self._raise_for_status(response)
+                with open(dest, "wb") as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                        for h in hashers.values():
+                            h.update(chunk)
+        except (requests.ConnectionError, requests.Timeout) as exc:
             dest.unlink(missing_ok=True)
             raise TeaConnectionError(str(exc)) from exc
         except Exception:
@@ -135,7 +130,7 @@ class TeaHttpClient:
         return {alg: h.hexdigest() for alg, h in hashers.items()}
 
     def close(self) -> None:
-        self._client.close()
+        self._session.close()
 
     def __enter__(self):
         return self
@@ -144,7 +139,7 @@ class TeaHttpClient:
         self.close()
 
     @staticmethod
-    def _raise_for_status(response: httpx.Response) -> None:
+    def _raise_for_status(response: requests.Response) -> None:
         """Map HTTP status codes to typed exceptions."""
         status = response.status_code
         if 200 <= status < 300:
