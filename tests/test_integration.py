@@ -4,7 +4,6 @@ import responses
 
 from libtea.client import TeaClient
 from libtea.models import ArtifactType, ChecksumAlgorithm, IdentifierType
-from tests.conftest import BASE_URL as BASE
 
 # Example JSON taken directly from the TEA OpenAPI spec
 LOG4J_PRODUCT = {
@@ -84,22 +83,22 @@ LOG4J_COLLECTION = {
 
 class TestSpecExamples:
     @responses.activate
-    def test_full_consumer_flow(self):
+    def test_full_consumer_flow(self, base_url):
         """Test the full consumer flow: product -> component releases -> collection -> artifacts."""
         product_uuid = LOG4J_PRODUCT["uuid"]
         release_uuid = TOMCAT_RELEASE["uuid"]
 
-        responses.get(f"{BASE}/product/{product_uuid}", json=LOG4J_PRODUCT)
+        responses.get(f"{base_url}/product/{product_uuid}", json=LOG4J_PRODUCT)
         responses.get(
-            f"{BASE}/componentRelease/{release_uuid}",
+            f"{base_url}/componentRelease/{release_uuid}",
             json={
                 "release": TOMCAT_RELEASE,
                 "latestCollection": LOG4J_COLLECTION,
             },
         )
-        responses.get(f"{BASE}/componentRelease/{release_uuid}/collection/latest", json=LOG4J_COLLECTION)
+        responses.get(f"{base_url}/componentRelease/{release_uuid}/collection/latest", json=LOG4J_COLLECTION)
 
-        with TeaClient(base_url=BASE) as client:
+        with TeaClient(base_url=base_url) as client:
             # Step 1: Get product
             product = client.get_product(product_uuid)
             assert product.name == "Apache Log4j 2"

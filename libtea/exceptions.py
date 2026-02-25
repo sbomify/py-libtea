@@ -22,7 +22,7 @@ class TeaNotFoundError(TeaError):
 
 
 class TeaRequestError(TeaError):
-    """HTTP 400 or other client error."""
+    """Unexpected HTTP redirect (3xx) or client error (4xx other than 401/403/404)."""
 
 
 class TeaServerError(TeaError):
@@ -52,3 +52,7 @@ class TeaChecksumError(TeaError):
 
 class TeaValidationError(TeaError):
     """Malformed server response that fails Pydantic validation."""
+
+
+class TeaInsecureTransportWarning(UserWarning):
+    """Warning emitted when using plaintext HTTP instead of HTTPS."""

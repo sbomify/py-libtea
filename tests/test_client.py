@@ -1,7 +1,8 @@
 import pytest
 import responses
 
-from libtea.client import TeaClient
+from libtea.client import TeaClient, _validate_path_segment
+from libtea.exceptions import TeaDiscoveryError, TeaValidationError
 from libtea.models import (
     Artifact,
     Collection,
@@ -13,14 +14,13 @@ from libtea.models import (
     ProductRelease,
     Release,
 )
-from tests.conftest import BASE_URL as BASE
 
 
 class TestSearchProducts:
     @responses.activate
-    def test_search_products_by_purl(self, client):
+    def test_search_products_by_purl(self, client, base_url):
         responses.get(
-            f"{BASE}/products",
+            f"{base_url}/products",
             json={
                 "timestamp": "2024-03-20T15:30:00Z",
                 "pageStartIndex": 0,
@@ -44,9 +44,9 @@ class TestSearchProducts:
         assert "idValue=pkg" in str(request.url)
 
     @responses.activate
-    def test_search_products_pagination(self, client):
+    def test_search_products_pagination(self, client, base_url):
         responses.get(
-            f"{BASE}/products",
+            f"{base_url}/products",
             json={
                 "timestamp": "2024-03-20T15:30:00Z",
                 "pageStartIndex": 10,
@@ -62,9 +62,9 @@ class TestSearchProducts:
         assert resp.page_start_index == 10
 
     @responses.activate
-    def test_search_products_empty(self, client):
+    def test_search_products_empty(self, client, base_url):
         responses.get(
-            f"{BASE}/products",
+            f"{base_url}/products",
             json={
                 "timestamp": "2024-03-20T15:30:00Z",
                 "pageStartIndex": 0,
@@ -80,9 +80,9 @@ class TestSearchProducts:
 
 class TestSearchProductReleases:
     @responses.activate
-    def test_search_product_releases_by_purl(self, client):
+    def test_search_product_releases_by_purl(self, client, base_url):
         responses.get(
-            f"{BASE}/productReleases",
+            f"{base_url}/productReleases",
             json={
                 "timestamp": "2024-03-20T15:30:00Z",
                 "pageStartIndex": 0,
@@ -108,9 +108,9 @@ class TestSearchProductReleases:
 
 class TestProduct:
     @responses.activate
-    def test_get_product(self, client):
+    def test_get_product(self, client, base_url):
         responses.get(
-            f"{BASE}/product/abc-123",
+            f"{base_url}/product/abc-123",
             json={
                 "uuid": "abc-123",
                 "name": "Test Product",
@@ -122,9 +122,9 @@ class TestProduct:
         assert product.name == "Test Product"
 
     @responses.activate
-    def test_get_product_releases(self, client):
+    def test_get_product_releases(self, client, base_url):
         responses.get(
-            f"{BASE}/product/abc-123/releases",
+            f"{base_url}/product/abc-123/releases",
             json={
                 "timestamp": "2024-03-20T15:30:00Z",
                 "pageStartIndex": 0,
@@ -147,9 +147,9 @@ class TestProduct:
 
 class TestProductRelease:
     @responses.activate
-    def test_get_product_release(self, client):
+    def test_get_product_release(self, client, base_url):
         responses.get(
-            f"{BASE}/productRelease/rel-1",
+            f"{base_url}/productRelease/rel-1",
             json={
                 "uuid": "rel-1",
                 "version": "1.0.0",
@@ -162,9 +162,9 @@ class TestProductRelease:
         assert release.version == "1.0.0"
 
     @responses.activate
-    def test_get_product_release_collection_latest(self, client):
+    def test_get_product_release_collection_latest(self, client, base_url):
         responses.get(
-            f"{BASE}/productRelease/rel-1/collection/latest",
+            f"{base_url}/productRelease/rel-1/collection/latest",
             json={
                 "uuid": "rel-1",
                 "version": 1,
@@ -177,9 +177,9 @@ class TestProductRelease:
 
 class TestComponent:
     @responses.activate
-    def test_get_component(self, client):
+    def test_get_component(self, client, base_url):
         responses.get(
-            f"{BASE}/component/comp-1",
+            f"{base_url}/component/comp-1",
             json={
                 "uuid": "comp-1",
                 "name": "Test Component",
@@ -191,9 +191,9 @@ class TestComponent:
         assert component.name == "Test Component"
 
     @responses.activate
-    def test_get_component_releases(self, client):
+    def test_get_component_releases(self, client, base_url):
         responses.get(
-            f"{BASE}/component/comp-1/releases",
+            f"{base_url}/component/comp-1/releases",
             json=[
                 {"uuid": "cr-1", "version": "1.0.0", "createdDate": "2024-01-01T00:00:00Z"},
             ],
@@ -205,9 +205,9 @@ class TestComponent:
 
 class TestComponentRelease:
     @responses.activate
-    def test_get_component_release(self, client):
+    def test_get_component_release(self, client, base_url):
         responses.get(
-            f"{BASE}/componentRelease/cr-1",
+            f"{base_url}/componentRelease/cr-1",
             json={
                 "release": {"uuid": "cr-1", "version": "1.0.0", "createdDate": "2024-01-01T00:00:00Z"},
                 "latestCollection": {"uuid": "cr-1", "version": 1, "artifacts": []},
@@ -219,23 +219,21 @@ class TestComponentRelease:
         assert result.latest_collection is not None
 
     @responses.activate
-    def test_get_component_release_without_collection(self, client):
+    def test_get_component_release_missing_collection_raises(self, client, base_url):
+        """Per TEA spec, latestCollection is required — missing it should raise."""
         responses.get(
-            f"{BASE}/componentRelease/cr-2",
+            f"{base_url}/componentRelease/cr-2",
             json={
                 "release": {"uuid": "cr-2", "version": "2.0.0", "createdDate": "2024-01-01T00:00:00Z"},
-                "latestCollection": None,
             },
         )
-        result = client.get_component_release("cr-2")
-        assert isinstance(result, ComponentReleaseWithCollection)
-        assert result.release.version == "2.0.0"
-        assert result.latest_collection is None
+        with pytest.raises(TeaValidationError, match="Invalid ComponentReleaseWithCollection"):
+            client.get_component_release("cr-2")
 
     @responses.activate
-    def test_get_component_release_collection_latest(self, client):
+    def test_get_component_release_collection_latest(self, client, base_url):
         responses.get(
-            f"{BASE}/componentRelease/cr-1/collection/latest",
+            f"{base_url}/componentRelease/cr-1/collection/latest",
             json={"uuid": "cr-1", "version": 2, "artifacts": []},
         )
         collection = client.get_component_release_collection_latest("cr-1")
@@ -243,9 +241,9 @@ class TestComponentRelease:
         assert collection.version == 2
 
     @responses.activate
-    def test_get_component_release_collections(self, client):
+    def test_get_component_release_collections(self, client, base_url):
         responses.get(
-            f"{BASE}/componentRelease/cr-1/collections",
+            f"{base_url}/componentRelease/cr-1/collections",
             json=[
                 {"uuid": "cr-1", "version": 1, "artifacts": []},
                 {"uuid": "cr-1", "version": 2, "artifacts": []},
@@ -255,9 +253,9 @@ class TestComponentRelease:
         assert len(collections) == 2
 
     @responses.activate
-    def test_get_component_release_collection_by_version(self, client):
+    def test_get_component_release_collection_by_version(self, client, base_url):
         responses.get(
-            f"{BASE}/componentRelease/cr-1/collection/3",
+            f"{base_url}/componentRelease/cr-1/collection/3",
             json={"uuid": "cr-1", "version": 3, "artifacts": []},
         )
         collection = client.get_component_release_collection("cr-1", 3)
@@ -266,9 +264,9 @@ class TestComponentRelease:
 
 class TestArtifact:
     @responses.activate
-    def test_get_artifact(self, client):
+    def test_get_artifact(self, client, base_url):
         responses.get(
-            f"{BASE}/artifact/art-1",
+            f"{base_url}/artifact/art-1",
             json={
                 "uuid": "art-1",
                 "name": "SBOM",
@@ -289,10 +287,10 @@ class TestArtifact:
 
 class TestDiscovery:
     @responses.activate
-    def test_discover(self, client):
+    def test_discover(self, client, base_url):
         tei = "urn:tei:uuid:example.com:d4d9f54a-abcf-11ee-ac79-1a52914d44b"
         responses.get(
-            f"{BASE}/discovery",
+            f"{base_url}/discovery",
             json=[
                 {
                     "productReleaseUuid": "d4d9f54a-abcf-11ee-ac79-1a52914d44b",
@@ -308,8 +306,8 @@ class TestDiscovery:
         assert "tei=" in str(request.url)
 
     @responses.activate
-    def test_discover_empty_result(self, client):
-        responses.get(f"{BASE}/discovery", json=[])
+    def test_discover_empty_result(self, client, base_url):
+        responses.get(f"{base_url}/discovery", json=[])
         results = client.discover("urn:tei:uuid:example.com:d4d9f54a")
         assert results == []
 
@@ -330,8 +328,6 @@ class TestFromWellKnown:
 
     @responses.activate
     def test_from_well_known_no_compatible_version_raises(self):
-        from libtea.exceptions import TeaDiscoveryError
-
         responses.get(
             "https://example.com/.well-known/tea",
             json={
@@ -339,11 +335,11 @@ class TestFromWellKnown:
                 "endpoints": [{"url": "https://api.example.com", "versions": ["99.0.0"]}],
             },
         )
-        with pytest.raises(TeaDiscoveryError):
+        with pytest.raises(TeaDiscoveryError, match="No compatible endpoint"):
             TeaClient.from_well_known("example.com")
 
     @responses.activate
-    def test_from_well_known_passes_token(self):
+    def test_from_well_known_passes_token(self, base_url):
         responses.get(
             "https://example.com/.well-known/tea",
             json={
@@ -363,9 +359,9 @@ class TestFromWellKnown:
 
 class TestPagination:
     @responses.activate
-    def test_get_product_releases_pagination_params(self, client):
+    def test_get_product_releases_pagination_params(self, client, base_url):
         responses.get(
-            f"{BASE}/product/abc-123/releases",
+            f"{base_url}/product/abc-123/releases",
             json={
                 "timestamp": "2024-03-20T15:30:00Z",
                 "pageStartIndex": 50,
@@ -383,9 +379,9 @@ class TestPagination:
 
 class TestProductReleaseCollections:
     @responses.activate
-    def test_get_product_release_collections(self, client):
+    def test_get_product_release_collections(self, client, base_url):
         responses.get(
-            f"{BASE}/productRelease/rel-1/collections",
+            f"{base_url}/productRelease/rel-1/collections",
             json=[
                 {"uuid": "rel-1", "version": 1, "artifacts": []},
                 {"uuid": "rel-1", "version": 2, "artifacts": []},
@@ -396,9 +392,9 @@ class TestProductReleaseCollections:
         assert collections[0].version == 1
 
     @responses.activate
-    def test_get_product_release_collection_by_version(self, client):
+    def test_get_product_release_collection_by_version(self, client, base_url):
         responses.get(
-            f"{BASE}/productRelease/rel-1/collection/5",
+            f"{base_url}/productRelease/rel-1/collection/5",
             json={"uuid": "rel-1", "version": 5, "artifacts": []},
         )
         collection = client.get_product_release_collection("rel-1", 5)
@@ -407,34 +403,61 @@ class TestProductReleaseCollections:
 
 class TestValidationErrors:
     @responses.activate
-    def test_validate_raises_tea_validation_error(self, client):
-        from libtea.exceptions import TeaValidationError
-
+    def test_validate_raises_tea_validation_error(self, client, base_url):
         # Missing required fields triggers Pydantic ValidationError → TeaValidationError
-        responses.get(f"{BASE}/product/abc", json={"bad": "data"})
+        responses.get(f"{base_url}/product/abc", json={"bad": "data"})
         with pytest.raises(TeaValidationError, match="Invalid Product response"):
             client.get_product("abc")
 
     @responses.activate
-    def test_validate_list_raises_tea_validation_error(self, client):
-        from libtea.exceptions import TeaValidationError
-
+    def test_validate_list_raises_tea_validation_error(self, client, base_url):
         # List with invalid items triggers Pydantic ValidationError → TeaValidationError
         responses.get(
-            f"{BASE}/component/comp-1/releases",
+            f"{base_url}/component/comp-1/releases",
             json=[{"bad": "data"}],
         )
         with pytest.raises(TeaValidationError, match="Invalid Release response"):
             client.get_component_releases("comp-1")
 
 
+class TestValidatePathSegment:
+    def test_accepts_uuid(self):
+        assert _validate_path_segment("d4d9f54a-abcf-11ee-ac79-1a52914d44b1") == "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+
+    def test_accepts_alphanumeric(self):
+        assert _validate_path_segment("abc123") == "abc123"
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "../../etc/passwd",
+            "abc/def",
+            "abc def",
+            "abc?query=1",
+            "abc#fragment",
+            "abc@host",
+            "abc.def",
+            "",
+            "a" * 129,
+            "abc\x00def",
+        ],
+    )
+    def test_rejects_unsafe_values(self, value):
+        with pytest.raises(TeaValidationError, match="Invalid uuid"):
+            _validate_path_segment(value)
+
+    def test_error_message_includes_guidance(self):
+        with pytest.raises(TeaValidationError, match="alphanumeric characters and hyphens"):
+            _validate_path_segment("../traversal")
+
+
 class TestContextManager:
     @responses.activate
-    def test_client_as_context_manager(self):
+    def test_client_as_context_manager(self, base_url):
         responses.get(
-            f"{BASE}/component/c1",
+            f"{base_url}/component/c1",
             json={"uuid": "c1", "name": "C1", "identifiers": []},
         )
-        with TeaClient(base_url=BASE) as client:
+        with TeaClient(base_url=base_url) as client:
             component = client.get_component("c1")
             assert component.name == "C1"

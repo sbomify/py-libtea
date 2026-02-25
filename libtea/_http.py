@@ -1,43 +1,93 @@
 """Internal HTTP client wrapping requests with TEA error handling."""
 
 import hashlib
+import logging
+import warnings
 from pathlib import Path
-from typing import Any
+from types import TracebackType
+from typing import Any, Self
 from urllib.parse import urlparse
 
 import requests
 
 from libtea.exceptions import (
     TeaAuthenticationError,
+    TeaChecksumError,
     TeaConnectionError,
+    TeaInsecureTransportWarning,
     TeaNotFoundError,
     TeaRequestError,
     TeaServerError,
     TeaValidationError,
 )
 
+logger = logging.getLogger("libtea")
+
+# Hash algorithm registry: {TEA name: (hashlib name, digest_size)}.
+# When digest_size is None, hashlib.new(name) is used with its default size.
+# When digest_size is set, hashlib.blake2b(digest_size=N) is used instead.
+# BLAKE3 is intentionally excluded — handled separately in _build_hashers.
+_HASH_REGISTRY: dict[str, tuple[str, int | None]] = {
+    "MD5": ("md5", None),
+    "SHA-1": ("sha1", None),
+    "SHA-256": ("sha256", None),
+    "SHA-384": ("sha384", None),
+    "SHA-512": ("sha512", None),
+    "SHA3-256": ("sha3_256", None),
+    "SHA3-384": ("sha3_384", None),
+    "SHA3-512": ("sha3_512", None),
+    "BLAKE2b-256": ("blake2b", 32),
+    "BLAKE2b-384": ("blake2b", 48),
+    "BLAKE2b-512": ("blake2b", 64),
+}
+
 
 def _get_package_version() -> str:
     """Get the package version for User-Agent header."""
     try:
-        from importlib.metadata import version
+        from importlib.metadata import PackageNotFoundError, version
 
         return version("libtea")
-    except Exception:
-        try:
-            import tomllib
-
-            pyproject_path = Path(__file__).parent.parent / "pyproject.toml"
-            if pyproject_path.exists():
-                with open(pyproject_path, "rb") as f:
-                    pyproject_data = tomllib.load(f)
-                return pyproject_data.get("project", {}).get("version", "unknown")
-        except Exception:
-            pass
+    except (PackageNotFoundError, ValueError):
         return "unknown"
 
 
 USER_AGENT = f"py-libtea/{_get_package_version()} (hello@sbomify.com)"
+
+_BLOCKED_SCHEMES = frozenset({"file", "ftp", "gopher", "data"})
+
+
+def _build_hashers(algorithms: list[str]) -> dict[str, Any]:
+    """Build hashlib hasher objects for the given algorithm names."""
+    hashers: dict[str, Any] = {}
+    for alg in algorithms:
+        if alg == "BLAKE3":
+            raise TeaChecksumError(
+                "BLAKE3 is not supported by Python's hashlib. "
+                "Install the 'blake3' package or use a different algorithm.",
+                algorithm="BLAKE3",
+            )
+        entry = _HASH_REGISTRY.get(alg)
+        if entry is None:
+            raise TeaChecksumError(
+                f"Unsupported checksum algorithm: {alg!r}. Supported: {', '.join(sorted(_HASH_REGISTRY.keys()))}",
+                algorithm=alg,
+            )
+        hashlib_name, digest_size = entry
+        if digest_size is not None:
+            hashers[alg] = hashlib.blake2b(digest_size=digest_size)
+        else:
+            hashers[alg] = hashlib.new(hashlib_name)
+    return hashers
+
+
+def _validate_download_url(url: str) -> None:
+    """Reject download URLs that use non-HTTP schemes."""
+    parsed = urlparse(url)
+    if parsed.scheme in _BLOCKED_SCHEMES or parsed.scheme not in ("http", "https"):
+        raise TeaValidationError(f"Artifact download URL must use http or https scheme, got {parsed.scheme!r}")
+    if not parsed.hostname:
+        raise TeaValidationError(f"Artifact download URL must include a hostname: {url!r}")
 
 
 class TeaHttpClient:
@@ -55,6 +105,14 @@ class TeaHttpClient:
             raise ValueError(f"base_url must use http or https scheme, got {parsed.scheme!r}")
         if not parsed.hostname:
             raise ValueError(f"base_url must include a hostname: {base_url!r}")
+        if parsed.scheme == "http" and token:
+            raise ValueError("Cannot use bearer token with plaintext HTTP. Use https:// or remove the token.")
+        if parsed.scheme == "http":
+            warnings.warn(
+                "Using plaintext HTTP is insecure. Use HTTPS in production.",
+                TeaInsecureTransportWarning,
+                stacklevel=2,
+            )
         self._base_url = parsed.geturl().rstrip("/")
         self._timeout = timeout
         self._session = requests.Session()
@@ -66,10 +124,15 @@ class TeaHttpClient:
         """Send GET request and return parsed JSON."""
         url = f"{self._base_url}{path}"
         try:
-            response = self._session.get(url, params=params, timeout=self._timeout)
+            response = self._session.get(url, params=params, timeout=self._timeout, allow_redirects=False)
         except requests.ConnectionError as exc:
+            logger.warning("Connection error for %s: %s", url, exc)
             raise TeaConnectionError(str(exc)) from exc
         except requests.Timeout as exc:
+            logger.warning("Timeout for %s: %s", url, exc)
+            raise TeaConnectionError(str(exc)) from exc
+        except requests.RequestException as exc:
+            logger.warning("Request error for %s: %s", url, exc)
             raise TeaConnectionError(str(exc)) from exc
 
         self._raise_for_status(response)
@@ -84,36 +147,8 @@ class TeaHttpClient:
         Uses a separate unauthenticated session so that the bearer token
         is not leaked to third-party artifact hosts (CDNs, Maven Central, etc.).
         """
-        from libtea.exceptions import TeaChecksumError
-
-        hashers: dict[str, Any] = {}
-        if algorithms:
-            alg_map = {
-                "MD5": "md5",
-                "SHA-1": "sha1",
-                "SHA-256": "sha256",
-                "SHA-384": "sha384",
-                "SHA-512": "sha512",
-                "SHA3-256": "sha3_256",
-                "SHA3-384": "sha3_384",
-                "SHA3-512": "sha3_512",
-                "BLAKE2b-256": "blake2b",
-                "BLAKE2b-384": "blake2b",
-                "BLAKE2b-512": "blake2b",
-            }
-            blake2b_sizes = {"BLAKE2b-256": 32, "BLAKE2b-384": 48, "BLAKE2b-512": 64}
-            for alg in algorithms:
-                if alg == "BLAKE3":
-                    raise TeaChecksumError(
-                        "BLAKE3 is not supported by Python's hashlib. "
-                        "Install the 'blake3' package or use a different algorithm.",
-                        algorithm="BLAKE3",
-                    )
-                hashlib_name = alg_map.get(alg)
-                if hashlib_name == "blake2b":
-                    hashers[alg] = hashlib.blake2b(digest_size=blake2b_sizes[alg])
-                elif hashlib_name:
-                    hashers[alg] = hashlib.new(hashlib_name)
+        _validate_download_url(url)
+        hashers = _build_hashers(algorithms) if algorithms else {}
 
         dest.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -129,19 +164,31 @@ class TeaHttpClient:
         except (requests.ConnectionError, requests.Timeout) as exc:
             dest.unlink(missing_ok=True)
             raise TeaConnectionError(str(exc)) from exc
-        except Exception:
+        except requests.RequestException as exc:
             dest.unlink(missing_ok=True)
+            raise TeaConnectionError(f"Download failed: {exc}") from exc
+        except Exception:
+            try:
+                dest.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Failed to clean up partial download at %s", dest)
             raise
 
         return {alg: h.hexdigest() for alg, h in hashers.items()}
 
     def close(self) -> None:
+        self._session.headers.pop("authorization", None)
         self._session.close()
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *args):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         self.close()
 
     @staticmethod
@@ -150,18 +197,25 @@ class TeaHttpClient:
         status = response.status_code
         if 200 <= status < 300:
             return
-
+        if 300 <= status < 400:
+            raise TeaRequestError(f"Unexpected redirect: HTTP {status}")
         if status in (401, 403):
+            logger.warning("Authentication failed: HTTP %d for %s", status, response.url)
             raise TeaAuthenticationError(f"Authentication failed: HTTP {status}")
-        elif status == 404:
+        if status == 404:
             error_type = None
             try:
                 body = response.json()
-                error_type = body.get("error")
-            except Exception:
+                if isinstance(body, dict):
+                    error_type = body.get("error")
+            except ValueError:
                 pass
             raise TeaNotFoundError(f"Not found: HTTP {status}", error_type=error_type)
-        elif 400 <= status < 500:
-            raise TeaRequestError(f"Client error: HTTP {status}")
-        elif status >= 500:
+        if status >= 500:
             raise TeaServerError(f"Server error: HTTP {status}")
+        # Remaining 4xx codes (400, 405-499 excluding 401/403/404)
+        body_text = response.text[:200] if response.text else ""
+        msg = f"Client error: HTTP {status}"
+        if body_text:
+            msg = f"{msg} — {body_text}"
+        raise TeaRequestError(msg)

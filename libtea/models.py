@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
 
 
@@ -14,6 +14,8 @@ class _TeaModel(BaseModel):
     model_config = ConfigDict(
         alias_generator=to_camel,
         populate_by_name=True,
+        extra="ignore",
+        frozen=True,
     )
 
 
@@ -40,6 +42,10 @@ class ChecksumAlgorithm(StrEnum):
     BLAKE2B_384 = "BLAKE2b-384"
     BLAKE2B_512 = "BLAKE2b-512"
     BLAKE3 = "BLAKE3"
+
+
+_CHECKSUM_VALUES = frozenset(e.value for e in ChecksumAlgorithm)
+_CHECKSUM_NAME_TO_VALUE = {e.name: e.value for e in ChecksumAlgorithm}
 
 
 class ArtifactType(StrEnum):
@@ -94,8 +100,8 @@ class Checksum(_TeaModel):
         Uses member-name lookup instead of blind replace to handle
         BLAKE2b casing correctly (BLAKE2B_256 -> BLAKE2b-256).
         """
-        if isinstance(v, str) and v not in {e.value for e in ChecksumAlgorithm}:
-            mapped = {e.name: e.value for e in ChecksumAlgorithm}.get(v)
+        if isinstance(v, str) and v not in _CHECKSUM_VALUES:
+            mapped = _CHECKSUM_NAME_TO_VALUE.get(v)
             if mapped is not None:
                 return mapped
         return v
@@ -168,7 +174,7 @@ class Release(_TeaModel):
 
 class ComponentReleaseWithCollection(_TeaModel):
     release: Release
-    latest_collection: Collection | None = None
+    latest_collection: Collection
 
 
 class Product(_TeaModel):
@@ -217,19 +223,19 @@ class PaginatedProductReleaseResponse(_TeaModel):
 
 class TeaEndpoint(_TeaModel):
     url: str
-    versions: list[str]
-    priority: float | None = None
+    versions: list[str] = Field(min_length=1)
+    priority: float | None = Field(default=None, ge=0, le=1)
 
 
 class TeaWellKnown(_TeaModel):
     schema_version: Literal[1]
-    endpoints: list[TeaEndpoint]
+    endpoints: list[TeaEndpoint] = Field(min_length=1)
 
 
 class TeaServerInfo(_TeaModel):
     root_url: str
-    versions: list[str]
-    priority: float | None = None
+    versions: list[str] = Field(min_length=1)
+    priority: float | None = Field(default=None, ge=0, le=1)
 
 
 class DiscoveryInfo(_TeaModel):

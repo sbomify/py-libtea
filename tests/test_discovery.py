@@ -1,8 +1,9 @@
 import pytest
 import requests
 import responses
+from pydantic import ValidationError
 
-from libtea.discovery import fetch_well_known, parse_tei, select_endpoint
+from libtea.discovery import _SemVer, fetch_well_known, parse_tei, select_endpoint
 from libtea.exceptions import TeaDiscoveryError
 from libtea.models import TeaEndpoint, TeaWellKnown
 
@@ -49,9 +50,12 @@ class TestParseTei:
         with pytest.raises(TeaDiscoveryError, match="Invalid TEI type"):
             parse_tei("urn:tei:unknown:example.com:some-id")
 
-    def test_all_valid_tei_types(self):
-        for tei_type in ("uuid", "purl", "hash", "swid", "eanupc", "gtin", "asin", "udi"):
-            _, _, _ = parse_tei(f"urn:tei:{tei_type}:example.com:some-id")
+    @pytest.mark.parametrize("tei_type", ["uuid", "purl", "hash", "swid", "eanupc", "gtin", "asin", "udi"])
+    def test_all_valid_tei_types(self, tei_type):
+        result_type, domain, identifier = parse_tei(f"urn:tei:{tei_type}:example.com:some-id")
+        assert result_type == tei_type
+        assert domain == "example.com"
+        assert identifier == "some-id"
 
     def test_invalid_tei_empty_domain(self):
         with pytest.raises(TeaDiscoveryError, match="Invalid domain"):
@@ -133,6 +137,24 @@ class TestFetchWellKnown:
         with pytest.raises(TeaDiscoveryError):
             fetch_well_known("example.com")
 
+    def test_fetch_well_known_empty_domain_raises(self):
+        with pytest.raises(TeaDiscoveryError, match="Invalid domain"):
+            fetch_well_known("")
+
+    def test_fetch_well_known_invalid_domain_raises(self):
+        with pytest.raises(TeaDiscoveryError, match="Invalid domain"):
+            fetch_well_known("-bad.com")
+
+    def test_fetch_well_known_underscore_domain_raises(self):
+        with pytest.raises(TeaDiscoveryError, match="Invalid domain"):
+            fetch_well_known("bad_domain.com")
+
+    @responses.activate
+    def test_fetch_well_known_request_exception(self):
+        responses.get("https://example.com/.well-known/tea", body=requests.exceptions.TooManyRedirects("too many"))
+        with pytest.raises(TeaDiscoveryError, match="HTTP error"):
+            fetch_well_known("example.com")
+
     @responses.activate
     def test_fetch_well_known_non_json_raises_discovery_error(self):
         responses.get("https://example.com/.well-known/tea", body="not json")
@@ -191,17 +213,134 @@ class TestSelectEndpoint:
         ep = select_endpoint(wk, "1.0.0")
         assert ep.url == "https://new.example.com"
 
-    def test_empty_endpoints_raises(self):
-        wk = TeaWellKnown(schema_version=1, endpoints=[])
-        with pytest.raises(TeaDiscoveryError, match="No compatible endpoint"):
-            select_endpoint(wk, "1.0.0")
+    def test_empty_endpoints_rejected_by_model(self):
+        """TeaWellKnown enforces min_length=1 on endpoints per spec."""
+        with pytest.raises(ValidationError):
+            TeaWellKnown(schema_version=1, endpoints=[])
 
-    def test_none_priority_vs_explicit_priority(self):
+    def test_none_priority_defaults_to_1(self):
+        """Endpoint without priority defaults to 1.0 (highest), matching spec default."""
         wk = self._make_well_known(
             [
                 {"url": "https://none-priority.example.com", "versions": ["1.0.0"]},
-                {"url": "https://high-priority.example.com", "versions": ["1.0.0"], "priority": 2.0},
+                {"url": "https://low-priority.example.com", "versions": ["1.0.0"], "priority": 0.5},
             ]
         )
         ep = select_endpoint(wk, "1.0.0")
-        assert ep.url == "https://high-priority.example.com"
+        assert ep.url == "https://none-priority.example.com"
+
+    def test_semver_matches_without_patch(self):
+        """Version '1.0' in endpoint should match client version '1.0.0'."""
+        wk = self._make_well_known(
+            [
+                {"url": "https://api.example.com", "versions": ["1.0"]},
+            ]
+        )
+        ep = select_endpoint(wk, "1.0.0")
+        assert ep.url == "https://api.example.com"
+
+    def test_semver_matches_with_prerelease(self):
+        """Pre-release versions match exactly."""
+        wk = self._make_well_known(
+            [
+                {"url": "https://api.example.com", "versions": ["0.3.0-beta.2"]},
+            ]
+        )
+        ep = select_endpoint(wk, "0.3.0-beta.2")
+        assert ep.url == "https://api.example.com"
+
+    def test_semver_prerelease_does_not_match_release(self):
+        """Pre-release '1.0.0-beta.1' should not match '1.0.0'."""
+        wk = self._make_well_known(
+            [
+                {"url": "https://api.example.com", "versions": ["1.0.0-beta.1"]},
+            ]
+        )
+        with pytest.raises(TeaDiscoveryError, match="No compatible endpoint"):
+            select_endpoint(wk, "1.0.0")
+
+    def test_invalid_semver_in_endpoint_skipped(self):
+        """Invalid version strings in endpoint are silently skipped."""
+        wk = self._make_well_known(
+            [
+                {"url": "https://api.example.com", "versions": ["not-semver", "1.0.0"]},
+            ]
+        )
+        ep = select_endpoint(wk, "1.0.0")
+        assert ep.url == "https://api.example.com"
+
+    def test_priority_out_of_range_rejected(self):
+        """Priority > 1.0 should be rejected by model validation."""
+        with pytest.raises(ValidationError):
+            TeaEndpoint(url="https://api.example.com", versions=["1.0.0"], priority=2.0)
+
+    def test_empty_versions_rejected(self):
+        """Endpoint with empty versions list should be rejected by model validation."""
+        with pytest.raises(ValidationError):
+            TeaEndpoint(url="https://api.example.com", versions=[])
+
+
+class TestSemVer:
+    def test_parse_basic(self):
+        v = _SemVer("1.2.3")
+        assert v.major == 1
+        assert v.minor == 2
+        assert v.patch == 3
+        assert v.pre == ()
+
+    def test_parse_without_patch(self):
+        v = _SemVer("1.0")
+        assert v.major == 1
+        assert v.minor == 0
+        assert v.patch == 0
+
+    def test_parse_with_prerelease(self):
+        v = _SemVer("0.3.0-beta.2")
+        assert v.major == 0
+        assert v.minor == 3
+        assert v.patch == 0
+        assert v.pre == ("beta", 2)
+
+    def test_equality_with_and_without_patch(self):
+        assert _SemVer("1.0") == _SemVer("1.0.0")
+
+    def test_ordering_major(self):
+        assert _SemVer("1.0.0") < _SemVer("2.0.0")
+
+    def test_ordering_minor(self):
+        assert _SemVer("1.0.0") < _SemVer("1.1.0")
+
+    def test_ordering_patch(self):
+        assert _SemVer("1.0.0") < _SemVer("1.0.1")
+
+    def test_prerelease_lower_than_release(self):
+        assert _SemVer("1.0.0-alpha") < _SemVer("1.0.0")
+
+    def test_prerelease_ordering(self):
+        """SemVer spec example: 1.0.0-alpha < 1.0.0-alpha.1 < 1.0.0-alpha.beta < 1.0.0-beta < 1.0.0-beta.2 < 1.0.0-beta.11 < 1.0.0-rc.1 < 1.0.0"""
+        versions = [
+            "1.0.0-alpha",
+            "1.0.0-alpha.1",
+            "1.0.0-alpha.beta",
+            "1.0.0-beta",
+            "1.0.0-beta.2",
+            "1.0.0-beta.11",
+            "1.0.0-rc.1",
+            "1.0.0",
+        ]
+        parsed = [_SemVer(v) for v in versions]
+        for i in range(len(parsed) - 1):
+            assert parsed[i] < parsed[i + 1], f"{versions[i]} should be < {versions[i + 1]}"
+
+    def test_numeric_prerelease_less_than_alpha(self):
+        """Numeric identifiers have lower precedence than alphanumeric."""
+        assert _SemVer("1.0.0-1") < _SemVer("1.0.0-alpha")
+
+    def test_invalid_semver_raises(self):
+        with pytest.raises(ValueError, match="Invalid SemVer"):
+            _SemVer("not-a-version")
+
+    def test_str_repr(self):
+        v = _SemVer("1.2.3-beta.1")
+        assert str(v) == "1.2.3-beta.1"
+        assert repr(v) == "_SemVer('1.2.3-beta.1')"
