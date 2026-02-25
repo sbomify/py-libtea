@@ -419,6 +419,12 @@ class TestValidationErrors:
         with pytest.raises(TeaValidationError, match="Invalid Release response"):
             client.get_component_releases("comp-1")
 
+    @responses.activate
+    def test_validate_list_rejects_non_list_response(self, client, base_url):
+        responses.get(f"{base_url}/component/comp-1/releases", json={"not": "a list"})
+        with pytest.raises(TeaValidationError, match="Expected list"):
+            client.get_component_releases("comp-1")
+
 
 class TestValidatePathSegment:
     def test_accepts_uuid(self):

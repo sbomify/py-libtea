@@ -44,8 +44,10 @@ def _validate(model_cls: type[_M], data: Any) -> _M:
         raise TeaValidationError(f"Invalid {model_cls.__name__} response: {exc}") from exc
 
 
-def _validate_list(model_cls: type[_M], data: list[Any]) -> list[_M]:
+def _validate_list(model_cls: type[_M], data: Any) -> list[_M]:
     """Validate a list of items against a Pydantic model."""
+    if not isinstance(data, list):
+        raise TeaValidationError(f"Expected list for {model_cls.__name__}, got {type(data).__name__}")
     try:
         return [model_cls.model_validate(item) for item in data]
     except ValidationError as exc:
