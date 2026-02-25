@@ -23,7 +23,7 @@ class TestDownloadArtifact:
     def test_download_with_valid_checksum(self, client, tmp_path):
         responses.get(ARTIFACT_URL, body=ARTIFACT_CONTENT)
         sha256 = hashlib.sha256(ARTIFACT_CONTENT).hexdigest()
-        checksums = [Checksum(alg_type=ChecksumAlgorithm.SHA_256, alg_value=sha256)]
+        checksums = [Checksum(algorithm_type=ChecksumAlgorithm.SHA_256, algorithm_value=sha256)]
         dest = tmp_path / "sbom.json"
         result = client.download_artifact(ARTIFACT_URL, dest, verify_checksums=checksums)
         assert result == dest
@@ -32,7 +32,7 @@ class TestDownloadArtifact:
     @responses.activate
     def test_download_with_invalid_checksum_deletes_file(self, client, tmp_path):
         responses.get(ARTIFACT_URL, body=ARTIFACT_CONTENT)
-        checksums = [Checksum(alg_type=ChecksumAlgorithm.SHA_256, alg_value="badhash")]
+        checksums = [Checksum(algorithm_type=ChecksumAlgorithm.SHA_256, algorithm_value="badhash")]
         dest = tmp_path / "sbom.json"
         with pytest.raises(TeaChecksumError, match="SHA-256") as exc_info:
             client.download_artifact(ARTIFACT_URL, dest, verify_checksums=checksums)
@@ -47,8 +47,8 @@ class TestDownloadArtifact:
         sha256 = hashlib.sha256(ARTIFACT_CONTENT).hexdigest()
         sha1 = hashlib.sha1(ARTIFACT_CONTENT).hexdigest()
         checksums = [
-            Checksum(alg_type=ChecksumAlgorithm.SHA_1, alg_value=sha1),
-            Checksum(alg_type=ChecksumAlgorithm.SHA_256, alg_value=sha256),
+            Checksum(algorithm_type=ChecksumAlgorithm.SHA_1, algorithm_value=sha1),
+            Checksum(algorithm_type=ChecksumAlgorithm.SHA_256, algorithm_value=sha256),
         ]
         dest = tmp_path / "sbom.json"
         result = client.download_artifact(ARTIFACT_URL, dest, verify_checksums=checksums)
@@ -58,29 +58,25 @@ class TestDownloadArtifact:
     def test_download_checksum_uppercase_hex_accepted(self, client, tmp_path):
         responses.get(ARTIFACT_URL, body=ARTIFACT_CONTENT)
         sha256 = hashlib.sha256(ARTIFACT_CONTENT).hexdigest().upper()
-        checksums = [Checksum(alg_type=ChecksumAlgorithm.SHA_256, alg_value=sha256)]
+        checksums = [Checksum(algorithm_type=ChecksumAlgorithm.SHA_256, algorithm_value=sha256)]
         dest = tmp_path / "sbom.json"
         result = client.download_artifact(ARTIFACT_URL, dest, verify_checksums=checksums)
         assert result == dest
 
     def test_download_with_blake3_raises_clear_error(self, client, tmp_path):
-        checksums = [Checksum(alg_type=ChecksumAlgorithm.BLAKE3, alg_value="somevalue")]
+        checksums = [Checksum(algorithm_type=ChecksumAlgorithm.BLAKE3, algorithm_value="somevalue")]
         dest = tmp_path / "sbom.json"
         with pytest.raises(TeaChecksumError, match="BLAKE3") as exc_info:
             client.download_artifact(ARTIFACT_URL, dest, verify_checksums=checksums)
         assert exc_info.value.algorithm == "BLAKE3"
 
-    @responses.activate
     def test_download_with_unknown_algorithm_raises_clear_error(self, client, tmp_path):
         """If an algorithm has no hashlib mapping, verification should raise explicitly."""
-        responses.get(ARTIFACT_URL, body=ARTIFACT_CONTENT)
-        checksums = [Checksum(alg_type=ChecksumAlgorithm.BLAKE3, alg_value="abc123")]
-        dest = tmp_path / "sbom.json"
         from unittest.mock import patch
 
-        # Patch download_with_hashes to return empty dict (no algorithms computed)
+        dest = tmp_path / "sbom.json"
+        checksums = [Checksum(algorithm_type=ChecksumAlgorithm.SHA_256, algorithm_value="abc123")]
         with patch.object(client._http, "download_with_hashes", return_value={}):
-            checksums = [Checksum(alg_type=ChecksumAlgorithm.SHA_256, alg_value="abc123")]
             with pytest.raises(TeaChecksumError, match="No computed digest") as exc_info:
                 client.download_artifact(ARTIFACT_URL, dest, verify_checksums=checksums)
             assert not dest.exists()
@@ -91,7 +87,7 @@ class TestDownloadArtifact:
         """Zero-byte artifacts are valid (e.g. stub SBOMs)."""
         responses.get(ARTIFACT_URL, body=b"")
         sha256 = hashlib.sha256(b"").hexdigest()
-        checksums = [Checksum(alg_type=ChecksumAlgorithm.SHA_256, alg_value=sha256)]
+        checksums = [Checksum(algorithm_type=ChecksumAlgorithm.SHA_256, algorithm_value=sha256)]
         dest = tmp_path / "empty.json"
         result = client.download_artifact(ARTIFACT_URL, dest, verify_checksums=checksums)
         assert result == dest
@@ -103,7 +99,7 @@ class TestDownloadArtifact:
         content = b"A" * 20000
         responses.get(ARTIFACT_URL, body=content)
         sha256 = hashlib.sha256(content).hexdigest()
-        checksums = [Checksum(alg_type=ChecksumAlgorithm.SHA_256, alg_value=sha256)]
+        checksums = [Checksum(algorithm_type=ChecksumAlgorithm.SHA_256, algorithm_value=sha256)]
         dest = tmp_path / "large.json"
         result = client.download_artifact(ARTIFACT_URL, dest, verify_checksums=checksums)
         assert result == dest

@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 from libtea.discovery import _SemVer, fetch_well_known, parse_tei, select_endpoint
 from libtea.exceptions import TeaDiscoveryError
-from libtea.models import TeaEndpoint, TeaWellKnown
+from libtea.models import TeaEndpoint, TeaWellKnown, TeiType
 
 
 class TestParseTei:
@@ -50,7 +50,7 @@ class TestParseTei:
         with pytest.raises(TeaDiscoveryError, match="Invalid TEI type"):
             parse_tei("urn:tei:unknown:example.com:some-id")
 
-    @pytest.mark.parametrize("tei_type", ["uuid", "purl", "hash", "swid", "eanupc", "gtin", "asin", "udi"])
+    @pytest.mark.parametrize("tei_type", [e.value for e in TeiType])
     def test_all_valid_tei_types(self, tei_type):
         result_type, domain, identifier = parse_tei(f"urn:tei:{tei_type}:example.com:some-id")
         assert result_type == tei_type

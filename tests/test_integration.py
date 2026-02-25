@@ -108,7 +108,7 @@ class TestSpecExamples:
             cr = client.get_component_release(release_uuid)
             assert cr.release.version == "11.0.7"
             assert cr.release.distributions[0].distribution_type == "zip"
-            assert cr.release.distributions[0].checksums[0].alg_type == ChecksumAlgorithm.SHA_256
+            assert cr.release.distributions[0].checksums[0].algorithm_type == ChecksumAlgorithm.SHA_256
 
             # Step 3: Get latest collection
             collection = client.get_component_release_collection_latest(release_uuid)

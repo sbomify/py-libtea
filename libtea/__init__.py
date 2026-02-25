@@ -39,6 +39,7 @@ from libtea.models import (
     Release,
     ReleaseDistribution,
     TeaServerInfo,
+    TeiType,
 )
 
 __version__ = version("libtea")
@@ -78,5 +79,6 @@ __all__ = [
     "Release",
     "ReleaseDistribution",
     "TeaServerInfo",
+    "TeiType",
     "__version__",
 ]

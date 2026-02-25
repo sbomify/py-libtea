@@ -15,6 +15,7 @@ from libtea.models import (
     PaginatedProductResponse,
     Product,
     Release,
+    TeiType,
 )
 
 
@@ -44,6 +45,16 @@ class TestEnums:
         assert CollectionUpdateReasonType.VEX_UPDATED == "VEX_UPDATED"
 
 
+class TestTeiType:
+    def test_all_members(self):
+        expected = {"uuid", "purl", "hash", "swid", "eanupc", "gtin", "asin", "udi"}
+        assert {e.value for e in TeiType} == expected
+
+    def test_is_strenum(self):
+        assert isinstance(TeiType.UUID, str)
+        assert TeiType.UUID == "uuid"
+
+
 class TestSharedTypes:
     def test_identifier_from_json(self):
         data = {"idType": "PURL", "idValue": "pkg:maven/org.apache/log4j"}
@@ -59,14 +70,14 @@ class TestSharedTypes:
     def test_checksum_from_json(self):
         data = {"algType": "SHA-256", "algValue": "abcdef1234567890"}
         cs = Checksum.model_validate(data)
-        assert cs.alg_type == ChecksumAlgorithm.SHA_256
-        assert cs.alg_value == "abcdef1234567890"
+        assert cs.algorithm_type == ChecksumAlgorithm.SHA_256
+        assert cs.algorithm_value == "abcdef1234567890"
 
     def test_checksum_underscore_normalization(self):
         """Servers may use SHA_256 (underscore) instead of SHA-256 (hyphen)."""
         data = {"algType": "SHA_256", "algValue": "abcdef1234567890"}
         cs = Checksum.model_validate(data)
-        assert cs.alg_type == ChecksumAlgorithm.SHA_256
+        assert cs.algorithm_type == ChecksumAlgorithm.SHA_256
 
     def test_enum_is_strenum(self):
         assert isinstance(IdentifierType.CPE, str)
@@ -74,13 +85,23 @@ class TestSharedTypes:
         assert isinstance(ArtifactType.BOM, str)
 
     def test_checksum_to_json(self):
-        cs = Checksum(alg_type=ChecksumAlgorithm.SHA_256, alg_value="abcdef1234567890")
+        cs = Checksum(algorithm_type=ChecksumAlgorithm.SHA_256, algorithm_value="abcdef1234567890")
         data = cs.model_dump(by_alias=True)
         assert data == {"algType": "SHA-256", "algValue": "abcdef1234567890"}
+
+    def test_checksum_json_round_trip(self):
+        cs = Checksum(algorithm_type=ChecksumAlgorithm.SHA_256, algorithm_value="abcdef1234567890")
+        json_str = cs.model_dump_json(by_alias=True)
+        restored = Checksum.model_validate_json(json_str)
+        assert restored == cs
 
     def test_populate_by_name(self):
         ident = Identifier.model_validate({"id_type": "TEI", "id_value": "tei:example"})
         assert ident.id_type == IdentifierType.TEI
+
+    def test_checksum_populate_by_name(self):
+        cs = Checksum.model_validate({"algorithm_type": "SHA-256", "algorithm_value": "abcdef"})
+        assert cs.algorithm_type == ChecksumAlgorithm.SHA_256
 
     def test_extra_fields_ignored(self):
         cs = Checksum.model_validate({"algType": "SHA-256", "algValue": "deadbeef", "extra": "ignored"})
@@ -105,12 +126,12 @@ class TestChecksumNormalization:
     )
     def test_underscore_to_value(self, raw, expected_member):
         cs = Checksum.model_validate({"algType": raw, "algValue": "aabbcc"})
-        assert cs.alg_type == expected_member
+        assert cs.algorithm_type == expected_member
 
     def test_valid_values_pass_through(self):
         for member in ChecksumAlgorithm:
             cs = Checksum.model_validate({"algType": member.value, "algValue": "aabbcc"})
-            assert cs.alg_type == member
+            assert cs.algorithm_type == member
 
 
 class TestValidationErrors:
@@ -122,7 +143,11 @@ class TestValidationErrors:
         with pytest.raises(ValidationError):
             Identifier.model_validate({"idType": "SPDXID", "idValue": "some-value"})
 
-    def test_checksum_rejects_missing_alg_value(self):
+    def test_checksum_rejects_missing_algorithm_type(self):
+        with pytest.raises(ValidationError):
+            Checksum.model_validate({"algValue": "abcdef1234567890"})
+
+    def test_checksum_rejects_missing_algorithm_value(self):
         with pytest.raises(ValidationError):
             Checksum.model_validate({"algType": "SHA-256"})
 
@@ -233,7 +258,7 @@ class TestRelease:
         release = Release.model_validate(data)
         assert release.version == "11.0.7"
         assert release.distributions[0].distribution_type == "zip"
-        assert release.distributions[0].checksums[0].alg_type == ChecksumAlgorithm.SHA_256
+        assert release.distributions[0].checksums[0].algorithm_type == ChecksumAlgorithm.SHA_256
 
 
 class TestCollection:

@@ -335,7 +335,7 @@ class TeaClient:
             TeaChecksumError: If checksum verification fails.
             TeaConnectionError: On network failure.
         """
-        algorithms = [cs.alg_type.value for cs in verify_checksums] if verify_checksums else None
+        algorithms = [cs.algorithm_type.value for cs in verify_checksums] if verify_checksums else None
         computed = self._http.download_with_hashes(url, dest, algorithms=algorithms)
 
         if verify_checksums:
@@ -347,8 +347,8 @@ class TeaClient:
     def _verify_checksums(checksums: list[Checksum], computed: dict[str, str], url: str, dest: Path) -> None:
         """Verify computed checksums against expected values, cleaning up on failure."""
         for cs in checksums:
-            alg_name = cs.alg_type.value
-            expected = cs.alg_value.lower()
+            alg_name = cs.algorithm_type.value
+            expected = cs.algorithm_value.lower()
             if alg_name not in computed:
                 dest.unlink(missing_ok=True)
                 raise TeaChecksumError(

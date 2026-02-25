@@ -31,6 +31,23 @@ class IdentifierType(StrEnum):
     UDI = "UDI"  # Not in spec's identifier-type enum; included for forward-compatibility
 
 
+class TeiType(StrEnum):
+    """TEI URN scheme types per TEA discovery specification.
+
+    These are the valid ``<type>`` values in a TEI URN
+    (``urn:tei:<type>:<domain>:<identifier>``).
+    """
+
+    UUID = "uuid"
+    PURL = "purl"
+    HASH = "hash"
+    SWID = "swid"
+    EANUPC = "eanupc"
+    GTIN = "gtin"
+    ASIN = "asin"
+    UDI = "udi"
+
+
 class ChecksumAlgorithm(StrEnum):
     """Checksum algorithm identifiers per TEA spec.
 
@@ -109,16 +126,16 @@ class Identifier(_TeaModel):
 class Checksum(_TeaModel):
     """A checksum with algorithm type and hex value.
 
-    The ``alg_type`` validator normalizes both hyphen form (``SHA-256``) and
+    The ``algorithm_type`` validator normalizes both hyphen form (``SHA-256``) and
     underscore form (``SHA_256``) to the canonical hyphen form.
     """
 
-    alg_type: ChecksumAlgorithm
-    alg_value: str
+    algorithm_type: ChecksumAlgorithm = Field(alias="algType")
+    algorithm_value: str = Field(alias="algValue")
 
-    @field_validator("alg_type", mode="before")
+    @field_validator("algorithm_type", mode="before")
     @classmethod
-    def normalize_alg_type(cls, v: str) -> str:
+    def normalize_algorithm_type(cls, v: str) -> str:
         """Normalize underscore form (SHA_256) to hyphen form (SHA-256).
 
         Uses member-name lookup instead of blind replace to handle

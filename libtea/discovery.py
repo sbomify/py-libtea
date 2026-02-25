@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from libtea._http import USER_AGENT
 from libtea.exceptions import TeaDiscoveryError
-from libtea.models import TeaEndpoint, TeaWellKnown
+from libtea.models import TeaEndpoint, TeaWellKnown, TeiType
 
 _SEMVER_RE = re.compile(r"^(?P<major>\d+)\.(?P<minor>\d+)(?:\.(?P<patch>\d+))?(?:-(?P<pre>[0-9A-Za-z.-]+))?$")
 
@@ -94,7 +94,7 @@ class _SemVer:
 
 logger = logging.getLogger("libtea")
 
-_VALID_TEI_TYPES = frozenset({"uuid", "purl", "hash", "swid", "eanupc", "gtin", "asin", "udi"})
+_VALID_TEI_TYPES = frozenset(e.value for e in TeiType)
 _DOMAIN_RE = re.compile(
     r"^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$"
 )
