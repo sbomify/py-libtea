@@ -103,3 +103,11 @@ class TestTeaHttpClient:
         dest = tmp_path / "sbom.xml"
         http_client.download_with_hashes(url="https://artifacts.example.com/sbom.xml", dest=dest)
         assert dest.read_bytes() == content
+
+    @respx.mock
+    def test_download_cleans_up_partial_file_on_transport_error(self, http_client, tmp_path):
+        respx.get("https://artifacts.example.com/sbom.xml").mock(side_effect=httpx.ConnectError("refused"))
+        dest = tmp_path / "sbom.xml"
+        with pytest.raises(TeaConnectionError):
+            http_client.download_with_hashes(url="https://artifacts.example.com/sbom.xml", dest=dest)
+        assert not dest.exists()

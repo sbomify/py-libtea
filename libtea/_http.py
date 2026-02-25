@@ -54,7 +54,7 @@ class TeaHttpClient:
         """
         from libtea.exceptions import TeaChecksumError
 
-        hashers: dict[str, hashlib._Hash] = {}
+        hashers: dict[str, Any] = {}
         if algorithms:
             alg_map = {
                 "MD5": "md5",
@@ -96,7 +96,11 @@ class TeaHttpClient:
                             for h in hashers.values():
                                 h.update(chunk)
         except httpx.TransportError as exc:
+            dest.unlink(missing_ok=True)
             raise TeaConnectionError(str(exc)) from exc
+        except Exception:
+            dest.unlink(missing_ok=True)
+            raise
 
         return {alg: h.hexdigest() for alg, h in hashers.items()}
 

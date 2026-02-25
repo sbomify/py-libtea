@@ -66,3 +66,23 @@ class TestDownloadArtifact:
         dest = tmp_path / "sbom.json"
         with pytest.raises(TeaChecksumError, match="BLAKE3"):
             client.download_artifact(ARTIFACT_URL, dest, verify_checksums=checksums)
+
+    @respx.mock
+    def test_download_with_unknown_algorithm_raises_clear_error(self, client, tmp_path):
+        """If an algorithm has no hashlib mapping, verification should raise explicitly."""
+        respx.get(ARTIFACT_URL).mock(return_value=httpx.Response(200, content=ARTIFACT_CONTENT))
+        checksums = [Checksum(alg_type=ChecksumAlgorithm.BLAKE3, alg_value="abc123")]
+        dest = tmp_path / "sbom.json"
+        # BLAKE3 raises before download, so test with a checksum whose algorithm
+        # was silently skipped during hashing (simulated by providing BLAKE3 in
+        # verify_checksums but not in the download algorithms list).
+        # Instead, we test the path by calling download_artifact with a checksum
+        # that has an algorithm not in the computed dict.
+        from unittest.mock import patch
+
+        # Patch download_with_hashes to return empty dict (no algorithms computed)
+        with patch.object(client._http, "download_with_hashes", return_value={}):
+            checksums = [Checksum(alg_type=ChecksumAlgorithm.SHA_256, alg_value="abc123")]
+            with pytest.raises(TeaChecksumError, match="No computed digest"):
+                client.download_artifact(ARTIFACT_URL, dest, verify_checksums=checksums)
+            assert not dest.exists()

@@ -157,13 +157,22 @@ class TeaClient:
 
         if verify_checksums:
             for cs in verify_checksums:
+                alg_name = cs.alg_type.value
                 expected = cs.alg_value.lower()
-                actual = computed.get(cs.alg_type.value, "").lower()
+                if alg_name not in computed:
+                    dest.unlink(missing_ok=True)
+                    raise TeaChecksumError(
+                        f"No computed digest for algorithm: {alg_name}",
+                        algorithm=alg_name,
+                        expected=expected,
+                        actual=None,
+                    )
+                actual = computed[alg_name].lower()
                 if actual != expected:
                     dest.unlink(missing_ok=True)
                     raise TeaChecksumError(
-                        f"{cs.alg_type.value} mismatch: expected {expected}, got {actual}",
-                        algorithm=cs.alg_type.value,
+                        f"{alg_name} mismatch: expected {expected}, got {actual}",
+                        algorithm=alg_name,
                         expected=expected,
                         actual=actual,
                     )
