@@ -101,5 +101,5 @@ class TestTeaHttpClient:
         content = b"file content here"
         respx.get("https://artifacts.example.com/sbom.xml").mock(return_value=httpx.Response(200, content=content))
         dest = tmp_path / "sbom.xml"
-        http_client.download(url="https://artifacts.example.com/sbom.xml", dest=dest)
+        http_client.download_with_hashes(url="https://artifacts.example.com/sbom.xml", dest=dest)
         assert dest.read_bytes() == content
