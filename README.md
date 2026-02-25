@@ -7,9 +7,20 @@
 
 Python client library for the [Transparency Exchange API (TEA)](https://transparency.exchange/) v0.3.0-beta.2.
 
-TEA is an open standard for discovering and retrieving software transparency artifacts (SBOMs, VEX, build metadata) for any software product or component.
+TEA is an open standard for discovering and retrieving software transparency artifacts (SBOMs, VEX, build metadata) for any software product or component. A [TEI identifier](https://github.com/CycloneDX/transparency-exchange-api/blob/main/discovery/readme.md) resolves via DNS to the right endpoint, similar to how email uses MX records — so consumers can fetch artifacts without knowing which server hosts them.
+
+**Specification:** [Ecma TC54-TG1](https://tc54.org/tea/) | [OpenAPI spec](https://github.com/CycloneDX/transparency-exchange-api)
 
 > **Status**: Alpha — API is subject to change.
+
+### Features
+
+- Auto-discovery via `.well-known/tea` and TEI URNs
+- Products, components, releases, and versioned collections
+- Search by PURL, CPE, or TEI identifier
+- Artifact download with on-the-fly checksum verification
+- Typed Pydantic v2 models with full camelCase/snake_case conversion
+- Structured exception hierarchy with error context
 
 ## Installation
 
@@ -41,6 +52,20 @@ client = TeaClient(base_url="https://api.example.com/tea/v0.3.0-beta.2")
 ```
 
 ## Usage
+
+### Search
+
+```python
+with TeaClient.from_well_known("example.com") as client:
+    # Search by PURL
+    results = client.search_products("PURL", "pkg:pypi/requests")
+    for product in results.results:
+        print(product.name, product.uuid)
+
+    # Search product releases
+    releases = client.search_product_releases("PURL", "pkg:pypi/requests@2.31.0")
+    print(releases.total_results)
+```
 
 ### Products and releases
 
@@ -145,6 +170,14 @@ Exception hierarchy:
 - Python >= 3.11
 - [requests](https://requests.readthedocs.io/) for HTTP
 - [Pydantic](https://docs.pydantic.dev/) v2 for data models
+
+## Not yet supported
+
+- Publisher API (spec is consumer-only in beta.2)
+- Async client
+- CLE (Common Lifecycle Enumeration) endpoints
+- Mutual TLS (mTLS) authentication
+- Endpoint failover with retry
 
 ## Development
 

@@ -24,6 +24,7 @@ class IdentifierType(StrEnum):
     CPE = "CPE"
     TEI = "TEI"
     PURL = "PURL"
+    UDI = "UDI"
 
 
 class ChecksumAlgorithm(StrEnum):

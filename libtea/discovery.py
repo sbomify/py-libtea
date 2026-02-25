@@ -37,9 +37,11 @@ def parse_tei(tei: str) -> tuple[str, str, str]:
 
 def fetch_well_known(domain: str, *, timeout: float = 10.0) -> TeaWellKnown:
     """Fetch and parse the .well-known/tea document from a domain via HTTPS."""
+    from libtea._http import USER_AGENT
+
     url = f"https://{domain}/.well-known/tea"
     try:
-        response = requests.get(url, timeout=timeout, allow_redirects=True)
+        response = requests.get(url, timeout=timeout, allow_redirects=True, headers={"user-agent": USER_AGENT})
         if response.status_code >= 400:
             raise TeaDiscoveryError(f"Failed to fetch {url}: HTTP {response.status_code}")
     except requests.ConnectionError as exc:

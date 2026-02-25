@@ -23,6 +23,7 @@ class TestEnums:
         assert IdentifierType.CPE == "CPE"
         assert IdentifierType.TEI == "TEI"
         assert IdentifierType.PURL == "PURL"
+        assert IdentifierType.UDI == "UDI"
 
     def test_checksum_algorithm_values(self):
         assert ChecksumAlgorithm.SHA_256 == "SHA-256"
@@ -195,6 +196,16 @@ class TestProduct:
         assert product.name == "Apache Log4j 2"
         assert len(product.identifiers) == 2
         assert product.identifiers[0].id_type == IdentifierType.CPE
+
+    def test_product_with_udi_identifier(self):
+        data = {
+            "uuid": "abc-123",
+            "name": "Medical Device",
+            "identifiers": [{"idType": "UDI", "idValue": "00123456789012"}],
+        }
+        product = Product.model_validate(data)
+        assert product.identifiers[0].id_type == IdentifierType.UDI
+        assert product.identifiers[0].id_value == "00123456789012"
 
 
 class TestRelease:

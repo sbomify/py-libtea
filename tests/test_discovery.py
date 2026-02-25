@@ -96,6 +96,20 @@ class TestFetchWellKnown:
         assert len(wk.endpoints) == 1
 
     @responses.activate
+    def test_fetch_well_known_sends_user_agent(self):
+        responses.get(
+            "https://example.com/.well-known/tea",
+            json={
+                "schemaVersion": 1,
+                "endpoints": [{"url": "https://api.example.com", "versions": ["1.0.0"]}],
+            },
+        )
+        fetch_well_known("example.com")
+        ua = responses.calls[0].request.headers["user-agent"]
+        assert ua.startswith("py-libtea/")
+        assert "hello@sbomify.com" in ua
+
+    @responses.activate
     def test_fetch_well_known_404_raises_discovery_error(self):
         responses.get("https://example.com/.well-known/tea", status=404)
         with pytest.raises(TeaDiscoveryError, match="HTTP 404"):
