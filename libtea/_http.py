@@ -1,6 +1,7 @@
 """Internal HTTP client wrapping httpx with TEA error handling."""
 
 import hashlib
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +13,16 @@ from libtea.exceptions import (
     TeaNotFoundError,
     TeaRequestError,
     TeaServerError,
+    TeaValidationError,
 )
+
+
+def _get_user_agent() -> str:
+    try:
+        v = _pkg_version("libtea")
+    except Exception:
+        v = "unknown"
+    return f"py-libtea/{v} (hello@sbomify.com)"
 
 
 class TeaHttpClient:
@@ -25,7 +35,7 @@ class TeaHttpClient:
         token: str | None = None,
         timeout: float = 30.0,
     ):
-        headers = {"user-agent": "py-libtea"}
+        headers = {"user-agent": _get_user_agent()}
         if token:
             headers["authorization"] = f"Bearer {token}"
 
@@ -44,7 +54,10 @@ class TeaHttpClient:
             raise TeaConnectionError(str(exc)) from exc
 
         self._raise_for_status(response)
-        return response.json()
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise TeaValidationError(f"Invalid JSON in response: {exc}") from exc
 
     def download_with_hashes(self, url: str, dest: Path, algorithms: list[str] | None = None) -> dict[str, str]:
         """Download a file and compute checksums on-the-fly. Returns {algorithm: hex_digest}.
@@ -83,9 +96,10 @@ class TeaHttpClient:
                 elif hashlib_name:
                     hashers[alg] = hashlib.new(hashlib_name)
 
+        dest.parent.mkdir(parents=True, exist_ok=True)
         try:
             with httpx.Client(
-                headers={"user-agent": "py-libtea"},
+                headers={"user-agent": _get_user_agent()},
                 timeout=self._timeout,
             ) as download_client:
                 with download_client.stream("GET", url) as response:

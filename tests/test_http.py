@@ -9,6 +9,7 @@ from libtea.exceptions import (
     TeaNotFoundError,
     TeaRequestError,
     TeaServerError,
+    TeaValidationError,
 )
 
 
@@ -111,3 +112,27 @@ class TestTeaHttpClient:
         with pytest.raises(TeaConnectionError):
             http_client.download_with_hashes(url="https://artifacts.example.com/sbom.xml", dest=dest)
         assert not dest.exists()
+
+    @respx.mock
+    def test_get_json_non_json_response_raises_validation_error(self, http_client, base_url):
+        respx.get(f"{base_url}/product/abc").mock(return_value=httpx.Response(200, content=b"not json"))
+        with pytest.raises(TeaValidationError, match="Invalid JSON"):
+            http_client.get_json("/product/abc")
+
+    @respx.mock
+    def test_download_creates_parent_directories(self, http_client, tmp_path):
+        content = b"nested file"
+        respx.get("https://artifacts.example.com/sbom.xml").mock(return_value=httpx.Response(200, content=content))
+        dest = tmp_path / "a" / "b" / "sbom.xml"
+        http_client.download_with_hashes(url="https://artifacts.example.com/sbom.xml", dest=dest)
+        assert dest.read_bytes() == content
+
+    @respx.mock
+    def test_user_agent_includes_version(self, base_url):
+        route = respx.get(f"{base_url}/product/abc").mock(return_value=httpx.Response(200, json={"uuid": "abc"}))
+        client = TeaHttpClient(base_url=base_url)
+        client.get_json("/product/abc")
+        ua = route.calls[0].request.headers["user-agent"]
+        assert ua.startswith("py-libtea/")
+        assert "hello@sbomify.com" in ua
+        client.close()
