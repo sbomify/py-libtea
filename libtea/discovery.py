@@ -103,8 +103,16 @@ _DOMAIN_RE = re.compile(
 def parse_tei(tei: str) -> tuple[str, str, str]:
     """Parse a TEI URN into (type, domain, identifier).
 
-    TEI format: urn:tei:<type>:<domain>:<identifier>
-    The identifier may contain colons (e.g. hash type).
+    TEI format: ``urn:tei:<type>:<domain>:<identifier>``
+
+    Args:
+        tei: TEI URN string.
+
+    Returns:
+        Tuple of (type, domain, identifier).
+
+    Raises:
+        TeaDiscoveryError: If the TEI format is invalid.
     """
     parts = tei.split(":")
     if len(parts) < 5 or parts[0] != "urn" or parts[1] != "tei":
@@ -123,7 +131,19 @@ def parse_tei(tei: str) -> tuple[str, str, str]:
 
 
 def fetch_well_known(domain: str, *, timeout: float = 10.0) -> TeaWellKnown:
-    """Fetch and parse the .well-known/tea document from a domain via HTTPS."""
+    """Fetch and parse the .well-known/tea discovery document from a domain.
+
+    Args:
+        domain: Domain name to resolve (e.g. ``tea.example.com``).
+        timeout: HTTP request timeout in seconds.
+
+    Returns:
+        Parsed well-known document with endpoint list.
+
+    Raises:
+        TeaDiscoveryError: If the domain is invalid, unreachable, or returns
+            an invalid document.
+    """
     if not domain or not _DOMAIN_RE.match(domain):
         raise TeaDiscoveryError(f"Invalid domain: {domain!r}")
     url = f"https://{domain}/.well-known/tea"
@@ -162,6 +182,16 @@ def select_endpoint(well_known: TeaWellKnown, supported_version: str) -> TeaEndp
 
     Per TEA spec: uses SemVer 2.0.0 comparison to match versions, then
     prioritizes by highest matching version, with priority as tiebreaker.
+
+    Args:
+        well_known: Parsed .well-known/tea document.
+        supported_version: SemVer version string the client supports.
+
+    Returns:
+        The best matching endpoint.
+
+    Raises:
+        TeaDiscoveryError: If no endpoint supports the requested version.
     """
     target = _SemVer(supported_version)
 

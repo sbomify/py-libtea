@@ -23,13 +23,21 @@ class _TeaModel(BaseModel):
 
 
 class IdentifierType(StrEnum):
+    """Identifier type used in product and component identifiers."""
+
     CPE = "CPE"
     TEI = "TEI"
     PURL = "PURL"
-    UDI = "UDI"
+    UDI = "UDI"  # Not in spec's identifier-type enum; included for forward-compatibility
 
 
 class ChecksumAlgorithm(StrEnum):
+    """Checksum algorithm identifiers per TEA spec.
+
+    Values use hyphen form (e.g. ``SHA-256``). The Checksum model's validator
+    normalizes underscore form (``SHA_256``) to hyphen form automatically.
+    """
+
     MD5 = "MD5"
     SHA_1 = "SHA-1"
     SHA_256 = "SHA-256"
@@ -49,6 +57,8 @@ _CHECKSUM_NAME_TO_VALUE = {e.name: e.value for e in ChecksumAlgorithm}
 
 
 class ArtifactType(StrEnum):
+    """Type of a TEA artifact (e.g. BOM, VEX, attestation)."""
+
     ATTESTATION = "ATTESTATION"
     BOM = "BOM"
     BUILD_META = "BUILD_META"
@@ -63,11 +73,15 @@ class ArtifactType(StrEnum):
 
 
 class CollectionBelongsTo(StrEnum):
+    """Whether a collection belongs to a component release or product release."""
+
     COMPONENT_RELEASE = "COMPONENT_RELEASE"
     PRODUCT_RELEASE = "PRODUCT_RELEASE"
 
 
 class CollectionUpdateReasonType(StrEnum):
+    """Reason for a collection version update."""
+
     INITIAL_RELEASE = "INITIAL_RELEASE"
     VEX_UPDATED = "VEX_UPDATED"
     ARTIFACT_UPDATED = "ARTIFACT_UPDATED"
@@ -76,6 +90,8 @@ class CollectionUpdateReasonType(StrEnum):
 
 
 class ErrorType(StrEnum):
+    """TEA API error types returned in 404 responses."""
+
     OBJECT_UNKNOWN = "OBJECT_UNKNOWN"
     OBJECT_NOT_SHAREABLE = "OBJECT_NOT_SHAREABLE"
 
@@ -84,11 +100,19 @@ class ErrorType(StrEnum):
 
 
 class Identifier(_TeaModel):
+    """An identifier with a specified type (e.g. PURL, CPE, TEI)."""
+
     id_type: IdentifierType
     id_value: str
 
 
 class Checksum(_TeaModel):
+    """A checksum with algorithm type and hex value.
+
+    The ``alg_type`` validator normalizes both hyphen form (``SHA-256``) and
+    underscore form (``SHA_256``) to the canonical hyphen form.
+    """
+
     alg_type: ChecksumAlgorithm
     alg_value: str
 
@@ -111,6 +135,8 @@ class Checksum(_TeaModel):
 
 
 class ReleaseDistribution(_TeaModel):
+    """A distribution format for a component release (e.g. binary, source)."""
+
     distribution_type: str
     description: str | None = None
     identifiers: list[Identifier] = []
@@ -120,6 +146,8 @@ class ReleaseDistribution(_TeaModel):
 
 
 class ArtifactFormat(_TeaModel):
+    """A TEA artifact in a specific format with download URL and checksums."""
+
     media_type: str
     description: str | None = None
     url: str
@@ -128,6 +156,8 @@ class ArtifactFormat(_TeaModel):
 
 
 class Artifact(_TeaModel):
+    """A security-related artifact (e.g. SBOM, VEX, attestation) with available formats."""
+
     uuid: str
     name: str
     type: ArtifactType
@@ -136,11 +166,19 @@ class Artifact(_TeaModel):
 
 
 class CollectionUpdateReason(_TeaModel):
+    """Reason for a collection version update, with optional comment."""
+
     type: CollectionUpdateReasonType
     comment: str | None = None
 
 
 class Collection(_TeaModel):
+    """A versioned collection of artifacts belonging to a release.
+
+    The UUID matches the owning component or product release. The version
+    integer starts at 1 and increments on each content change.
+    """
+
     uuid: str
     version: int
     date: datetime | None = None
@@ -150,17 +188,23 @@ class Collection(_TeaModel):
 
 
 class ComponentRef(_TeaModel):
+    """Reference to a TEA component, optionally pinned to a specific release."""
+
     uuid: str
     release: str | None = None
 
 
 class Component(_TeaModel):
+    """A TEA component (software lineage/family, not a specific version)."""
+
     uuid: str
     name: str
     identifiers: list[Identifier]
 
 
 class Release(_TeaModel):
+    """A specific version of a TEA component with distributions and identifiers."""
+
     uuid: str
     component: str | None = None
     component_name: str | None = None
@@ -173,17 +217,29 @@ class Release(_TeaModel):
 
 
 class ComponentReleaseWithCollection(_TeaModel):
+    """A component release bundled with its latest collection.
+
+    Returned by ``GET /componentRelease/{uuid}``.
+    """
+
     release: Release
     latest_collection: Collection
 
 
 class Product(_TeaModel):
+    """A TEA product (optional grouping of components)."""
+
     uuid: str
     name: str
     identifiers: list[Identifier]
 
 
 class ProductRelease(_TeaModel):
+    """A specific version of a TEA product with its component references.
+
+    This is the primary entry point from TEI discovery.
+    """
+
     uuid: str
     product: str | None = None
     product_name: str | None = None
@@ -196,6 +252,8 @@ class ProductRelease(_TeaModel):
 
 
 class ErrorResponse(_TeaModel):
+    """Error response body from TEA API 404 responses."""
+
     error: ErrorType
 
 
@@ -203,6 +261,8 @@ class ErrorResponse(_TeaModel):
 
 
 class PaginatedProductResponse(_TeaModel):
+    """Paginated response containing a list of products."""
+
     timestamp: datetime
     page_start_index: int
     page_size: int
@@ -211,6 +271,8 @@ class PaginatedProductResponse(_TeaModel):
 
 
 class PaginatedProductReleaseResponse(_TeaModel):
+    """Paginated response containing a list of product releases."""
+
     timestamp: datetime
     page_start_index: int
     page_size: int
@@ -222,22 +284,30 @@ class PaginatedProductReleaseResponse(_TeaModel):
 
 
 class TeaEndpoint(_TeaModel):
+    """A TEA server endpoint from the .well-known/tea discovery document."""
+
     url: str
     versions: list[str] = Field(min_length=1)
     priority: float | None = Field(default=None, ge=0, le=1)
 
 
 class TeaWellKnown(_TeaModel):
+    """The .well-known/tea discovery document listing available TEA endpoints."""
+
     schema_version: Literal[1]
     endpoints: list[TeaEndpoint] = Field(min_length=1)
 
 
 class TeaServerInfo(_TeaModel):
+    """TEA server info returned from the discovery API endpoint."""
+
     root_url: str
     versions: list[str] = Field(min_length=1)
     priority: float | None = Field(default=None, ge=0, le=1)
 
 
 class DiscoveryInfo(_TeaModel):
+    """Discovery result mapping a TEI to a product release and its servers."""
+
     product_release_uuid: str
     servers: list[TeaServerInfo]

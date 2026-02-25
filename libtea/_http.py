@@ -91,7 +91,17 @@ def _validate_download_url(url: str) -> None:
 
 
 class TeaHttpClient:
-    """Low-level HTTP client for TEA API requests."""
+    """Low-level HTTP client for TEA API requests.
+
+    Handles authentication headers, error mapping, and streaming downloads.
+    Uses a separate unauthenticated session for artifact downloads to avoid
+    leaking bearer tokens to third-party hosts.
+
+    Args:
+        base_url: TEA server base URL.
+        token: Optional bearer token. Rejected with plaintext HTTP.
+        timeout: Request timeout in seconds.
+    """
 
     def __init__(
         self,
@@ -121,7 +131,21 @@ class TeaHttpClient:
             self._session.headers["authorization"] = f"Bearer {token}"
 
     def get_json(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
-        """Send GET request and return parsed JSON."""
+        """Send GET request and return parsed JSON.
+
+        Args:
+            path: URL path relative to base URL (e.g. ``/product/{uuid}``).
+            params: Optional query parameters.
+
+        Returns:
+            Parsed JSON response body.
+
+        Raises:
+            TeaConnectionError: On network failure.
+            TeaNotFoundError: On HTTP 404.
+            TeaAuthenticationError: On HTTP 401/403.
+            TeaServerError: On HTTP 5xx.
+        """
         url = f"{self._base_url}{path}"
         try:
             response = self._session.get(url, params=params, timeout=self._timeout, allow_redirects=False)
@@ -142,10 +166,22 @@ class TeaHttpClient:
             raise TeaValidationError(f"Invalid JSON in response: {exc}") from exc
 
     def download_with_hashes(self, url: str, dest: Path, algorithms: list[str] | None = None) -> dict[str, str]:
-        """Download a file and compute checksums on-the-fly. Returns {algorithm: hex_digest}.
+        """Download a file and compute checksums on-the-fly.
 
         Uses a separate unauthenticated session so that the bearer token
         is not leaked to third-party artifact hosts (CDNs, Maven Central, etc.).
+
+        Args:
+            url: Direct download URL.
+            dest: Local file path to write to. Parent directories are created.
+            algorithms: Optional list of checksum algorithm names to compute.
+
+        Returns:
+            Dict mapping algorithm name to hex digest string.
+
+        Raises:
+            TeaConnectionError: On network failure. Partial files are deleted.
+            TeaChecksumError: If an unsupported algorithm is requested.
         """
         _validate_download_url(url)
         hashers = _build_hashers(algorithms) if algorithms else {}
