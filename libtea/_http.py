@@ -1,7 +1,6 @@
 """Internal HTTP client wrapping httpx with TEA error handling."""
 
 import hashlib
-from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Any
 
@@ -17,12 +16,27 @@ from libtea.exceptions import (
 )
 
 
-def _get_user_agent() -> str:
+def _get_package_version() -> str:
+    """Get the package version for User-Agent header."""
     try:
-        v = _pkg_version("libtea")
+        from importlib.metadata import version
+
+        return version("libtea")
     except Exception:
-        v = "unknown"
-    return f"py-libtea/{v} (hello@sbomify.com)"
+        try:
+            import tomllib
+
+            pyproject_path = Path(__file__).parent.parent / "pyproject.toml"
+            if pyproject_path.exists():
+                with open(pyproject_path, "rb") as f:
+                    pyproject_data = tomllib.load(f)
+                return pyproject_data.get("project", {}).get("version", "unknown")
+        except Exception:
+            pass
+        return "unknown"
+
+
+USER_AGENT = f"py-libtea/{_get_package_version()} (hello@sbomify.com)"
 
 
 class TeaHttpClient:
@@ -35,7 +49,7 @@ class TeaHttpClient:
         token: str | None = None,
         timeout: float = 30.0,
     ):
-        headers = {"user-agent": _get_user_agent()}
+        headers = {"user-agent": USER_AGENT}
         if token:
             headers["authorization"] = f"Bearer {token}"
 
@@ -99,7 +113,7 @@ class TeaHttpClient:
         dest.parent.mkdir(parents=True, exist_ok=True)
         try:
             with httpx.Client(
-                headers={"user-agent": _get_user_agent()},
+                headers={"user-agent": USER_AGENT},
                 timeout=self._timeout,
             ) as download_client:
                 with download_client.stream("GET", url) as response:
