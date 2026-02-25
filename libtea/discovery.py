@@ -33,7 +33,15 @@ def fetch_well_known(domain: str, *, timeout: float = 10.0) -> TeaWellKnown:
     except httpx.TransportError as exc:
         raise TeaDiscoveryError(f"Failed to connect to {url}: {exc}") from exc
 
-    return TeaWellKnown.model_validate(response.json())
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise TeaDiscoveryError(f"Invalid JSON in .well-known/tea response from {domain}") from exc
+
+    try:
+        return TeaWellKnown.model_validate(data)
+    except Exception as exc:
+        raise TeaDiscoveryError(f"Invalid .well-known/tea document from {domain}: {exc}") from exc
 
 
 def select_endpoint(well_known: TeaWellKnown, supported_version: str) -> TeaEndpoint:

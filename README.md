@@ -42,23 +42,23 @@ with TeaClient.from_well_known("example.com") as client:
 ### Components
 
 ```python
-    component = client.get_component("component-uuid")
-    releases = client.get_component_releases("component-uuid")
+component = client.get_component("component-uuid")
+releases = client.get_component_releases("component-uuid")
 
-    # Get a component release with its latest collection
-    cr = client.get_component_release("release-uuid")
-    print(cr.release.version, len(cr.latest_collection.artifacts))
+# Get a component release with its latest collection
+cr = client.get_component_release("release-uuid")
+print(cr.release.version, len(cr.latest_collection.artifacts))
 ```
 
 ### Collections and artifacts
 
 ```python
-    collection = client.get_component_release_collection_latest("release-uuid")
-    for artifact in collection.artifacts:
-        print(artifact.name, artifact.type)
+collection = client.get_component_release_collection_latest("release-uuid")
+for artifact in collection.artifacts:
+    print(artifact.name, artifact.type)
 
-    # Specific collection version
-    collection_v3 = client.get_component_release_collection("release-uuid", 3)
+# Specific collection version
+collection_v3 = client.get_component_release_collection("release-uuid", 3)
 ```
 
 ### Downloading artifacts with checksum verification
@@ -66,23 +66,23 @@ with TeaClient.from_well_known("example.com") as client:
 ```python
 from pathlib import Path
 
-    artifact = client.get_artifact("artifact-uuid")
-    fmt = artifact.formats[0]
+artifact = client.get_artifact("artifact-uuid")
+fmt = artifact.formats[0]
 
-    # Downloads and verifies checksums on-the-fly
-    client.download_artifact(
-        fmt.url,
-        Path("sbom.json"),
-        verify_checksums=fmt.checksums,
-    )
+# Downloads and verifies checksums on-the-fly
+client.download_artifact(
+    fmt.url,
+    Path("sbom.json"),
+    verify_checksums=fmt.checksums,
+)
 ```
 
 ### Discovery via TEI
 
 ```python
-    results = client.discover("urn:tei:uuid:example.com:d4d9f54a-abcf-11ee-ac79-1a52914d44b")
-    for info in results:
-        print(info.product_release_uuid, info.servers)
+results = client.discover("urn:tei:uuid:example.com:d4d9f54a-abcf-11ee-ac79-1a52914d44b")
+for info in results:
+    print(info.product_release_uuid, info.servers)
 ```
 
 ## Error handling

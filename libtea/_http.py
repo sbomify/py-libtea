@@ -58,6 +58,7 @@ class TeaHttpClient:
             base_url=base_url,
             headers=headers,
             timeout=timeout,
+            follow_redirects=True,
         )
 
     def get_json(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
@@ -115,6 +116,7 @@ class TeaHttpClient:
             with httpx.Client(
                 headers={"user-agent": USER_AGENT},
                 timeout=self._timeout,
+                follow_redirects=True,
             ) as download_client:
                 with download_client.stream("GET", url) as response:
                     self._raise_for_status(response)

@@ -87,6 +87,18 @@ class TestFetchWellKnown:
         with pytest.raises(TeaDiscoveryError):
             fetch_well_known("example.com")
 
+    @respx.mock
+    def test_fetch_well_known_non_json_raises_discovery_error(self):
+        respx.get("https://example.com/.well-known/tea").mock(return_value=httpx.Response(200, content=b"not json"))
+        with pytest.raises(TeaDiscoveryError, match="Invalid JSON"):
+            fetch_well_known("example.com")
+
+    @respx.mock
+    def test_fetch_well_known_invalid_schema_raises_discovery_error(self):
+        respx.get("https://example.com/.well-known/tea").mock(return_value=httpx.Response(200, json={"bad": "data"}))
+        with pytest.raises(TeaDiscoveryError, match="Invalid .well-known/tea"):
+            fetch_well_known("example.com")
+
 
 class TestSelectEndpoint:
     def _make_well_known(self, endpoints: list[dict]) -> TeaWellKnown:
