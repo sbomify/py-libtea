@@ -1,6 +1,8 @@
 """Pydantic data models for TEA API objects."""
 
+from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 from pydantic.alias_generators import to_camel
@@ -96,3 +98,139 @@ class Checksum(_TeaModel):
             if mapped is not None:
                 return mapped
         return v
+
+
+# --- Domain objects ---
+
+
+class ReleaseDistribution(_TeaModel):
+    distribution_type: str
+    description: str | None = None
+    identifiers: list[Identifier] = []
+    url: str | None = None
+    signature_url: str | None = None
+    checksums: list[Checksum] = []
+
+
+class ArtifactFormat(_TeaModel):
+    media_type: str
+    description: str | None = None
+    url: str
+    signature_url: str | None = None
+    checksums: list[Checksum] = []
+
+
+class Artifact(_TeaModel):
+    uuid: str
+    name: str
+    type: ArtifactType
+    distribution_types: list[str] | None = None
+    formats: list[ArtifactFormat] = []
+
+
+class CollectionUpdateReason(_TeaModel):
+    type: CollectionUpdateReasonType
+    comment: str | None = None
+
+
+class Collection(_TeaModel):
+    uuid: str
+    version: int
+    date: datetime | None = None
+    belongs_to: CollectionBelongsTo | None = None
+    update_reason: CollectionUpdateReason | None = None
+    artifacts: list[Artifact] = []
+
+
+class ComponentRef(_TeaModel):
+    uuid: str
+    release: str | None = None
+
+
+class Component(_TeaModel):
+    uuid: str
+    name: str
+    identifiers: list[Identifier]
+
+
+class Release(_TeaModel):
+    uuid: str
+    component: str | None = None
+    component_name: str | None = None
+    version: str
+    created_date: datetime
+    release_date: datetime | None = None
+    pre_release: bool | None = None
+    identifiers: list[Identifier] = []
+    distributions: list[ReleaseDistribution] = []
+
+
+class ComponentReleaseWithCollection(_TeaModel):
+    release: Release
+    latest_collection: Collection
+
+
+class Product(_TeaModel):
+    uuid: str
+    name: str
+    identifiers: list[Identifier]
+
+
+class ProductRelease(_TeaModel):
+    uuid: str
+    product: str | None = None
+    product_name: str | None = None
+    version: str
+    created_date: datetime
+    release_date: datetime | None = None
+    pre_release: bool | None = None
+    identifiers: list[Identifier] = []
+    components: list[ComponentRef]
+
+
+class ErrorResponse(_TeaModel):
+    error: ErrorType
+
+
+# --- Pagination ---
+
+
+class PaginatedProductResponse(_TeaModel):
+    timestamp: datetime
+    page_start_index: int
+    page_size: int
+    total_results: int
+    results: list[Product] = []
+
+
+class PaginatedProductReleaseResponse(_TeaModel):
+    timestamp: datetime
+    page_start_index: int
+    page_size: int
+    total_results: int
+    results: list[ProductRelease] = []
+
+
+# --- Discovery types ---
+
+
+class TeaEndpoint(_TeaModel):
+    url: str
+    versions: list[str]
+    priority: float | None = None
+
+
+class TeaWellKnown(_TeaModel):
+    schema_version: Literal[1]
+    endpoints: list[TeaEndpoint]
+
+
+class TeaServerInfo(_TeaModel):
+    root_url: str
+    versions: list[str]
+    priority: float | None = None
+
+
+class DiscoveryInfo(_TeaModel):
+    product_release_uuid: str
+    servers: list[TeaServerInfo]
