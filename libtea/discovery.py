@@ -1,7 +1,6 @@
 """TEI parsing, .well-known/tea fetching, and endpoint selection."""
 
 import logging
-import re
 from functools import total_ordering
 
 import requests
@@ -10,8 +9,6 @@ from pydantic import ValidationError
 from libtea._http import USER_AGENT
 from libtea.exceptions import TeaDiscoveryError
 from libtea.models import TeaEndpoint, TeaWellKnown, TeiType
-
-_SEMVER_RE = re.compile(r"^(?P<major>\d+)\.(?P<minor>\d+)(?:\.(?P<patch>\d+))?(?:-(?P<pre>[0-9A-Za-z.-]+))?$")
 
 
 @total_ordering
@@ -28,14 +25,23 @@ class _SemVer:
     __slots__ = ("major", "minor", "patch", "pre", "_raw")
 
     def __init__(self, version_str: str) -> None:
-        m = _SEMVER_RE.match(version_str)
-        if not m:
-            raise ValueError(f"Invalid SemVer string: {version_str!r}")
         self._raw = version_str
-        self.major = int(m["major"])
-        self.minor = int(m["minor"])
-        self.patch = int(m["patch"]) if m["patch"] is not None else 0
-        self.pre: tuple[int | str, ...] = tuple(_SemVer._parse_pre(m["pre"])) if m["pre"] else ()
+        # Split pre-release: "1.2.3-beta.2" -> "1.2.3", "beta.2"
+        if "-" in version_str:
+            ver_part, pre_part = version_str.split("-", 1)
+        else:
+            ver_part, pre_part = version_str, None
+
+        parts = ver_part.split(".")
+        if len(parts) < 2 or len(parts) > 3:
+            raise ValueError(f"Invalid SemVer string: {version_str!r}")
+        if not all(p.isdigit() for p in parts):
+            raise ValueError(f"Invalid SemVer string: {version_str!r}")
+
+        self.major = int(parts[0])
+        self.minor = int(parts[1])
+        self.patch = int(parts[2]) if len(parts) == 3 else 0
+        self.pre: tuple[int | str, ...] = tuple(_SemVer._parse_pre(pre_part)) if pre_part else ()
 
     @staticmethod
     def _parse_pre(pre_str: str) -> list[int | str]:
@@ -95,9 +101,21 @@ class _SemVer:
 logger = logging.getLogger("libtea")
 
 _VALID_TEI_TYPES = frozenset(e.value for e in TeiType)
-_DOMAIN_RE = re.compile(
-    r"^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$"
-)
+_DOMAIN_LABEL_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-")
+
+
+def _is_valid_domain(domain: str) -> bool:
+    """Validate domain per RFC 952/1123: alnum labels, internal hyphens, max 63 chars per label."""
+    if not domain:
+        return False
+    for label in domain.split("."):
+        if not label or len(label) > 63:
+            return False
+        if label[0] == "-" or label[-1] == "-":
+            return False
+        if not all(c in _DOMAIN_LABEL_CHARS for c in label):
+            return False
+    return True
 
 
 def parse_tei(tei: str) -> tuple[str, str, str]:
@@ -124,7 +142,7 @@ def parse_tei(tei: str) -> tuple[str, str, str]:
             f"Invalid TEI type: {tei_type!r}. Must be one of: {', '.join(sorted(_VALID_TEI_TYPES))}"
         )
     domain = parts[3]
-    if not domain or not _DOMAIN_RE.match(domain):
+    if not domain or not _is_valid_domain(domain):
         raise TeaDiscoveryError(f"Invalid domain in TEI: {domain!r}")
     identifier = ":".join(parts[4:])
     return tei_type, domain, identifier
@@ -144,7 +162,7 @@ def fetch_well_known(domain: str, *, timeout: float = 10.0) -> TeaWellKnown:
         TeaDiscoveryError: If the domain is invalid, unreachable, or returns
             an invalid document.
     """
-    if not domain or not _DOMAIN_RE.match(domain):
+    if not domain or not _is_valid_domain(domain):
         raise TeaDiscoveryError(f"Invalid domain: {domain!r}")
     url = f"https://{domain}/.well-known/tea"
     try:

@@ -2,7 +2,6 @@
 
 import hmac
 import logging
-import re
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Self, TypeVar
@@ -33,7 +32,7 @@ TEA_SPEC_VERSION = "0.3.0-beta.2"
 _M = TypeVar("_M", bound=BaseModel)
 
 # Restrict URL path segments to safe characters to prevent path traversal and injection.
-_SAFE_PATH_SEGMENT_RE = re.compile(r"^[a-zA-Z0-9\-]{1,128}$")
+_SAFE_PATH_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-")
 
 
 def _validate(model_cls: type[_M], data: Any) -> _M:
@@ -56,7 +55,7 @@ def _validate_list(model_cls: type[_M], data: Any) -> list[_M]:
 
 def _validate_path_segment(value: str, name: str = "uuid") -> str:
     """Validate that a value is safe to interpolate into a URL path."""
-    if not _SAFE_PATH_SEGMENT_RE.match(value):
+    if not value or len(value) > 128 or not all(c in _SAFE_PATH_CHARS for c in value):
         raise TeaValidationError(
             f"Invalid {name}: {value!r}. Must contain only alphanumeric characters and hyphens, max 128 characters."
         )
