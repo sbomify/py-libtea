@@ -104,20 +104,41 @@ _BLOCKED_HOSTNAMES = frozenset(
     }
 )
 
+# RFC 6598 CGNAT range — ipaddress.is_private misses this on Python 3.11+.
+_CGNAT_NETWORK = ipaddress.IPv4Network("100.64.0.0/10")
+
 _MAX_DOWNLOAD_REDIRECTS = 10
 
 
+def _is_internal_ip(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Return True if the IP address is private, loopback, link-local, reserved, or CGNAT."""
+    if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+        return True
+    if isinstance(addr, ipaddress.IPv4Address) and addr in _CGNAT_NETWORK:
+        return True
+    return False
+
+
 def _validate_resolved_ips(hostname: str) -> None:
-    """Resolve hostname via DNS and reject if any resolved IP is private/internal."""
+    """Resolve hostname via DNS and reject if any resolved IP is private/internal.
+
+    Note: There is an inherent TOCTOU (time-of-check-time-of-use) gap between
+    this DNS check and the actual HTTP request made by ``requests``.  A DNS
+    rebinding attack could return a safe IP here and a malicious IP for the
+    subsequent connection.  Fully closing this gap would require socket-level
+    IP pinning, which ``requests`` does not support.  This check still raises
+    the bar significantly against naive SSRF attempts.
+    """
     try:
         addr_infos = socket.getaddrinfo(hostname, None)
     except socket.gaierror:
-        return  # DNS resolution failed; let the actual request handle it
+        logger.warning("DNS resolution failed for %s during SSRF check; proceeding with request", hostname)
+        return
     for _, _, _, _, sockaddr in addr_infos:
         resolved_ip = sockaddr[0]
         try:
             addr = ipaddress.ip_address(resolved_ip)
-            if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+            if _is_internal_ip(addr):
                 raise TeaValidationError(
                     f"Artifact download URL hostname {hostname!r} resolves to private/internal IP: {resolved_ip}"
                 )
@@ -139,7 +160,7 @@ def _validate_download_url(url: str) -> None:
 
     try:
         addr = ipaddress.ip_address(hostname)
-        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+        if _is_internal_ip(addr):
             raise TeaValidationError(f"Artifact download URL must not target private/internal IP: {hostname!r}")
     except ValueError:
         # Not an IP literal — resolve hostname and check resolved IPs (DNS rebinding protection)
@@ -335,6 +356,7 @@ class TeaHttpClient:
     def close(self) -> None:
         self._session.headers.pop("authorization", None)
         self._session.auth = None
+        self._session.cert = None
         self._session.close()
 
     def __enter__(self) -> Self:
@@ -371,8 +393,8 @@ class TeaHttpClient:
         if status >= 500:
             raise TeaServerError(f"Server error: HTTP {status}")
         # Remaining 4xx codes (400, 405-499 excluding 401/403/404)
-        body_text = response.text[:200] if response.text else ""
-        if body_text and response.text and len(response.text) > 200:
+        body_text = (response.text or "")[:200]
+        if len(response.text or "") > 200:
             body_text += " (truncated)"
         msg = f"Client error: HTTP {status}"
         if body_text:

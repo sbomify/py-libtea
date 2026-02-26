@@ -2,12 +2,13 @@
 
 import logging
 import warnings
+from urllib.parse import urlparse
 
 import requests
 from pydantic import ValidationError
 from semver import Version as _SemVer
 
-from libtea._http import USER_AGENT
+from libtea._http import USER_AGENT, MtlsConfig
 from libtea.exceptions import TeaDiscoveryError, TeaInsecureTransportWarning
 from libtea.models import TeaEndpoint, TeaWellKnown, TeiType
 
@@ -62,7 +63,12 @@ def parse_tei(tei: str) -> tuple[str, str, str]:
 
 
 def fetch_well_known(
-    domain: str, *, timeout: float = 10.0, scheme: str = "https", port: int | None = None
+    domain: str,
+    *,
+    timeout: float = 10.0,
+    scheme: str = "https",
+    port: int | None = None,
+    mtls: MtlsConfig | None = None,
 ) -> TeaWellKnown:
     """Fetch and parse the .well-known/tea discovery document from a domain.
 
@@ -72,6 +78,7 @@ def fetch_well_known(
         scheme: URL scheme, ``"https"`` (default) or ``"http"``.
         port: Optional port number. Default ports (443 for https, 80 for http)
             are omitted from the URL.
+        mtls: Optional mutual TLS configuration.
 
     Returns:
         Parsed well-known document with endpoint list.
@@ -99,11 +106,22 @@ def fetch_well_known(
         url = f"{scheme}://{domain}/.well-known/tea"
     else:
         url = f"{scheme}://{domain}:{resolved_port}/.well-known/tea"
+
+    kwargs: dict = {"timeout": timeout, "allow_redirects": True, "headers": {"user-agent": USER_AGENT}}
+    if mtls:
+        kwargs["cert"] = (str(mtls.client_cert), str(mtls.client_key))
+        if mtls.ca_bundle:
+            kwargs["verify"] = str(mtls.ca_bundle)
+
     try:
-        response = requests.get(url, timeout=timeout, allow_redirects=True, headers={"user-agent": USER_AGENT})
+        response = requests.get(url, **kwargs)
+        # Validate the final URL after any redirects (SSRF protection)
+        final_parsed = urlparse(response.url)
+        if final_parsed.scheme not in ("http", "https"):
+            raise TeaDiscoveryError(f"Discovery redirected to unsupported scheme: {final_parsed.scheme!r}")
         if response.status_code >= 400:
-            body_snippet = response.text[:200] if response.text else ""
-            if body_snippet and response.text and len(response.text) > 200:
+            body_snippet = (response.text or "")[:200]
+            if len(response.text or "") > 200:
                 body_snippet += " (truncated)"
             msg = f"Failed to fetch {url}: HTTP {response.status_code}"
             if body_snippet:

@@ -247,6 +247,18 @@ class TestCLICommands:
         assert result.exit_code == 1
 
     @responses.activate
+    def test_download_with_max_download_bytes(self, tmp_path):
+        artifact_url = "https://cdn.example.com/sbom.json"
+        responses.get(artifact_url, body=b'{"bomFormat": "CycloneDX"}')
+        dest = tmp_path / "sbom.json"
+        result = runner.invoke(
+            app,
+            ["download", artifact_url, str(dest), "--max-download-bytes", "10000", "--base-url", BASE_URL],
+        )
+        assert result.exit_code == 0
+        assert dest.exists()
+
+    @responses.activate
     def test_inspect(self):
         tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
         uuid = "abc-123"

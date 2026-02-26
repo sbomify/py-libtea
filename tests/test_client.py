@@ -5,11 +5,21 @@ import requests
 import responses
 
 from libtea._http import MtlsConfig
-from libtea.client import _MAX_PAGE_SIZE, TeaClient, _probe_endpoint, _validate_page_size, _validate_path_segment
+from libtea.client import (
+    _MAX_PAGE_SIZE,
+    TeaClient,
+    _probe_endpoint,
+    _validate_collection_version,
+    _validate_page_offset,
+    _validate_page_size,
+    _validate_path_segment,
+)
 from libtea.exceptions import TeaConnectionError, TeaDiscoveryError, TeaServerError, TeaValidationError
 from libtea.models import (
     CLE,
     Artifact,
+    Checksum,
+    ChecksumAlgorithm,
     Collection,
     Component,
     ComponentReleaseWithCollection,
@@ -731,3 +741,88 @@ class TestPageSizeValidation:
     def test_search_product_releases_rejects_bad_page_size(self, client):
         with pytest.raises(TeaValidationError, match="page_size"):
             client.search_product_releases("PURL", "pkg:pypi/foo", page_size=_MAX_PAGE_SIZE + 1)
+
+
+class TestPageOffsetValidation:
+    """page_offset parameter is validated in search/paginated methods."""
+
+    def test_validate_page_offset_rejects_negative(self):
+        with pytest.raises(TeaValidationError, match="page_offset must be >= 0"):
+            _validate_page_offset(-1)
+
+    def test_validate_page_offset_accepts_zero(self):
+        _validate_page_offset(0)  # should not raise
+
+    def test_validate_page_offset_accepts_positive(self):
+        _validate_page_offset(100)  # should not raise
+
+    def test_search_products_rejects_negative_offset(self, client):
+        with pytest.raises(TeaValidationError, match="page_offset"):
+            client.search_products("PURL", "pkg:pypi/foo", page_offset=-1)
+
+    def test_get_product_releases_rejects_negative_offset(self, client):
+        with pytest.raises(TeaValidationError, match="page_offset"):
+            client.get_product_releases("abc-123", page_offset=-1)
+
+    def test_search_product_releases_rejects_negative_offset(self, client):
+        with pytest.raises(TeaValidationError, match="page_offset"):
+            client.search_product_releases("PURL", "pkg:pypi/foo", page_offset=-1)
+
+
+class TestCollectionVersionValidation:
+    """Collection version parameter is validated before making API calls."""
+
+    def test_validate_collection_version_rejects_zero(self):
+        with pytest.raises(TeaValidationError, match="Collection version must be >= 1"):
+            _validate_collection_version(0)
+
+    def test_validate_collection_version_rejects_negative(self):
+        with pytest.raises(TeaValidationError, match="Collection version must be >= 1"):
+            _validate_collection_version(-1)
+
+    def test_validate_collection_version_accepts_one(self):
+        _validate_collection_version(1)  # should not raise
+
+    def test_get_product_release_collection_rejects_zero(self, client):
+        with pytest.raises(TeaValidationError, match="Collection version"):
+            client.get_product_release_collection("rel-1", 0)
+
+    def test_get_component_release_collection_rejects_zero(self, client):
+        with pytest.raises(TeaValidationError, match="Collection version"):
+            client.get_component_release_collection("cr-1", 0)
+
+
+class TestWeakChecksumWarning:
+    """P2-5: Weak hash algorithms emit a warning."""
+
+    @responses.activate
+    def test_md5_checksum_warns(self, client, tmp_path):
+        import hashlib
+        import warnings
+
+        content = b"test content"
+        responses.get("https://artifacts.example.com/sbom.json", body=content)
+        md5 = hashlib.md5(content).hexdigest()
+        checksums = [Checksum(algorithm_type=ChecksumAlgorithm.MD5, algorithm_value=md5)]
+        dest = tmp_path / "sbom.json"
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            client.download_artifact("https://artifacts.example.com/sbom.json", dest, verify_checksums=checksums)
+        weak_warnings = [x for x in w if "weak hash" in str(x.message).lower()]
+        assert len(weak_warnings) == 1
+
+    @responses.activate
+    def test_sha256_no_warning(self, client, tmp_path):
+        import hashlib
+        import warnings
+
+        content = b"test content"
+        responses.get("https://artifacts.example.com/sbom.json", body=content)
+        sha256 = hashlib.sha256(content).hexdigest()
+        checksums = [Checksum(algorithm_type=ChecksumAlgorithm.SHA_256, algorithm_value=sha256)]
+        dest = tmp_path / "sbom.json"
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            client.download_artifact("https://artifacts.example.com/sbom.json", dest, verify_checksums=checksums)
+        weak_warnings = [x for x in w if "weak hash" in str(x.message).lower()]
+        assert len(weak_warnings) == 0

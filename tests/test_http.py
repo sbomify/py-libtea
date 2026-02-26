@@ -13,6 +13,7 @@ from libtea._http import (
     TeaHttpClient,
     _build_hashers,
     _get_package_version,
+    _is_internal_ip,
     _validate_download_url,
     _validate_resolved_ips,
 )
@@ -374,6 +375,18 @@ class TestRequestExceptionCatchAll:
             http_client.download_with_hashes(url="https://artifacts.example.com/sbom.xml", dest=dest)
         assert not dest.exists()
 
+    @responses.activate
+    def test_download_request_exception_cleans_up(self, http_client, tmp_path):
+        """RequestException during download cleans up partial file."""
+        responses.get(
+            "https://artifacts.example.com/sbom.xml",
+            body=requests.exceptions.ChunkedEncodingError("broken"),
+        )
+        dest = tmp_path / "sbom.xml"
+        with pytest.raises(TeaConnectionError, match="Download failed"):
+            http_client.download_with_hashes(url="https://artifacts.example.com/sbom.xml", dest=dest)
+        assert not dest.exists()
+
 
 class TestEmptyBodyErrors:
     @responses.activate
@@ -416,6 +429,14 @@ class TestBasicAuth:
         assert client._session.auth is not None
         client.close()
         assert client._session.auth is None
+
+    def test_close_clears_mtls_cert(self):
+        """P2-4: close() should clear mTLS cert references."""
+        mtls = MtlsConfig(client_cert=Path("/tmp/cert.pem"), client_key=Path("/tmp/key.pem"))
+        client = TeaHttpClient(base_url=BASE_URL, mtls=mtls)
+        assert client._session.cert is not None
+        client.close()
+        assert client._session.cert is None
 
     @responses.activate
     def test_basic_auth_not_sent_to_download(self, tmp_path):
@@ -504,12 +525,48 @@ class TestSsrfProtection:
         with pytest.raises(TeaValidationError):
             _validate_download_url(url)
 
+    def test_rejects_cgnat_ip(self):
+        """P0-1: CGNAT range (100.64.0.0/10) must be blocked."""
+        with pytest.raises(TeaValidationError, match="private/internal"):
+            _validate_download_url("http://100.64.0.1/file.xml")
+
     def test_accepts_public_url(self):
         with patch("libtea._http.socket.getaddrinfo", return_value=[]):
             _validate_download_url("https://cdn.example.com/sbom.json")
 
     def test_accepts_public_ip(self):
         _validate_download_url("https://8.8.8.8/file.xml")
+
+
+class TestIsInternalIp:
+    """Tests for the _is_internal_ip helper."""
+
+    def test_cgnat_is_internal(self):
+        import ipaddress
+
+        assert _is_internal_ip(ipaddress.IPv4Address("100.64.0.1"))
+        assert _is_internal_ip(ipaddress.IPv4Address("100.127.255.254"))
+
+    def test_public_ip_not_internal(self):
+        import ipaddress
+
+        assert not _is_internal_ip(ipaddress.IPv4Address("8.8.8.8"))
+        assert not _is_internal_ip(ipaddress.IPv4Address("93.184.216.34"))
+
+    def test_loopback_is_internal(self):
+        import ipaddress
+
+        assert _is_internal_ip(ipaddress.IPv4Address("127.0.0.1"))
+
+    def test_link_local_is_internal(self):
+        import ipaddress
+
+        assert _is_internal_ip(ipaddress.IPv4Address("169.254.169.254"))
+
+    def test_ipv6_loopback_is_internal(self):
+        import ipaddress
+
+        assert _is_internal_ip(ipaddress.IPv6Address("::1"))
 
 
 class TestDnsRebindingProtection:
@@ -537,6 +594,23 @@ class TestDnsRebindingProtection:
         fake_addr = [(2, 1, 6, "", ("93.184.216.34", 0))]
         with patch("libtea._http.socket.getaddrinfo", return_value=fake_addr):
             _validate_resolved_ips("cdn.example.com")  # should not raise
+
+    def test_rejects_hostname_resolving_to_cgnat(self):
+        """P0-1: CGNAT range via DNS rebinding must be blocked."""
+        fake_addr = [(2, 1, 6, "", ("100.64.0.1", 0))]
+        with patch("libtea._http.socket.getaddrinfo", return_value=fake_addr):
+            with pytest.raises(TeaValidationError, match="resolves to private/internal IP"):
+                _validate_resolved_ips("evil-cgnat.example.com")
+
+    def test_dns_failure_logs_warning(self, caplog):
+        """DNS failure should log a warning, not silently pass."""
+        import logging
+        import socket
+
+        with caplog.at_level(logging.WARNING, logger="libtea"):
+            with patch("libtea._http.socket.getaddrinfo", side_effect=socket.gaierror("NXDOMAIN")):
+                _validate_resolved_ips("nonexistent.example.com")
+        assert "DNS resolution failed" in caplog.text
 
     def test_dns_failure_is_ignored(self):
         """If DNS resolution fails, let the actual request handle it."""

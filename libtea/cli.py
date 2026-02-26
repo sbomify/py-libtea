@@ -11,6 +11,8 @@ except ImportError:
     print("Error: CLI dependencies not installed. Run: pip install libtea[cli]", file=sys.stderr)
     raise SystemExit(1)
 
+from pydantic import BaseModel
+
 from libtea._http import MtlsConfig
 from libtea.client import TEA_SPEC_VERSION, TeaClient
 from libtea.exceptions import TeaError
@@ -88,10 +90,10 @@ def _build_client(
 
 def _output(data: Any) -> None:
     """Print JSON to stdout."""
-    if hasattr(data, "model_dump"):
+    if isinstance(data, BaseModel):
         data = data.model_dump(mode="json", by_alias=True)
     elif isinstance(data, list):
-        data = [item.model_dump(mode="json", by_alias=True) if hasattr(item, "model_dump") else item for item in data]
+        data = [item.model_dump(mode="json", by_alias=True) if isinstance(item, BaseModel) else item for item in data]
     json.dump(data, sys.stdout, indent=2, default=str)
     print()
 
@@ -312,6 +314,9 @@ def download(
     checksum: Annotated[
         Optional[list[str]], typer.Option("--checksum", help="Checksum as ALG:VALUE (repeatable)")
     ] = None,
+    max_download_bytes: Annotated[
+        Optional[int], typer.Option("--max-download-bytes", help="Maximum download size in bytes")
+    ] = None,
     base_url: Annotated[Optional[str], _base_url_opt] = None,
     token: Annotated[Optional[str], _token_opt] = None,
     auth: Annotated[Optional[str], _auth_opt] = None,
@@ -343,7 +348,9 @@ def download(
         with _build_client(
             base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle
         ) as client:
-            result = client.download_artifact(url, dest, verify_checksums=checksums)
+            result = client.download_artifact(
+                url, dest, verify_checksums=checksums, max_download_bytes=max_download_bytes
+            )
         print(f"Downloaded to {result}", file=sys.stderr)
     except TeaError as exc:
         _error(str(exc))
@@ -399,7 +406,7 @@ def inspect(
         _error(str(exc))
 
 
-def _version_callback(value: bool):
+def _version_callback(value: bool) -> None:
     if value:
         from libtea import __version__
 

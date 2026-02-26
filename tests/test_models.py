@@ -28,7 +28,6 @@ class TestEnums:
         assert IdentifierType.CPE == "CPE"
         assert IdentifierType.TEI == "TEI"
         assert IdentifierType.PURL == "PURL"
-        assert IdentifierType.UDI == "UDI"
 
     def test_checksum_algorithm_values(self):
         assert ChecksumAlgorithm.SHA_256 == "SHA-256"
@@ -227,14 +226,15 @@ class TestProduct:
         assert len(product.identifiers) == 2
         assert product.identifiers[0].id_type == IdentifierType.CPE
 
-    def test_product_with_udi_identifier(self):
+    def test_product_with_unknown_identifier_type(self):
+        """Forward-compatible: unknown identifier types pass through as plain strings."""
         data = {
             "uuid": "abc-123",
             "name": "Medical Device",
             "identifiers": [{"idType": "UDI", "idValue": "00123456789012"}],
         }
         product = Product.model_validate(data)
-        assert product.identifiers[0].id_type == IdentifierType.UDI
+        assert product.identifiers[0].id_type == "UDI"
         assert product.identifiers[0].id_value == "00123456789012"
 
 

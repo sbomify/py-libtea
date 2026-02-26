@@ -23,12 +23,15 @@ class _TeaModel(BaseModel):
 
 
 class IdentifierType(StrEnum):
-    """Identifier type used in product and component identifiers."""
+    """Identifier type used in product and component identifiers.
+
+    Note: ``Identifier.id_type`` is typed as ``str`` (not ``IdentifierType``)
+    so unknown types from future spec versions pass through without error.
+    """
 
     CPE = "CPE"
     TEI = "TEI"
     PURL = "PURL"
-    UDI = "UDI"  # Not in spec's identifier-type enum; included for forward-compatibility
 
 
 class TeiType(StrEnum):

@@ -4,6 +4,7 @@ from importlib.metadata import version
 
 from libtea._http import MtlsConfig
 from libtea.client import TEA_SPEC_VERSION, TeaClient
+from libtea.discovery import fetch_well_known, parse_tei, select_endpoint, select_endpoints
 from libtea.exceptions import (
     TeaAuthenticationError,
     TeaChecksumError,
@@ -55,6 +56,11 @@ __all__ = [
     "MtlsConfig",
     "TEA_SPEC_VERSION",
     "TeaClient",
+    # Discovery
+    "fetch_well_known",
+    "parse_tei",
+    "select_endpoint",
+    "select_endpoints",
     # Exceptions
     "TeaError",
     "TeaAuthenticationError",

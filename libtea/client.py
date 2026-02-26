@@ -2,6 +2,7 @@
 
 import hmac
 import logging
+import warnings
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Self, TypeVar
@@ -79,6 +80,21 @@ def _validate_page_size(page_size: int) -> None:
     """Validate that page_size is within acceptable bounds."""
     if page_size < 1 or page_size > _MAX_PAGE_SIZE:
         raise TeaValidationError(f"page_size must be between 1 and {_MAX_PAGE_SIZE}, got {page_size}")
+
+
+def _validate_page_offset(page_offset: int) -> None:
+    """Validate that page_offset is non-negative."""
+    if page_offset < 0:
+        raise TeaValidationError(f"page_offset must be >= 0, got {page_offset}")
+
+
+def _validate_collection_version(version: int) -> None:
+    """Validate that a collection version number is >= 1 per spec."""
+    if version < 1:
+        raise TeaValidationError(f"Collection version must be >= 1, got {version}")
+
+
+_WEAK_HASH_ALGORITHMS = frozenset({"MD5", "SHA-1"})
 
 
 def _probe_endpoint(url: str, timeout: float = 5.0, mtls: MtlsConfig | None = None) -> None:
@@ -168,7 +184,7 @@ class TeaClient:
         unreachable or returns a server error, the next candidate is tried
         (per TEA spec: "MUST retry … with the next endpoint").
         """
-        well_known = fetch_well_known(domain, timeout=timeout, scheme=scheme, port=port)
+        well_known = fetch_well_known(domain, timeout=timeout, scheme=scheme, port=port, mtls=mtls)
         candidates = select_endpoints(well_known, version)
 
         last_error: Exception | None = None
@@ -220,6 +236,7 @@ class TeaClient:
     ) -> PaginatedProductResponse:
         """Search for products by identifier (e.g. PURL, CPE, TEI)."""
         _validate_page_size(page_size)
+        _validate_page_offset(page_offset)
         data = self._http.get_json(
             "/products",
             params={"idType": id_type, "idValue": id_value, "pageOffset": page_offset, "pageSize": page_size},
@@ -252,6 +269,7 @@ class TeaClient:
             Paginated response containing product releases.
         """
         _validate_page_size(page_size)
+        _validate_page_offset(page_offset)
         data = self._http.get_json(
             f"/product/{_validate_path_segment(uuid)}/releases",
             params={"pageOffset": page_offset, "pageSize": page_size},
@@ -265,6 +283,7 @@ class TeaClient:
     ) -> PaginatedProductReleaseResponse:
         """Search for product releases by identifier (e.g. PURL, CPE, TEI)."""
         _validate_page_size(page_size)
+        _validate_page_offset(page_offset)
         data = self._http.get_json(
             "/productReleases",
             params={"idType": id_type, "idValue": id_value, "pageOffset": page_offset, "pageSize": page_size},
@@ -317,6 +336,7 @@ class TeaClient:
         Returns:
             The requested collection version.
         """
+        _validate_collection_version(version)
         data = self._http.get_json(f"/productRelease/{_validate_path_segment(uuid)}/collection/{version}")
         return _validate(Collection, data)
 
@@ -396,6 +416,7 @@ class TeaClient:
         Returns:
             The requested collection version.
         """
+        _validate_collection_version(version)
         data = self._http.get_json(f"/componentRelease/{_validate_path_segment(uuid)}/collection/{version}")
         return _validate(Collection, data)
 
@@ -491,6 +512,13 @@ class TeaClient:
             TeaConnectionError: On network failure.
             TeaValidationError: If download exceeds max_download_bytes.
         """
+        if verify_checksums:
+            weak = {cs.algorithm_type.value for cs in verify_checksums} & _WEAK_HASH_ALGORITHMS
+            if weak:
+                warnings.warn(
+                    f"Verifying with weak hash algorithm(s): {', '.join(sorted(weak))}. Prefer SHA-256 or stronger.",
+                    stacklevel=2,
+                )
         algorithms = [cs.algorithm_type.value for cs in verify_checksums] if verify_checksums else None
         computed = self._http.download_with_hashes(
             url, dest, algorithms=algorithms, max_download_bytes=max_download_bytes
