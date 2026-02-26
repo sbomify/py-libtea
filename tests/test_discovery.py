@@ -3,9 +3,9 @@ import requests
 import responses
 from pydantic import ValidationError
 
-from libtea.discovery import _SemVer, fetch_well_known, parse_tei, select_endpoint
+from libtea.discovery import _is_valid_domain, _SemVer, fetch_well_known, parse_tei, select_endpoint
 from libtea.exceptions import TeaDiscoveryError
-from libtea.models import TeaEndpoint, TeaWellKnown, TeiType
+from libtea.models import DiscoveryInfo, TeaEndpoint, TeaWellKnown, TeiType
 
 
 class TestParseTei:
@@ -280,14 +280,55 @@ class TestSelectEndpoint:
             TeaEndpoint(url="https://api.example.com", versions=[])
 
 
-def test_discovery_info_rejects_empty_servers():
-    """Spec requires minItems: 1 for servers array."""
-    from pydantic import ValidationError
+class TestDiscoveryInfo:
+    def test_rejects_empty_servers(self):
+        """Spec requires minItems: 1 for servers array."""
+        with pytest.raises(ValidationError):
+            DiscoveryInfo(product_release_uuid="d4d9f54a-abcf-11ee-ac79-1a52914d44b1", servers=[])
 
-    from libtea.models import DiscoveryInfo
 
-    with pytest.raises(ValidationError):
-        DiscoveryInfo(product_release_uuid="d4d9f54a-abcf-11ee-ac79-1a52914d44b1", servers=[])
+class TestIsValidDomain:
+    def test_rejects_empty_string(self):
+        assert not _is_valid_domain("")
+
+    def test_rejects_label_over_63_chars(self):
+        assert not _is_valid_domain("a" * 64 + ".com")
+
+    def test_accepts_label_at_63_chars(self):
+        assert _is_valid_domain("a" * 63 + ".com")
+
+    def test_rejects_trailing_dot(self):
+        assert not _is_valid_domain("example.com.")
+
+    def test_rejects_double_dot(self):
+        assert not _is_valid_domain("example..com")
+
+    def test_rejects_leading_hyphen_label(self):
+        assert not _is_valid_domain("-example.com")
+
+    def test_rejects_trailing_hyphen_label(self):
+        assert not _is_valid_domain("example-.com")
+
+    def test_accepts_hyphen_in_middle(self):
+        assert _is_valid_domain("my-example.com")
+
+    def test_rejects_underscore(self):
+        assert not _is_valid_domain("my_example.com")
+
+    def test_accepts_single_label(self):
+        assert _is_valid_domain("localhost")
+
+    def test_rejects_domain_over_253_chars(self):
+        """RFC 1035 limits total domain name to 253 characters."""
+        long_domain = ".".join(["a" * 63] * 4)  # 63*4 + 3 dots = 255 chars
+        assert len(long_domain) == 255
+        assert not _is_valid_domain(long_domain)
+
+    def test_accepts_domain_at_253_chars(self):
+        # 61-char labels * 4 + 3 dots = 247, well under 253
+        domain = ".".join(["a" * 61] * 4)
+        assert len(domain) <= 253
+        assert _is_valid_domain(domain)
 
 
 class TestSemVer:
@@ -349,6 +390,32 @@ class TestSemVer:
     def test_invalid_semver_raises(self):
         with pytest.raises(ValueError, match="Invalid SemVer"):
             _SemVer("not-a-version")
+
+    def test_four_part_version_rejected(self):
+        with pytest.raises(ValueError, match="Invalid SemVer"):
+            _SemVer("1.2.3.4")
+
+    def test_single_number_rejected(self):
+        with pytest.raises(ValueError, match="Invalid SemVer"):
+            _SemVer("1")
+
+    def test_non_numeric_parts_rejected(self):
+        with pytest.raises(ValueError, match="Invalid SemVer"):
+            _SemVer("a.b.c")
+
+    def test_trailing_hyphen_rejected(self):
+        """A trailing hyphen is not valid SemVer (empty pre-release)."""
+        with pytest.raises(ValueError, match="Invalid SemVer"):
+            _SemVer("1.0.0-")
+
+    def test_invalid_prerelease_chars_rejected(self):
+        """SemVer 2.0.0 restricts pre-release to [0-9A-Za-z.-]."""
+        with pytest.raises(ValueError, match="Invalid SemVer"):
+            _SemVer("1.0.0-beta!@#")
+
+    def test_prerelease_with_spaces_rejected(self):
+        with pytest.raises(ValueError, match="Invalid SemVer"):
+            _SemVer("1.0.0-beta 1")
 
     def test_str_repr(self):
         v = _SemVer("1.2.3-beta.1")

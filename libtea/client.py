@@ -55,7 +55,9 @@ def _validate_list(model_cls: type[_M], data: Any) -> list[_M]:
 
 def _validate_path_segment(value: str, name: str = "uuid") -> str:
     """Validate that a value is safe to interpolate into a URL path."""
-    if not value or len(value) > 128 or not all(c in _SAFE_PATH_CHARS for c in value):
+    if not value:
+        raise TeaValidationError(f"Invalid {name}: must not be empty.")
+    if len(value) > 128 or not all(c in _SAFE_PATH_CHARS for c in value):
         raise TeaValidationError(
             f"Invalid {name}: {value!r}. Must contain only alphanumeric characters and hyphens, max 128 characters."
         )

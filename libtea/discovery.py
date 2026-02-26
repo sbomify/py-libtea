@@ -24,6 +24,8 @@ class _SemVer:
 
     __slots__ = ("major", "minor", "patch", "pre", "_raw")
 
+    _PRE_RELEASE_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-")
+
     def __init__(self, version_str: str) -> None:
         self._raw = version_str
         # Split pre-release: "1.2.3-beta.2" -> "1.2.3", "beta.2"
@@ -37,6 +39,11 @@ class _SemVer:
             raise ValueError(f"Invalid SemVer string: {version_str!r}")
         if not all(p.isdigit() for p in parts):
             raise ValueError(f"Invalid SemVer string: {version_str!r}")
+
+        # Validate pre-release per SemVer spec item 9: [0-9A-Za-z.-] only, non-empty
+        if pre_part is not None:
+            if not pre_part or not all(c in _SemVer._PRE_RELEASE_CHARS for c in pre_part):
+                raise ValueError(f"Invalid SemVer string: {version_str!r}")
 
         self.major = int(parts[0])
         self.minor = int(parts[1])
@@ -105,8 +112,8 @@ _DOMAIN_LABEL_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTU
 
 
 def _is_valid_domain(domain: str) -> bool:
-    """Validate domain per RFC 952/1123: alnum labels, internal hyphens, max 63 chars per label."""
-    if not domain:
+    """Validate domain per RFC 952/1123: alnum labels, internal hyphens, max 63 chars per label, max 253 total."""
+    if not domain or len(domain) > 253:
         return False
     for label in domain.split("."):
         if not label or len(label) > 63:
