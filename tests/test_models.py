@@ -2,10 +2,14 @@ import pytest
 from pydantic import ValidationError
 
 from libtea.models import (
+    CLE,
     ArtifactFormat,
     ArtifactType,
     Checksum,
     ChecksumAlgorithm,
+    CLEEvent,
+    CLEEventType,
+    CLEVersionSpecifier,
     Collection,
     CollectionBelongsTo,
     CollectionUpdateReasonType,
@@ -356,3 +360,145 @@ class TestPaginatedResponse:
         resp = PaginatedProductResponse.model_validate(data)
         assert resp.total_results == 1
         assert resp.results[0].name == "Apache Log4j 2"
+
+
+class TestCLEEventType:
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "released",
+            "endOfDevelopment",
+            "endOfSupport",
+            "endOfLife",
+            "endOfDistribution",
+            "endOfMarketing",
+            "supersededBy",
+            "componentRenamed",
+            "withdrawn",
+        ],
+    )
+    def test_all_event_types(self, value):
+        assert CLEEventType(value) == value
+
+
+class TestCLEModels:
+    def test_released_event(self):
+        event = CLEEvent.model_validate(
+            {
+                "id": 1,
+                "type": "released",
+                "effective": "2024-01-01T00:00:00Z",
+                "published": "2024-01-01T00:00:00Z",
+                "version": "1.0.0",
+                "license": "Apache-2.0",
+            }
+        )
+        assert event.id == 1
+        assert event.type == CLEEventType.RELEASED
+        assert event.version == "1.0.0"
+        assert event.license == "Apache-2.0"
+
+    def test_end_of_support_event(self):
+        event = CLEEvent.model_validate(
+            {
+                "id": 3,
+                "type": "endOfSupport",
+                "effective": "2025-06-01T00:00:00Z",
+                "published": "2025-01-01T00:00:00Z",
+                "versions": [{"range": "vers:npm/>=1.0.0|<2.0.0"}],
+                "supportId": "standard",
+            }
+        )
+        assert event.type == CLEEventType.END_OF_SUPPORT
+        assert event.support_id == "standard"
+        assert len(event.versions) == 1
+        assert event.versions[0].range == "vers:npm/>=1.0.0|<2.0.0"
+
+    def test_withdrawn_event(self):
+        event = CLEEvent.model_validate(
+            {
+                "id": 5,
+                "type": "withdrawn",
+                "effective": "2025-03-01T00:00:00Z",
+                "published": "2025-03-01T00:00:00Z",
+                "eventId": 1,
+                "reason": "Incorrect release date",
+            }
+        )
+        assert event.type == CLEEventType.WITHDRAWN
+        assert event.event_id == 1
+        assert event.reason == "Incorrect release date"
+
+    def test_component_renamed_event(self):
+        event = CLEEvent.model_validate(
+            {
+                "id": 4,
+                "type": "componentRenamed",
+                "effective": "2025-01-01T00:00:00Z",
+                "published": "2025-01-01T00:00:00Z",
+                "identifiers": [{"idType": "PURL", "idValue": "pkg:pypi/new-name@1.0.0"}],
+            }
+        )
+        assert event.type == CLEEventType.COMPONENT_RENAMED
+        assert len(event.identifiers) == 1
+
+    def test_full_cle_document(self):
+        cle = CLE.model_validate(
+            {
+                "events": [
+                    {
+                        "id": 2,
+                        "type": "endOfDevelopment",
+                        "effective": "2025-01-01T00:00:00Z",
+                        "published": "2024-06-01T00:00:00Z",
+                        "versions": [{"version": "1.0.0"}],
+                        "supportId": "standard",
+                    },
+                    {
+                        "id": 1,
+                        "type": "released",
+                        "effective": "2024-01-01T00:00:00Z",
+                        "published": "2024-01-01T00:00:00Z",
+                        "version": "1.0.0",
+                        "license": "Apache-2.0",
+                    },
+                ],
+                "definitions": {
+                    "support": [
+                        {"id": "standard", "description": "Standard support", "url": "https://example.com/support"}
+                    ]
+                },
+            }
+        )
+        assert len(cle.events) == 2
+        assert cle.definitions is not None
+        assert len(cle.definitions.support) == 1
+
+    def test_cle_without_definitions(self):
+        cle = CLE.model_validate(
+            {
+                "events": [
+                    {
+                        "id": 1,
+                        "type": "released",
+                        "effective": "2024-01-01T00:00:00Z",
+                        "published": "2024-01-01T00:00:00Z",
+                    }
+                ]
+            }
+        )
+        assert cle.definitions is None
+
+    def test_cle_event_missing_required_fields(self):
+        with pytest.raises(ValidationError):
+            CLEEvent.model_validate({"id": 1})
+
+    def test_version_specifier_with_version(self):
+        vs = CLEVersionSpecifier.model_validate({"version": "1.0.0"})
+        assert vs.version == "1.0.0"
+        assert vs.range is None
+
+    def test_version_specifier_with_range(self):
+        vs = CLEVersionSpecifier.model_validate({"range": "vers:npm/>=1.0.0|<2.0.0"})
+        assert vs.version is None
+        assert vs.range == "vers:npm/>=1.0.0|<2.0.0"

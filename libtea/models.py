@@ -274,6 +274,77 @@ class ErrorResponse(_TeaModel):
     error: ErrorType
 
 
+# --- CLE (Common Lifecycle Enumeration) ---
+
+
+class CLEEventType(StrEnum):
+    """CLE lifecycle event types per ECMA-428 TC54 TG3 CLE Specification v1.0.0."""
+
+    RELEASED = "released"
+    END_OF_DEVELOPMENT = "endOfDevelopment"
+    END_OF_SUPPORT = "endOfSupport"
+    END_OF_LIFE = "endOfLife"
+    END_OF_DISTRIBUTION = "endOfDistribution"
+    END_OF_MARKETING = "endOfMarketing"
+    SUPERSEDED_BY = "supersededBy"
+    COMPONENT_RENAMED = "componentRenamed"
+    WITHDRAWN = "withdrawn"
+
+
+class CLEVersionSpecifier(_TeaModel):
+    """A version specifier: either a single version or a version range in vers format."""
+
+    version: str | None = None
+    range: str | None = None
+
+
+class CLESupportDefinition(_TeaModel):
+    """A support policy definition referenced by CLE events."""
+
+    id: str
+    description: str
+    url: str | None = None
+
+
+class CLEDefinitions(_TeaModel):
+    """Container for reusable CLE policy definitions."""
+
+    support: list[CLESupportDefinition] | None = None
+
+
+class CLEEvent(_TeaModel):
+    """A discrete lifecycle event from the CLE specification.
+
+    Required fields: id, type, effective, published.
+    Other fields are event-type-specific (e.g. version for released, eventId for withdrawn).
+    """
+
+    id: int
+    type: CLEEventType
+    effective: datetime
+    published: datetime
+    version: str | None = None
+    versions: list[CLEVersionSpecifier] | None = None
+    support_id: str | None = None
+    license: str | None = None
+    superseded_by_version: str | None = None
+    identifiers: list[Identifier] | None = None
+    event_id: int | None = None
+    reason: str | None = None
+    description: str | None = None
+    references: list[str] | None = None
+
+
+class CLE(_TeaModel):
+    """Common Lifecycle Enumeration document per ECMA-428 TC54 TG3 v1.0.0.
+
+    Contains lifecycle events ordered by ID (descending) and optional definitions.
+    """
+
+    events: list[CLEEvent]
+    definitions: CLEDefinitions | None = None
+
+
 # --- Pagination ---
 
 
