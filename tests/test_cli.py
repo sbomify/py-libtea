@@ -318,6 +318,7 @@ class TestCLIDiscoveryPath:
                 "endpoints": [{"url": "https://api.example.com", "versions": ["0.3.0-beta.2"]}],
             },
         )
+        responses.head("https://api.example.com/v0.3.0-beta.2", status=200)
         uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
         responses.get(
             "https://api.example.com/v0.3.0-beta.2/product/" + uuid,
@@ -337,6 +338,7 @@ class TestCLIDiscoveryPath:
                 "endpoints": [{"url": "http://api.example.com", "versions": ["0.3.0-beta.2"]}],
             },
         )
+        responses.head("http://api.example.com/v0.3.0-beta.2", status=200)
         uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
         responses.get(
             "http://api.example.com/v0.3.0-beta.2/product/" + uuid,

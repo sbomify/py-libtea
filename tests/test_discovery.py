@@ -4,7 +4,7 @@ import responses
 from pydantic import ValidationError
 from semver import Version as SemVer
 
-from libtea.discovery import _is_valid_domain, fetch_well_known, parse_tei, select_endpoint
+from libtea.discovery import _is_valid_domain, fetch_well_known, parse_tei, select_endpoint, select_endpoints
 from libtea.exceptions import TeaDiscoveryError
 from libtea.models import DiscoveryInfo, TeaEndpoint, TeaWellKnown, TeiType
 
@@ -470,3 +470,55 @@ class TestSemVer:
     def test_equality(self):
         assert SemVer.parse("1.0.0") == SemVer.parse("1.0.0")
         assert SemVer.parse("1.0.0-beta.2") == SemVer.parse("1.0.0-beta.2")
+
+
+class TestSelectEndpoints:
+    def _make_well_known(self, endpoints: list[dict]) -> TeaWellKnown:
+        return TeaWellKnown(
+            schema_version=1,
+            endpoints=[TeaEndpoint(**ep) for ep in endpoints],
+        )
+
+    def test_returns_all_matching_endpoints(self):
+        wk = self._make_well_known(
+            [
+                {"url": "https://a.example.com", "versions": ["1.0.0"], "priority": 0.5},
+                {"url": "https://b.example.com", "versions": ["1.0.0"], "priority": 1.0},
+                {"url": "https://c.example.com", "versions": ["2.0.0"]},
+            ]
+        )
+        eps = select_endpoints(wk, "1.0.0")
+        assert len(eps) == 2
+        assert eps[0].url == "https://b.example.com"
+        assert eps[1].url == "https://a.example.com"
+
+    def test_single_candidate(self):
+        wk = self._make_well_known(
+            [
+                {"url": "https://only.example.com", "versions": ["1.0.0"]},
+            ]
+        )
+        eps = select_endpoints(wk, "1.0.0")
+        assert len(eps) == 1
+        assert eps[0].url == "https://only.example.com"
+
+    def test_no_match_raises(self):
+        wk = self._make_well_known(
+            [
+                {"url": "https://api.example.com", "versions": ["2.0.0"]},
+            ]
+        )
+        with pytest.raises(TeaDiscoveryError, match="No compatible endpoint"):
+            select_endpoints(wk, "1.0.0")
+
+    def test_select_endpoint_returns_first(self):
+        """select_endpoint (singular) returns the best candidate from select_endpoints."""
+        wk = self._make_well_known(
+            [
+                {"url": "https://low.example.com", "versions": ["1.0.0"], "priority": 0.3},
+                {"url": "https://high.example.com", "versions": ["1.0.0"], "priority": 0.9},
+            ]
+        )
+        ep = select_endpoint(wk, "1.0.0")
+        eps = select_endpoints(wk, "1.0.0")
+        assert ep.url == eps[0].url

@@ -6,11 +6,18 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, Self, TypeVar
 
+import requests as _requests
 from pydantic import BaseModel, ValidationError
 
-from libtea._http import MtlsConfig, TeaHttpClient
-from libtea.discovery import fetch_well_known, select_endpoint
-from libtea.exceptions import TeaChecksumError, TeaValidationError
+from libtea._http import USER_AGENT, MtlsConfig, TeaHttpClient
+from libtea.discovery import fetch_well_known, select_endpoints
+from libtea.exceptions import (
+    TeaChecksumError,
+    TeaConnectionError,
+    TeaDiscoveryError,
+    TeaServerError,
+    TeaValidationError,
+)
 from libtea.models import (
     CLE,
     Artifact,
@@ -65,6 +72,49 @@ def _validate_path_segment(value: str, name: str = "uuid") -> str:
     return value
 
 
+_MAX_PAGE_SIZE = 10000
+
+
+def _validate_page_size(page_size: int) -> None:
+    """Validate that page_size is within acceptable bounds."""
+    if page_size < 1 or page_size > _MAX_PAGE_SIZE:
+        raise TeaValidationError(f"page_size must be between 1 and {_MAX_PAGE_SIZE}, got {page_size}")
+
+
+def _probe_endpoint(url: str, timeout: float = 5.0, mtls: MtlsConfig | None = None) -> None:
+    """Probe a URL to verify the server is reachable.
+
+    Uses a standalone HEAD request with no auth and no retries so that
+    failover between candidates is fast.
+
+    Args:
+        url: Endpoint URL to probe.
+        timeout: Request timeout in seconds.
+        mtls: Optional mutual TLS configuration for mTLS-only deployments.
+
+    Raises:
+        TeaConnectionError: If the endpoint is unreachable.
+        TeaServerError: If the endpoint returns HTTP 5xx.
+    """
+    kwargs: dict[str, Any] = {
+        "timeout": timeout,
+        "allow_redirects": False,
+        "headers": {"user-agent": USER_AGENT},
+    }
+    if mtls:
+        kwargs["cert"] = (str(mtls.client_cert), str(mtls.client_key))
+        if mtls.ca_bundle:
+            kwargs["verify"] = str(mtls.ca_bundle)
+    try:
+        resp = _requests.head(url, **kwargs)
+    except (_requests.ConnectionError, _requests.Timeout) as exc:
+        raise TeaConnectionError(str(exc)) from exc
+    except _requests.RequestException as exc:
+        raise TeaConnectionError(str(exc)) from exc
+    if resp.status_code >= 500:
+        raise TeaServerError(f"Server error: HTTP {resp.status_code}")
+
+
 class TeaClient:
     """Synchronous client for the Transparency Exchange API.
 
@@ -112,19 +162,37 @@ class TeaClient:
         max_retries: int = 3,
         backoff_factor: float = 0.5,
     ) -> Self:
-        """Create a client by discovering the TEA endpoint from a domain's .well-known/tea."""
+        """Create a client by discovering the TEA endpoint from a domain's .well-known/tea.
+
+        Tries each compatible endpoint in priority order. If an endpoint is
+        unreachable or returns a server error, the next candidate is tried
+        (per TEA spec: "MUST retry … with the next endpoint").
+        """
         well_known = fetch_well_known(domain, timeout=timeout, scheme=scheme, port=port)
-        endpoint = select_endpoint(well_known, version)
-        base_url = f"{endpoint.url.rstrip('/')}/v{version}"
-        return cls(
-            base_url=base_url,
-            token=token,
-            basic_auth=basic_auth,
-            timeout=timeout,
-            mtls=mtls,
-            max_retries=max_retries,
-            backoff_factor=backoff_factor,
-        )
+        candidates = select_endpoints(well_known, version)
+
+        last_error: Exception | None = None
+        for endpoint in candidates:
+            base_url = f"{endpoint.url.rstrip('/')}/v{version}"
+            try:
+                _probe_endpoint(base_url, timeout=min(timeout, 5.0), mtls=mtls)
+            except (TeaConnectionError, TeaServerError) as exc:
+                logger.warning("Endpoint %s unreachable, trying next: %s", base_url, exc)
+                last_error = exc
+                continue
+            return cls(
+                base_url=base_url,
+                token=token,
+                basic_auth=basic_auth,
+                timeout=timeout,
+                mtls=mtls,
+                max_retries=max_retries,
+                backoff_factor=backoff_factor,
+            )
+
+        if last_error:
+            raise last_error
+        raise TeaDiscoveryError(f"No reachable endpoint found for version {version!r}")
 
     # --- Discovery ---
 
@@ -151,6 +219,7 @@ class TeaClient:
         self, id_type: str, id_value: str, *, page_offset: int = 0, page_size: int = 100
     ) -> PaginatedProductResponse:
         """Search for products by identifier (e.g. PURL, CPE, TEI)."""
+        _validate_page_size(page_size)
         data = self._http.get_json(
             "/products",
             params={"idType": id_type, "idValue": id_value, "pageOffset": page_offset, "pageSize": page_size},
@@ -182,6 +251,7 @@ class TeaClient:
         Returns:
             Paginated response containing product releases.
         """
+        _validate_page_size(page_size)
         data = self._http.get_json(
             f"/product/{_validate_path_segment(uuid)}/releases",
             params={"pageOffset": page_offset, "pageSize": page_size},
@@ -194,6 +264,7 @@ class TeaClient:
         self, id_type: str, id_value: str, *, page_offset: int = 0, page_size: int = 100
     ) -> PaginatedProductReleaseResponse:
         """Search for product releases by identifier (e.g. PURL, CPE, TEI)."""
+        _validate_page_size(page_size)
         data = self._http.get_json(
             "/productReleases",
             params={"idType": id_type, "idValue": id_value, "pageOffset": page_offset, "pageSize": page_size},
@@ -398,6 +469,7 @@ class TeaClient:
         dest: Path,
         *,
         verify_checksums: list[Checksum] | None = None,
+        max_download_bytes: int | None = None,
     ) -> Path:
         """Download an artifact file, optionally verifying checksums.
 
@@ -409,6 +481,7 @@ class TeaClient:
             dest: Local file path to write to.
             verify_checksums: Optional list of checksums to verify after download.
                 On mismatch the downloaded file is deleted.
+            max_download_bytes: Optional maximum download size in bytes.
 
         Returns:
             The destination path.
@@ -416,9 +489,12 @@ class TeaClient:
         Raises:
             TeaChecksumError: If checksum verification fails.
             TeaConnectionError: On network failure.
+            TeaValidationError: If download exceeds max_download_bytes.
         """
         algorithms = [cs.algorithm_type.value for cs in verify_checksums] if verify_checksums else None
-        computed = self._http.download_with_hashes(url, dest, algorithms=algorithms)
+        computed = self._http.download_with_hashes(
+            url, dest, algorithms=algorithms, max_download_bytes=max_download_bytes
+        )
 
         if verify_checksums:
             self._verify_checksums(verify_checksums, computed, url, dest)

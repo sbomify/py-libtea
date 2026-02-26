@@ -143,9 +143,10 @@ class TestValidationErrors:
         with pytest.raises(ValidationError):
             Checksum.model_validate({"algType": "CRC32", "algValue": "aabbcc"})
 
-    def test_identifier_rejects_unknown_type(self):
-        with pytest.raises(ValidationError):
-            Identifier.model_validate({"idType": "SPDXID", "idValue": "some-value"})
+    def test_identifier_accepts_unknown_type(self):
+        """Forward-compatible: unknown identifier types pass through as strings."""
+        ident = Identifier.model_validate({"idType": "SPDXID", "idValue": "some-value"})
+        assert ident.id_type == "SPDXID"
 
     def test_checksum_rejects_missing_algorithm_type(self):
         with pytest.raises(ValidationError):
@@ -318,6 +319,22 @@ class TestOptionalFields:
         assert collection.belongs_to is None
         assert collection.update_reason is None
         assert collection.artifacts == []
+
+    def test_collection_all_fields_optional(self):
+        """Per TEA spec, all Collection fields are optional."""
+        collection = Collection.model_validate({})
+        assert collection.uuid is None
+        assert collection.version is None
+        assert collection.artifacts == []
+
+    def test_collection_version_rejects_zero(self):
+        """TEA spec says versions start with 1."""
+        with pytest.raises(ValidationError):
+            Collection.model_validate({"version": 0})
+
+    def test_collection_version_rejects_negative(self):
+        with pytest.raises(ValidationError):
+            Collection.model_validate({"version": -1})
 
     def test_artifact_format_minimal_fields(self):
         data = {

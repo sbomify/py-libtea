@@ -7,7 +7,15 @@ import pytest
 import requests
 import responses
 
-from libtea._http import MtlsConfig, TeaHttpClient, _build_hashers, _get_package_version, _validate_download_url
+from libtea._http import (
+    _MAX_DOWNLOAD_REDIRECTS,
+    MtlsConfig,
+    TeaHttpClient,
+    _build_hashers,
+    _get_package_version,
+    _validate_download_url,
+    _validate_resolved_ips,
+)
 from libtea.exceptions import (
     TeaAuthenticationError,
     TeaChecksumError,
@@ -475,7 +483,7 @@ class TestRetryConfig:
 
 
 class TestSsrfProtection:
-    """P3-5: Download URL must not target private/internal networks."""
+    """Download URL must not target private/internal networks."""
 
     @pytest.mark.parametrize(
         "url",
@@ -489,6 +497,7 @@ class TestSsrfProtection:
             "http://[::1]/file.xml",
             "http://localhost/file.xml",
             "http://localhost.localdomain/file.xml",
+            "http://metadata.google.internal/computeMetadata/v1/",
         ],
     )
     def test_rejects_internal_urls(self, url):
@@ -496,7 +505,153 @@ class TestSsrfProtection:
             _validate_download_url(url)
 
     def test_accepts_public_url(self):
-        _validate_download_url("https://cdn.example.com/sbom.json")
+        with patch("libtea._http.socket.getaddrinfo", return_value=[]):
+            _validate_download_url("https://cdn.example.com/sbom.json")
 
     def test_accepts_public_ip(self):
         _validate_download_url("https://8.8.8.8/file.xml")
+
+
+class TestDnsRebindingProtection:
+    """DNS rebinding protection via hostname resolution check."""
+
+    def test_rejects_hostname_resolving_to_loopback(self):
+        fake_addr = [(2, 1, 6, "", ("127.0.0.1", 0))]
+        with patch("libtea._http.socket.getaddrinfo", return_value=fake_addr):
+            with pytest.raises(TeaValidationError, match="resolves to private/internal IP"):
+                _validate_resolved_ips("evil-rebind.example.com")
+
+    def test_rejects_hostname_resolving_to_private(self):
+        fake_addr = [(2, 1, 6, "", ("10.0.0.1", 0))]
+        with patch("libtea._http.socket.getaddrinfo", return_value=fake_addr):
+            with pytest.raises(TeaValidationError, match="resolves to private/internal IP"):
+                _validate_resolved_ips("evil-rebind.example.com")
+
+    def test_rejects_hostname_resolving_to_link_local(self):
+        fake_addr = [(2, 1, 6, "", ("169.254.169.254", 0))]
+        with patch("libtea._http.socket.getaddrinfo", return_value=fake_addr):
+            with pytest.raises(TeaValidationError, match="resolves to private/internal IP"):
+                _validate_resolved_ips("evil-metadata.example.com")
+
+    def test_accepts_hostname_resolving_to_public_ip(self):
+        fake_addr = [(2, 1, 6, "", ("93.184.216.34", 0))]
+        with patch("libtea._http.socket.getaddrinfo", return_value=fake_addr):
+            _validate_resolved_ips("cdn.example.com")  # should not raise
+
+    def test_dns_failure_is_ignored(self):
+        """If DNS resolution fails, let the actual request handle it."""
+        import socket
+
+        with patch("libtea._http.socket.getaddrinfo", side_effect=socket.gaierror("NXDOMAIN")):
+            _validate_resolved_ips("nonexistent.example.com")  # should not raise
+
+    def test_validate_download_url_calls_dns_check(self):
+        """Non-IP hostnames trigger DNS resolution check."""
+        fake_addr = [(2, 1, 6, "", ("10.0.0.1", 0))]
+        with patch("libtea._http.socket.getaddrinfo", return_value=fake_addr):
+            with pytest.raises(TeaValidationError, match="resolves to private/internal IP"):
+                _validate_download_url("https://evil-rebind.example.com/file.xml")
+
+
+class TestDownloadRedirectHandling:
+    """Download follows redirects with SSRF validation at each hop."""
+
+    @responses.activate
+    def test_follows_redirect_to_safe_url(self, http_client, tmp_path):
+        responses.get(
+            "https://artifacts.example.com/sbom.xml",
+            status=302,
+            headers={"Location": "https://cdn.example.com/sbom.xml"},
+        )
+        responses.get("https://cdn.example.com/sbom.xml", body=b"content")
+        dest = tmp_path / "sbom.xml"
+        with patch("libtea._http.socket.getaddrinfo", return_value=[]):
+            http_client.download_with_hashes(url="https://artifacts.example.com/sbom.xml", dest=dest)
+        assert dest.read_bytes() == b"content"
+
+    @responses.activate
+    def test_rejects_redirect_to_internal_ip(self, http_client, tmp_path):
+        responses.get(
+            "https://artifacts.example.com/sbom.xml",
+            status=302,
+            headers={"Location": "http://169.254.169.254/latest/meta-data/"},
+        )
+        dest = tmp_path / "sbom.xml"
+        with patch("libtea._http.socket.getaddrinfo", return_value=[]):
+            with pytest.raises(TeaValidationError, match="private/internal"):
+                http_client.download_with_hashes(url="https://artifacts.example.com/sbom.xml", dest=dest)
+
+    @responses.activate
+    def test_rejects_redirect_without_location(self, http_client, tmp_path):
+        responses.get("https://artifacts.example.com/sbom.xml", status=302, headers={})
+        dest = tmp_path / "sbom.xml"
+        with patch("libtea._http.socket.getaddrinfo", return_value=[]):
+            with pytest.raises(TeaRequestError, match="Redirect without Location"):
+                http_client.download_with_hashes(url="https://artifacts.example.com/sbom.xml", dest=dest)
+
+    @responses.activate
+    def test_too_many_redirects(self, http_client, tmp_path):
+        for i in range(_MAX_DOWNLOAD_REDIRECTS + 1):
+            responses.get(
+                f"https://artifacts.example.com/hop{i}",
+                status=302,
+                headers={"Location": f"https://artifacts.example.com/hop{i + 1}"},
+            )
+        dest = tmp_path / "sbom.xml"
+        with patch("libtea._http.socket.getaddrinfo", return_value=[]):
+            with pytest.raises(TeaConnectionError, match="Too many redirects"):
+                http_client.download_with_hashes(url="https://artifacts.example.com/hop0", dest=dest)
+
+
+class TestDownloadSizeLimit:
+    """Download size limit prevents unbounded downloads."""
+
+    @responses.activate
+    def test_download_within_limit(self, http_client, tmp_path):
+        content = b"small"
+        responses.get("https://artifacts.example.com/small.bin", body=content)
+        dest = tmp_path / "small.bin"
+        with patch("libtea._http.socket.getaddrinfo", return_value=[]):
+            http_client.download_with_hashes(
+                url="https://artifacts.example.com/small.bin", dest=dest, max_download_bytes=1000
+            )
+        assert dest.read_bytes() == content
+
+    @responses.activate
+    def test_download_exceeds_limit_raises(self, http_client, tmp_path):
+        content = b"x" * 2000
+        responses.get("https://artifacts.example.com/large.bin", body=content)
+        dest = tmp_path / "large.bin"
+        with patch("libtea._http.socket.getaddrinfo", return_value=[]):
+            with pytest.raises(TeaValidationError, match="exceeds size limit"):
+                http_client.download_with_hashes(
+                    url="https://artifacts.example.com/large.bin", dest=dest, max_download_bytes=1000
+                )
+        assert not dest.exists()
+
+    @responses.activate
+    def test_no_limit_by_default(self, http_client, tmp_path):
+        content = b"x" * 100000
+        responses.get("https://artifacts.example.com/big.bin", body=content)
+        dest = tmp_path / "big.bin"
+        with patch("libtea._http.socket.getaddrinfo", return_value=[]):
+            http_client.download_with_hashes(url="https://artifacts.example.com/big.bin", dest=dest)
+        assert dest.read_bytes() == content
+
+
+class TestTruncationIndicator:
+    """Error messages indicate when response body is truncated."""
+
+    @responses.activate
+    def test_4xx_long_body_shows_truncated(self, http_client, base_url):
+        long_body = "x" * 300
+        responses.get(f"{base_url}/product/abc", body=long_body, status=422)
+        with pytest.raises(TeaRequestError, match="truncated"):
+            http_client.get_json("/product/abc")
+
+    @responses.activate
+    def test_4xx_short_body_no_truncation(self, http_client, base_url):
+        responses.get(f"{base_url}/product/abc", body="short error", status=422)
+        with pytest.raises(TeaRequestError) as exc_info:
+            http_client.get_json("/product/abc")
+        assert "truncated" not in str(exc_info.value)

@@ -1,8 +1,12 @@
+from pathlib import Path
+
 import pytest
+import requests
 import responses
 
-from libtea.client import TeaClient, _validate_path_segment
-from libtea.exceptions import TeaDiscoveryError, TeaValidationError
+from libtea._http import MtlsConfig
+from libtea.client import _MAX_PAGE_SIZE, TeaClient, _probe_endpoint, _validate_page_size, _validate_path_segment
+from libtea.exceptions import TeaConnectionError, TeaDiscoveryError, TeaServerError, TeaValidationError
 from libtea.models import (
     CLE,
     Artifact,
@@ -323,6 +327,7 @@ class TestFromWellKnown:
                 "endpoints": [{"url": "https://api.example.com", "versions": ["0.3.0-beta.2"]}],
             },
         )
+        responses.head("https://api.example.com/v0.3.0-beta.2", status=200)
         client = TeaClient.from_well_known("example.com")
         assert client is not None
         client.close()
@@ -348,6 +353,7 @@ class TestFromWellKnown:
                 "endpoints": [{"url": "http://api.example.com", "versions": ["0.3.0-beta.2"]}],
             },
         )
+        responses.head("http://api.example.com/v0.3.0-beta.2", status=200)
         import warnings
 
         with warnings.catch_warnings():
@@ -365,13 +371,124 @@ class TestFromWellKnown:
                 "endpoints": [{"url": "https://api.example.com", "versions": ["0.3.0-beta.2"]}],
             },
         )
+        responses.head("https://api.example.com/v0.3.0-beta.2", status=200)
         responses.get(
             "https://api.example.com/v0.3.0-beta.2/product/abc",
             json={"uuid": "abc", "name": "P", "identifiers": []},
         )
         client = TeaClient.from_well_known("example.com", token="secret")
         client.get_product("abc")
-        assert responses.calls[1].request.headers["authorization"] == "Bearer secret"
+        assert responses.calls[2].request.headers["authorization"] == "Bearer secret"
+        client.close()
+
+
+class TestProbeEndpoint:
+    @responses.activate
+    def test_probe_success(self):
+        responses.head("https://api.example.com/v1", status=200)
+        _probe_endpoint("https://api.example.com/v1")  # should not raise
+
+    @responses.activate
+    def test_probe_404_is_ok(self):
+        """404 means the server is alive — probe should succeed."""
+        responses.head("https://api.example.com/v1", status=404)
+        _probe_endpoint("https://api.example.com/v1")  # should not raise
+
+    @responses.activate
+    def test_probe_500_raises_server_error(self):
+        responses.head("https://api.example.com/v1", status=500)
+        with pytest.raises(TeaServerError):
+            _probe_endpoint("https://api.example.com/v1")
+
+    @responses.activate
+    def test_probe_connection_error_raises(self):
+        responses.head("https://api.example.com/v1", body=requests.ConnectionError("refused"))
+        with pytest.raises(TeaConnectionError):
+            _probe_endpoint("https://api.example.com/v1")
+
+    @responses.activate
+    def test_probe_timeout_raises(self):
+        responses.head("https://api.example.com/v1", body=requests.Timeout("timed out"))
+        with pytest.raises(TeaConnectionError):
+            _probe_endpoint("https://api.example.com/v1")
+
+
+class TestEndpointFailover:
+    """Multi-endpoint failover in from_well_known."""
+
+    WELL_KNOWN_DOC = {
+        "schemaVersion": 1,
+        "endpoints": [
+            {"url": "https://primary.example.com", "versions": ["0.3.0-beta.2"], "priority": 1.0},
+            {"url": "https://fallback.example.com", "versions": ["0.3.0-beta.2"], "priority": 0.5},
+        ],
+    }
+
+    @responses.activate
+    def test_failover_to_second_on_connection_error(self):
+        responses.get("https://example.com/.well-known/tea", json=self.WELL_KNOWN_DOC)
+        responses.head(
+            "https://primary.example.com/v0.3.0-beta.2",
+            body=requests.ConnectionError("refused"),
+        )
+        responses.head("https://fallback.example.com/v0.3.0-beta.2", status=200)
+
+        client = TeaClient.from_well_known("example.com")
+        assert client is not None
+        client.close()
+
+    @responses.activate
+    def test_failover_to_second_on_500(self):
+        responses.get("https://example.com/.well-known/tea", json=self.WELL_KNOWN_DOC)
+        responses.head("https://primary.example.com/v0.3.0-beta.2", status=500)
+        responses.head("https://fallback.example.com/v0.3.0-beta.2", status=200)
+
+        client = TeaClient.from_well_known("example.com")
+        assert client is not None
+        client.close()
+
+    @responses.activate
+    def test_all_endpoints_fail_raises_last_error(self):
+        responses.get("https://example.com/.well-known/tea", json=self.WELL_KNOWN_DOC)
+        responses.head(
+            "https://primary.example.com/v0.3.0-beta.2",
+            body=requests.ConnectionError("refused"),
+        )
+        responses.head(
+            "https://fallback.example.com/v0.3.0-beta.2",
+            body=requests.ConnectionError("also refused"),
+        )
+
+        with pytest.raises(TeaConnectionError):
+            TeaClient.from_well_known("example.com")
+
+    @responses.activate
+    def test_single_endpoint_success_no_failover(self):
+        doc = {
+            "schemaVersion": 1,
+            "endpoints": [{"url": "https://only.example.com", "versions": ["0.3.0-beta.2"]}],
+        }
+        responses.get("https://example.com/.well-known/tea", json=doc)
+        responses.head("https://only.example.com/v0.3.0-beta.2", status=200)
+
+        client = TeaClient.from_well_known("example.com")
+        assert client is not None
+        client.close()
+
+    @responses.activate
+    def test_failover_uses_correct_base_url(self):
+        """After failover, the client should use the fallback endpoint's URL."""
+        responses.get("https://example.com/.well-known/tea", json=self.WELL_KNOWN_DOC)
+        responses.head("https://primary.example.com/v0.3.0-beta.2", status=503)
+        responses.head("https://fallback.example.com/v0.3.0-beta.2", status=200)
+        responses.get(
+            "https://fallback.example.com/v0.3.0-beta.2/product/abc",
+            json={"uuid": "abc", "name": "P", "identifiers": []},
+        )
+
+        client = TeaClient.from_well_known("example.com")
+        product = client.get_product("abc")
+        assert product.name == "P"
         client.close()
 
 
@@ -546,3 +663,71 @@ class TestCLE:
         responses.get(f"{base_url}/product/{uuid}/cle", json={"bad": "data"})
         with pytest.raises(TeaValidationError, match="Invalid CLE response"):
             client.get_product_cle(uuid)
+
+
+class TestProbeEndpointMtls:
+    """_probe_endpoint passes mTLS config to the standalone HEAD request."""
+
+    @responses.activate
+    def test_probe_with_mtls_config(self):
+        responses.head("https://api.example.com/v1", status=200)
+        mtls = MtlsConfig(client_cert=Path("/tmp/cert.pem"), client_key=Path("/tmp/key.pem"))
+        _probe_endpoint("https://api.example.com/v1", mtls=mtls)  # should not raise
+
+    @responses.activate
+    def test_probe_with_mtls_ca_bundle(self):
+        responses.head("https://api.example.com/v1", status=200)
+        mtls = MtlsConfig(
+            client_cert=Path("/tmp/cert.pem"), client_key=Path("/tmp/key.pem"), ca_bundle=Path("/tmp/ca.pem")
+        )
+        _probe_endpoint("https://api.example.com/v1", mtls=mtls)  # should not raise
+
+    @responses.activate
+    def test_from_well_known_passes_mtls_to_probe(self):
+        """from_well_known must propagate mTLS config to _probe_endpoint."""
+        responses.get(
+            "https://example.com/.well-known/tea",
+            json={
+                "schemaVersion": 1,
+                "endpoints": [{"url": "https://api.example.com", "versions": ["0.3.0-beta.2"]}],
+            },
+        )
+        responses.head("https://api.example.com/v0.3.0-beta.2", status=200)
+        mtls = MtlsConfig(client_cert=Path("/tmp/cert.pem"), client_key=Path("/tmp/key.pem"))
+        client = TeaClient.from_well_known("example.com", mtls=mtls)
+        assert client is not None
+        client.close()
+
+
+class TestPageSizeValidation:
+    """page_size parameter is validated in search/paginated methods."""
+
+    def test_validate_page_size_rejects_zero(self):
+        with pytest.raises(TeaValidationError, match="page_size must be between 1"):
+            _validate_page_size(0)
+
+    def test_validate_page_size_rejects_negative(self):
+        with pytest.raises(TeaValidationError, match="page_size must be between 1"):
+            _validate_page_size(-1)
+
+    def test_validate_page_size_rejects_too_large(self):
+        with pytest.raises(TeaValidationError, match="page_size must be between 1"):
+            _validate_page_size(_MAX_PAGE_SIZE + 1)
+
+    def test_validate_page_size_accepts_one(self):
+        _validate_page_size(1)  # should not raise
+
+    def test_validate_page_size_accepts_max(self):
+        _validate_page_size(_MAX_PAGE_SIZE)  # should not raise
+
+    def test_search_products_rejects_bad_page_size(self, client):
+        with pytest.raises(TeaValidationError, match="page_size"):
+            client.search_products("PURL", "pkg:pypi/foo", page_size=0)
+
+    def test_get_product_releases_rejects_bad_page_size(self, client):
+        with pytest.raises(TeaValidationError, match="page_size"):
+            client.get_product_releases("abc-123", page_size=-1)
+
+    def test_search_product_releases_rejects_bad_page_size(self, client):
+        with pytest.raises(TeaValidationError, match="page_size"):
+            client.search_product_releases("PURL", "pkg:pypi/foo", page_size=_MAX_PAGE_SIZE + 1)

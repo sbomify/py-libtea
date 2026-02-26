@@ -3,12 +3,13 @@
 import hashlib
 import ipaddress
 import logging
+import socket
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Self
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -94,7 +95,34 @@ def _build_hashers(algorithms: list[str]) -> dict[str, Any]:
     return hashers
 
 
-_BLOCKED_HOSTNAMES = frozenset({"localhost", "localhost.localdomain"})
+_BLOCKED_HOSTNAMES = frozenset(
+    {
+        "localhost",
+        "localhost.localdomain",
+        "metadata.google.internal",
+        "metadata.google.internal.",
+    }
+)
+
+_MAX_DOWNLOAD_REDIRECTS = 10
+
+
+def _validate_resolved_ips(hostname: str) -> None:
+    """Resolve hostname via DNS and reject if any resolved IP is private/internal."""
+    try:
+        addr_infos = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return  # DNS resolution failed; let the actual request handle it
+    for _, _, _, _, sockaddr in addr_infos:
+        resolved_ip = sockaddr[0]
+        try:
+            addr = ipaddress.ip_address(resolved_ip)
+            if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+                raise TeaValidationError(
+                    f"Artifact download URL hostname {hostname!r} resolves to private/internal IP: {resolved_ip}"
+                )
+        except ValueError:
+            pass
 
 
 def _validate_download_url(url: str) -> None:
@@ -114,7 +142,8 @@ def _validate_download_url(url: str) -> None:
         if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
             raise TeaValidationError(f"Artifact download URL must not target private/internal IP: {hostname!r}")
     except ValueError:
-        pass  # Not an IP literal — hostname is fine
+        # Not an IP literal — resolve hostname and check resolved IPs (DNS rebinding protection)
+        _validate_resolved_ips(hostname)
 
 
 class TeaHttpClient:
@@ -222,16 +251,25 @@ class TeaHttpClient:
         except ValueError as exc:
             raise TeaValidationError(f"Invalid JSON in response: {exc}") from exc
 
-    def download_with_hashes(self, url: str, dest: Path, algorithms: list[str] | None = None) -> dict[str, str]:
+    def download_with_hashes(
+        self,
+        url: str,
+        dest: Path,
+        algorithms: list[str] | None = None,
+        *,
+        max_download_bytes: int | None = None,
+    ) -> dict[str, str]:
         """Download a file and compute checksums on-the-fly.
 
         Uses a separate unauthenticated session so that the bearer token
         is not leaked to third-party artifact hosts (CDNs, Maven Central, etc.).
+        Redirects are followed manually with SSRF validation at each hop.
 
         Args:
             url: Direct download URL.
             dest: Local file path to write to. Parent directories are created.
             algorithms: Optional list of checksum algorithm names to compute.
+            max_download_bytes: Optional maximum download size in bytes.
 
         Returns:
             Dict mapping algorithm name to hex digest string.
@@ -239,6 +277,7 @@ class TeaHttpClient:
         Raises:
             TeaConnectionError: On network failure. Partial files are deleted.
             TeaChecksumError: If an unsupported algorithm is requested.
+            TeaValidationError: If download exceeds max_download_bytes or fails SSRF check.
         """
         _validate_download_url(url)
         hashers = _build_hashers(algorithms) if algorithms else {}
@@ -247,10 +286,34 @@ class TeaHttpClient:
         try:
             with requests.Session() as download_session:
                 download_session.headers["user-agent"] = USER_AGENT
-                response = download_session.get(url, stream=True, timeout=self._timeout)
+
+                # Follow redirects manually with SSRF validation at each hop
+                current_url = url
+                response = None
+                for _ in range(_MAX_DOWNLOAD_REDIRECTS):
+                    response = download_session.get(
+                        current_url, stream=True, timeout=self._timeout, allow_redirects=False
+                    )
+                    if 300 <= response.status_code < 400:
+                        location = response.headers.get("Location")
+                        if not location:
+                            raise TeaRequestError(f"Redirect without Location header: HTTP {response.status_code}")
+                        current_url = urljoin(current_url, location)
+                        _validate_download_url(current_url)
+                        response.close()
+                        continue
+                    break
+                else:
+                    raise TeaConnectionError(f"Too many redirects (max {_MAX_DOWNLOAD_REDIRECTS})")
+
                 self._raise_for_status(response)
+
+                downloaded = 0
                 with open(dest, "wb") as f:
                     for chunk in response.iter_content(chunk_size=8192):
+                        downloaded += len(chunk)
+                        if max_download_bytes is not None and downloaded > max_download_bytes:
+                            raise TeaValidationError(f"Download exceeds size limit of {max_download_bytes} bytes")
                         f.write(chunk)
                         for h in hashers.values():
                             h.update(chunk)
@@ -260,7 +323,7 @@ class TeaHttpClient:
         except requests.RequestException as exc:
             dest.unlink(missing_ok=True)
             raise TeaConnectionError(f"Download failed: {exc}") from exc
-        except Exception:
+        except BaseException:
             try:
                 dest.unlink(missing_ok=True)
             except OSError:
@@ -309,6 +372,8 @@ class TeaHttpClient:
             raise TeaServerError(f"Server error: HTTP {status}")
         # Remaining 4xx codes (400, 405-499 excluding 401/403/404)
         body_text = response.text[:200] if response.text else ""
+        if body_text and response.text and len(response.text) > 200:
+            body_text += " (truncated)"
         msg = f"Client error: HTTP {status}"
         if body_text:
             msg = f"{msg} — {body_text}"

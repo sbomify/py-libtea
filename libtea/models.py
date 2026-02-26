@@ -117,9 +117,14 @@ class ErrorType(StrEnum):
 
 
 class Identifier(_TeaModel):
-    """An identifier with a specified type (e.g. PURL, CPE, TEI)."""
+    """An identifier with a specified type (e.g. PURL, CPE, TEI).
 
-    id_type: IdentifierType
+    The ``id_type`` field accepts any string for forward-compatibility with
+    future TEA spec versions. Compare against :class:`IdentifierType` members
+    for known types (e.g. ``ident.id_type == IdentifierType.PURL``).
+    """
+
+    id_type: str
     id_value: str
 
 
@@ -194,10 +199,11 @@ class Collection(_TeaModel):
 
     The UUID matches the owning component or product release. The version
     integer starts at 1 and increments on each content change.
+    Per spec, all fields are optional.
     """
 
-    uuid: str
-    version: int
+    uuid: str | None = None
+    version: int | None = Field(default=None, ge=1)
     date: datetime | None = None
     belongs_to: CollectionBelongsTo | None = None
     update_reason: CollectionUpdateReason | None = None

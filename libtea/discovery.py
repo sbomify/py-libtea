@@ -101,10 +101,10 @@ def fetch_well_known(
         url = f"{scheme}://{domain}:{resolved_port}/.well-known/tea"
     try:
         response = requests.get(url, timeout=timeout, allow_redirects=True, headers={"user-agent": USER_AGENT})
-        if 300 <= response.status_code < 400:
-            raise TeaDiscoveryError(f"Unexpected redirect from {url}: HTTP {response.status_code}")
         if response.status_code >= 400:
             body_snippet = response.text[:200] if response.text else ""
+            if body_snippet and response.text and len(response.text) > 200:
+                body_snippet += " (truncated)"
             msg = f"Failed to fetch {url}: HTTP {response.status_code}"
             if body_snippet:
                 msg = f"{msg} — {body_snippet}"
@@ -129,18 +129,18 @@ def fetch_well_known(
         raise TeaDiscoveryError(f"Invalid .well-known/tea document from {domain}: {exc}") from exc
 
 
-def select_endpoint(well_known: TeaWellKnown, supported_version: str) -> TeaEndpoint:
-    """Select the best endpoint that supports the given version.
+def select_endpoints(well_known: TeaWellKnown, supported_version: str) -> list[TeaEndpoint]:
+    """Select all endpoints that support the given version, sorted by priority.
 
     Per TEA spec: uses SemVer 2.0.0 comparison to match versions, then
-    prioritizes by highest matching version, with priority as tiebreaker.
+    sorts by highest matching version with priority as tiebreaker.
 
     Args:
         well_known: Parsed .well-known/tea document.
         supported_version: SemVer version string the client supports.
 
     Returns:
-        The best matching endpoint.
+        List of matching endpoints, best first.
 
     Raises:
         TeaDiscoveryError: If no endpoint supports the requested version.
@@ -171,4 +171,23 @@ def select_endpoint(well_known: TeaWellKnown, supported_version: str) -> TeaEndp
         key=lambda pair: (pair[0], pair[1].priority if pair[1].priority is not None else 1.0),
         reverse=True,
     )
-    return candidates[0][1]
+    return [ep for _, ep in candidates]
+
+
+def select_endpoint(well_known: TeaWellKnown, supported_version: str) -> TeaEndpoint:
+    """Select the best endpoint that supports the given version.
+
+    Convenience wrapper around :func:`select_endpoints` that returns only
+    the top-priority candidate.
+
+    Args:
+        well_known: Parsed .well-known/tea document.
+        supported_version: SemVer version string the client supports.
+
+    Returns:
+        The best matching endpoint.
+
+    Raises:
+        TeaDiscoveryError: If no endpoint supports the requested version.
+    """
+    return select_endpoints(well_known, supported_version)[0]
