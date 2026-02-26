@@ -50,14 +50,10 @@ from libtea.models import (
 
 __version__ = version("libtea")
 __all__ = [
+    # Client
     "TEA_SPEC_VERSION",
     "TeaClient",
-    "CLE",
-    "CLEDefinitions",
-    "CLEEvent",
-    "CLEEventType",
-    "CLESupportDefinition",
-    "CLEVersionSpecifier",
+    # Exceptions
     "TeaError",
     "TeaAuthenticationError",
     "TeaChecksumError",
@@ -68,9 +64,16 @@ __all__ = [
     "TeaRequestError",
     "TeaServerError",
     "TeaValidationError",
+    # Models
     "Artifact",
     "ArtifactFormat",
     "ArtifactType",
+    "CLE",
+    "CLEDefinitions",
+    "CLEEvent",
+    "CLEEventType",
+    "CLESupportDefinition",
+    "CLEVersionSpecifier",
     "Checksum",
     "ChecksumAlgorithm",
     "Collection",

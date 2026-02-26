@@ -186,6 +186,41 @@ class TestFetchWellKnown:
         with pytest.raises(TeaDiscoveryError, match="Invalid scheme"):
             fetch_well_known("example.com", scheme="ftp")
 
+    def test_fetch_well_known_invalid_port_zero_raises(self):
+        with pytest.raises(TeaDiscoveryError, match="Invalid port"):
+            fetch_well_known("example.com", port=0)
+
+    def test_fetch_well_known_invalid_port_negative_raises(self):
+        with pytest.raises(TeaDiscoveryError, match="Invalid port"):
+            fetch_well_known("example.com", port=-1)
+
+    def test_fetch_well_known_invalid_port_too_large_raises(self):
+        with pytest.raises(TeaDiscoveryError, match="Invalid port"):
+            fetch_well_known("example.com", port=70000)
+
+    @responses.activate
+    def test_fetch_well_known_http_default_port_omitted(self):
+        responses.get(
+            "http://example.com/.well-known/tea",
+            json={"schemaVersion": 1, "endpoints": [{"url": "http://api.example.com", "versions": ["1.0.0"]}]},
+        )
+        wk = fetch_well_known("example.com", scheme="http", port=80)
+        assert len(wk.endpoints) == 1
+
+    def test_fetch_well_known_http_emits_insecure_warning(self):
+        import warnings
+
+        from libtea.exceptions import TeaInsecureTransportWarning
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            try:
+                fetch_well_known("example.com", scheme="http")
+            except TeaDiscoveryError:
+                pass  # Connection will fail; we only care about the warning
+            insecure_warnings = [x for x in w if issubclass(x.category, TeaInsecureTransportWarning)]
+            assert len(insecure_warnings) == 1
+
     @responses.activate
     def test_fetch_well_known_http_with_custom_port(self):
         responses.get(

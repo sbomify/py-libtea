@@ -305,22 +305,50 @@ class TeaClient:
     # --- CLE ---
 
     def get_product_cle(self, uuid: str) -> CLE:
-        """Get CLE (Common Lifecycle Enumeration) data for a product."""
+        """Get CLE (Common Lifecycle Enumeration) data for a product.
+
+        Args:
+            uuid: Product UUID.
+
+        Returns:
+            The CLE document with lifecycle events and optional definitions.
+        """
         data = self._http.get_json(f"/product/{_validate_path_segment(uuid)}/cle")
         return _validate(CLE, data)
 
     def get_product_release_cle(self, uuid: str) -> CLE:
-        """Get CLE data for a product release."""
+        """Get CLE data for a product release.
+
+        Args:
+            uuid: Product release UUID.
+
+        Returns:
+            The CLE document with lifecycle events and optional definitions.
+        """
         data = self._http.get_json(f"/productRelease/{_validate_path_segment(uuid)}/cle")
         return _validate(CLE, data)
 
     def get_component_cle(self, uuid: str) -> CLE:
-        """Get CLE data for a component."""
+        """Get CLE data for a component.
+
+        Args:
+            uuid: Component UUID.
+
+        Returns:
+            The CLE document with lifecycle events and optional definitions.
+        """
         data = self._http.get_json(f"/component/{_validate_path_segment(uuid)}/cle")
         return _validate(CLE, data)
 
     def get_component_release_cle(self, uuid: str) -> CLE:
-        """Get CLE data for a component release."""
+        """Get CLE data for a component release.
+
+        Args:
+            uuid: Component release UUID.
+
+        Returns:
+            The CLE document with lifecycle events and optional definitions.
+        """
         data = self._http.get_json(f"/componentRelease/{_validate_path_segment(uuid)}/cle")
         return _validate(CLE, data)
 

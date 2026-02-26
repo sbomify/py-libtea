@@ -1,13 +1,14 @@
 """TEI parsing, .well-known/tea fetching, and endpoint selection."""
 
 import logging
+import warnings
 from functools import total_ordering
 
 import requests
 from pydantic import ValidationError
 
 from libtea._http import USER_AGENT
-from libtea.exceptions import TeaDiscoveryError
+from libtea.exceptions import TeaDiscoveryError, TeaInsecureTransportWarning
 from libtea.models import TeaEndpoint, TeaWellKnown, TeiType
 
 
@@ -176,6 +177,14 @@ def fetch_well_known(
     """
     if scheme not in ("http", "https"):
         raise TeaDiscoveryError(f"Invalid scheme: {scheme!r}. Must be 'http' or 'https'.")
+    if scheme == "http":
+        warnings.warn(
+            "Fetching .well-known/tea over plaintext HTTP. Use HTTPS in production.",
+            TeaInsecureTransportWarning,
+            stacklevel=2,
+        )
+    if port is not None and not (1 <= port <= 65535):
+        raise TeaDiscoveryError(f"Invalid port: {port}. Must be between 1 and 65535.")
     if not domain or not _is_valid_domain(domain):
         raise TeaDiscoveryError(f"Invalid domain: {domain!r}")
 

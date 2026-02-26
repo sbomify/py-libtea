@@ -340,6 +340,23 @@ class TestFromWellKnown:
             TeaClient.from_well_known("example.com")
 
     @responses.activate
+    def test_from_well_known_with_scheme_and_port(self):
+        responses.get(
+            "http://example.com:9080/.well-known/tea",
+            json={
+                "schemaVersion": 1,
+                "endpoints": [{"url": "http://api.example.com", "versions": ["0.3.0-beta.2"]}],
+            },
+        )
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            client = TeaClient.from_well_known("example.com", scheme="http", port=9080)
+        assert client is not None
+        client.close()
+
+    @responses.activate
     def test_from_well_known_passes_token(self, base_url):
         responses.get(
             "https://example.com/.well-known/tea",
@@ -491,6 +508,9 @@ class TestCLE:
         cle = client.get_product_cle(uuid)
         assert isinstance(cle, CLE)
         assert len(cle.events) == 1
+        assert cle.events[0].type == "released"
+        assert cle.events[0].version == "1.0.0"
+        assert cle.events[0].id == 1
 
     @responses.activate
     def test_get_product_release_cle(self, client, base_url):
@@ -498,6 +518,7 @@ class TestCLE:
         responses.get(f"{base_url}/productRelease/{uuid}/cle", json=_CLE_RESPONSE)
         cle = client.get_product_release_cle(uuid)
         assert isinstance(cle, CLE)
+        assert f"/productRelease/{uuid}/cle" in responses.calls[0].request.url
 
     @responses.activate
     def test_get_component_cle(self, client, base_url):
@@ -505,6 +526,7 @@ class TestCLE:
         responses.get(f"{base_url}/component/{uuid}/cle", json=_CLE_RESPONSE)
         cle = client.get_component_cle(uuid)
         assert isinstance(cle, CLE)
+        assert f"/component/{uuid}/cle" in responses.calls[0].request.url
 
     @responses.activate
     def test_get_component_release_cle(self, client, base_url):
@@ -512,3 +534,15 @@ class TestCLE:
         responses.get(f"{base_url}/componentRelease/{uuid}/cle", json=_CLE_RESPONSE)
         cle = client.get_component_release_cle(uuid)
         assert isinstance(cle, CLE)
+        assert f"/componentRelease/{uuid}/cle" in responses.calls[0].request.url
+
+    def test_get_product_cle_rejects_unsafe_uuid(self, client):
+        with pytest.raises(TeaValidationError, match="Invalid uuid"):
+            client.get_product_cle("../../etc/passwd")
+
+    @responses.activate
+    def test_get_product_cle_malformed_response_raises(self, client, base_url):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(f"{base_url}/product/{uuid}/cle", json={"bad": "data"})
+        with pytest.raises(TeaValidationError, match="Invalid CLE response"):
+            client.get_product_cle(uuid)
