@@ -465,3 +465,38 @@ class TestRetryConfig:
     def test_negative_retries_raises(self):
         with pytest.raises(ValueError, match="max_retries must be >= 0"):
             TeaHttpClient(base_url=BASE_URL, max_retries=-1)
+
+    def test_retry_after_header_ignored(self):
+        """P2-2: Server-controlled Retry-After must not be honored to prevent stalling."""
+        client = TeaHttpClient(base_url=BASE_URL)
+        adapter = client._session.get_adapter(BASE_URL)
+        assert adapter.max_retries.respect_retry_after_header is False
+        client.close()
+
+
+class TestSsrfProtection:
+    """P3-5: Download URL must not target private/internal networks."""
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://127.0.0.1/file.xml",
+            "http://10.0.0.1/file.xml",
+            "http://172.16.0.1/file.xml",
+            "http://192.168.1.1/file.xml",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://0.0.0.0/file.xml",
+            "http://[::1]/file.xml",
+            "http://localhost/file.xml",
+            "http://localhost.localdomain/file.xml",
+        ],
+    )
+    def test_rejects_internal_urls(self, url):
+        with pytest.raises(TeaValidationError):
+            _validate_download_url(url)
+
+    def test_accepts_public_url(self):
+        _validate_download_url("https://cdn.example.com/sbom.json")
+
+    def test_accepts_public_ip(self):
+        _validate_download_url("https://8.8.8.8/file.xml")

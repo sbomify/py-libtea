@@ -12,6 +12,23 @@ runner = CliRunner()
 BASE_URL = "https://api.example.com/tea/v1"
 
 
+class TestCliEntryPoint:
+    """P0-1: Entry point wrapper handles missing typer gracefully."""
+
+    def test_entry_point_importable(self):
+        from libtea._cli_entry import main
+
+        assert callable(main)
+
+    def test_entry_point_registered_in_pyproject(self):
+        """Verify pyproject.toml points to the wrapper, not directly to cli:app."""
+        from pathlib import Path
+
+        pyproject = Path(__file__).parent.parent / "pyproject.toml"
+        content = pyproject.read_text()
+        assert 'tea-cli = "libtea._cli_entry:main"' in content
+
+
 class TestCLINoServer:
     def test_no_base_url_or_domain_errors(self):
         result = runner.invoke(app, ["get-product", "some-uuid"])
@@ -261,6 +278,8 @@ class TestCLICommands:
         assert len(data) == 1
         assert data[0]["productRelease"]["uuid"] == uuid
         assert len(data[0]["components"]) == 1
+        assert "discovery" in data[0]
+        assert data[0]["discovery"]["productReleaseUuid"] == uuid
 
     def test_error_output_goes_to_stderr(self):
         result = runner.invoke(app, ["get-product", "some-uuid"])
@@ -281,3 +300,120 @@ class TestCLIErrorPaths:
         responses.get(f"{BASE_URL}/discovery", status=404, json={"error": "OBJECT_UNKNOWN"})
         result = runner.invoke(app, ["discover", tei, "--base-url", BASE_URL])
         assert result.exit_code == 1
+
+
+class TestCLIDiscoveryPath:
+    """P2-3: Tests for --domain discovery path."""
+
+    @responses.activate
+    def test_domain_discovery(self):
+        responses.get(
+            "https://example.com/.well-known/tea",
+            json={
+                "schemaVersion": 1,
+                "endpoints": [{"url": "https://api.example.com", "versions": ["0.3.0-beta.2"]}],
+            },
+        )
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            "https://api.example.com/v0.3.0-beta.2/product/" + uuid,
+            json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+        )
+        result = runner.invoke(app, ["get-product", uuid, "--domain", "example.com"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["name"] == "Test Product"
+
+    @responses.activate
+    def test_domain_discovery_with_http(self):
+        responses.get(
+            "http://example.com/.well-known/tea",
+            json={
+                "schemaVersion": 1,
+                "endpoints": [{"url": "http://api.example.com", "versions": ["0.3.0-beta.2"]}],
+            },
+        )
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            "http://api.example.com/v0.3.0-beta.2/product/" + uuid,
+            json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+        )
+        result = runner.invoke(app, ["get-product", uuid, "--domain", "example.com", "--use-http"])
+        assert result.exit_code == 0
+
+
+class TestCLIAuthOptions:
+    """P1-4: Tests for --auth and mTLS CLI options."""
+
+    @responses.activate
+    def test_basic_auth_option(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/product/{uuid}",
+            json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+        )
+        result = runner.invoke(app, ["get-product", uuid, "--base-url", BASE_URL, "--auth", "user:pass"])
+        assert result.exit_code == 0
+        assert responses.calls[0].request.headers["Authorization"].startswith("Basic ")
+
+    def test_invalid_auth_format(self):
+        result = runner.invoke(app, ["get-product", "some-uuid", "--base-url", BASE_URL, "--auth", "nopassword"])
+        assert result.exit_code == 1
+
+    def test_client_key_without_cert_errors(self):
+        result = runner.invoke(
+            app, ["get-product", "some-uuid", "--base-url", BASE_URL, "--client-key", "/tmp/key.pem"]
+        )
+        assert result.exit_code == 1
+
+    def test_client_cert_without_key_errors(self):
+        result = runner.invoke(
+            app, ["get-product", "some-uuid", "--base-url", BASE_URL, "--client-cert", "/tmp/cert.pem"]
+        )
+        assert result.exit_code == 1
+
+
+class TestCLIInspectOptions:
+    """P3-7: Tests for inspect --max-components."""
+
+    @responses.activate
+    def test_inspect_max_components_truncates(self):
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        uuid = "abc-123"
+        comp_uuids = [f"comp-{i}" for i in range(5)]
+        responses.get(
+            f"{BASE_URL}/discovery",
+            json=[
+                {
+                    "productReleaseUuid": uuid,
+                    "servers": [{"rootUrl": "https://tea.example.com", "versions": ["1.0.0"]}],
+                }
+            ],
+        )
+        responses.get(
+            f"{BASE_URL}/productRelease/{uuid}",
+            json={
+                "uuid": uuid,
+                "version": "1.0.0",
+                "createdDate": "2024-01-01T00:00:00Z",
+                "components": [{"uuid": c} for c in comp_uuids],
+            },
+        )
+        for c in comp_uuids[:2]:
+            responses.get(
+                f"{BASE_URL}/componentRelease/{c}",
+                json={
+                    "release": {"uuid": c, "version": "1.0.0", "createdDate": "2024-01-01T00:00:00Z"},
+                    "latestCollection": {"uuid": c, "version": 1, "artifacts": []},
+                },
+            )
+        result = runner.invoke(app, ["inspect", tei, "--max-components", "2", "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        # CliRunner mixes stdout/stderr; extract JSON before the warning line
+        output = result.output
+        json_end = output.rfind("]") + 1
+        data = json.loads(output[:json_end])
+        assert len(data[0]["components"]) == 2
+        assert data[0]["truncated"] is True
+        assert data[0]["totalComponents"] == 5
+        assert "Warning: truncated" in output

@@ -1,6 +1,7 @@
 """Internal HTTP client wrapping requests with TEA error handling."""
 
 import hashlib
+import ipaddress
 import logging
 import warnings
 from dataclasses import dataclass
@@ -93,13 +94,27 @@ def _build_hashers(algorithms: list[str]) -> dict[str, Any]:
     return hashers
 
 
+_BLOCKED_HOSTNAMES = frozenset({"localhost", "localhost.localdomain"})
+
+
 def _validate_download_url(url: str) -> None:
-    """Reject download URLs that use non-HTTP schemes."""
+    """Reject download URLs that use non-HTTP schemes or target internal networks."""
     parsed = urlparse(url)
     if parsed.scheme in _BLOCKED_SCHEMES or parsed.scheme not in ("http", "https"):
         raise TeaValidationError(f"Artifact download URL must use http or https scheme, got {parsed.scheme!r}")
     if not parsed.hostname:
         raise TeaValidationError(f"Artifact download URL must include a hostname: {url!r}")
+
+    hostname = parsed.hostname.lower()
+    if hostname in _BLOCKED_HOSTNAMES:
+        raise TeaValidationError(f"Artifact download URL must not target internal hosts: {hostname!r}")
+
+    try:
+        addr = ipaddress.ip_address(hostname)
+        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+            raise TeaValidationError(f"Artifact download URL must not target private/internal IP: {hostname!r}")
+    except ValueError:
+        pass  # Not an IP literal — hostname is fine
 
 
 class TeaHttpClient:
@@ -166,6 +181,7 @@ class TeaHttpClient:
             status_forcelist=(500, 502, 503, 504),
             allowed_methods=["GET", "HEAD", "OPTIONS"],
             raise_on_status=False,
+            respect_retry_after_header=False,
         )
         adapter = HTTPAdapter(max_retries=retry)
         self._session.mount("https://", adapter)

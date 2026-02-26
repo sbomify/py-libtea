@@ -2,8 +2,9 @@ import pytest
 import requests
 import responses
 from pydantic import ValidationError
+from semver import Version as SemVer
 
-from libtea.discovery import _is_valid_domain, _SemVer, fetch_well_known, parse_tei, select_endpoint
+from libtea.discovery import _is_valid_domain, fetch_well_known, parse_tei, select_endpoint
 from libtea.exceptions import TeaDiscoveryError
 from libtea.models import DiscoveryInfo, TeaEndpoint, TeaWellKnown, TeiType
 
@@ -410,30 +411,30 @@ class TestSemVer:
     """Tests verifying our usage patterns with the semver library."""
 
     def test_parse_basic(self):
-        v = _SemVer.parse("1.2.3")
+        v = SemVer.parse("1.2.3")
         assert v.major == 1
         assert v.minor == 2
         assert v.patch == 3
         assert v.prerelease is None
 
     def test_parse_with_prerelease(self):
-        v = _SemVer.parse("0.3.0-beta.2")
+        v = SemVer.parse("0.3.0-beta.2")
         assert v.major == 0
         assert v.minor == 3
         assert v.patch == 0
         assert v.prerelease == "beta.2"
 
     def test_ordering_major(self):
-        assert _SemVer.parse("1.0.0") < _SemVer.parse("2.0.0")
+        assert SemVer.parse("1.0.0") < SemVer.parse("2.0.0")
 
     def test_ordering_minor(self):
-        assert _SemVer.parse("1.0.0") < _SemVer.parse("1.1.0")
+        assert SemVer.parse("1.0.0") < SemVer.parse("1.1.0")
 
     def test_ordering_patch(self):
-        assert _SemVer.parse("1.0.0") < _SemVer.parse("1.0.1")
+        assert SemVer.parse("1.0.0") < SemVer.parse("1.0.1")
 
     def test_prerelease_lower_than_release(self):
-        assert _SemVer.parse("1.0.0-alpha") < _SemVer.parse("1.0.0")
+        assert SemVer.parse("1.0.0-alpha") < SemVer.parse("1.0.0")
 
     def test_prerelease_ordering(self):
         """SemVer spec example: 1.0.0-alpha < 1.0.0-alpha.1 < ... < 1.0.0"""
@@ -447,25 +448,25 @@ class TestSemVer:
             "1.0.0-rc.1",
             "1.0.0",
         ]
-        parsed = [_SemVer.parse(v) for v in versions]
+        parsed = [SemVer.parse(v) for v in versions]
         for i in range(len(parsed) - 1):
             assert parsed[i] < parsed[i + 1], f"{versions[i]} should be < {versions[i + 1]}"
 
     def test_numeric_prerelease_less_than_alpha(self):
-        assert _SemVer.parse("1.0.0-1") < _SemVer.parse("1.0.0-alpha")
+        assert SemVer.parse("1.0.0-1") < SemVer.parse("1.0.0-alpha")
 
     def test_invalid_semver_raises(self):
         with pytest.raises(ValueError):
-            _SemVer.parse("not-a-version")
+            SemVer.parse("not-a-version")
 
     def test_two_part_version_rejected(self):
         with pytest.raises(ValueError):
-            _SemVer.parse("1.0")
+            SemVer.parse("1.0")
 
     def test_single_number_rejected(self):
         with pytest.raises(ValueError):
-            _SemVer.parse("1")
+            SemVer.parse("1")
 
     def test_equality(self):
-        assert _SemVer.parse("1.0.0") == _SemVer.parse("1.0.0")
-        assert _SemVer.parse("1.0.0-beta.2") == _SemVer.parse("1.0.0-beta.2")
+        assert SemVer.parse("1.0.0") == SemVer.parse("1.0.0")
+        assert SemVer.parse("1.0.0-beta.2") == SemVer.parse("1.0.0-beta.2")
