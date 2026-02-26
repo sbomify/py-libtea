@@ -4,6 +4,7 @@ import responses
 from libtea.client import TeaClient, _validate_path_segment
 from libtea.exceptions import TeaDiscoveryError, TeaValidationError
 from libtea.models import (
+    CLE,
     Artifact,
     Collection,
     Component,
@@ -467,3 +468,47 @@ class TestContextManager:
         with TeaClient(base_url=base_url) as client:
             component = client.get_component("c1")
             assert component.name == "C1"
+
+
+_CLE_RESPONSE = {
+    "events": [
+        {
+            "id": 1,
+            "type": "released",
+            "effective": "2024-01-01T00:00:00Z",
+            "published": "2024-01-01T00:00:00Z",
+            "version": "1.0.0",
+        }
+    ]
+}
+
+
+class TestCLE:
+    @responses.activate
+    def test_get_product_cle(self, client, base_url):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(f"{base_url}/product/{uuid}/cle", json=_CLE_RESPONSE)
+        cle = client.get_product_cle(uuid)
+        assert isinstance(cle, CLE)
+        assert len(cle.events) == 1
+
+    @responses.activate
+    def test_get_product_release_cle(self, client, base_url):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(f"{base_url}/productRelease/{uuid}/cle", json=_CLE_RESPONSE)
+        cle = client.get_product_release_cle(uuid)
+        assert isinstance(cle, CLE)
+
+    @responses.activate
+    def test_get_component_cle(self, client, base_url):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(f"{base_url}/component/{uuid}/cle", json=_CLE_RESPONSE)
+        cle = client.get_component_cle(uuid)
+        assert isinstance(cle, CLE)
+
+    @responses.activate
+    def test_get_component_release_cle(self, client, base_url):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(f"{base_url}/componentRelease/{uuid}/cle", json=_CLE_RESPONSE)
+        cle = client.get_component_release_cle(uuid)
+        assert isinstance(cle, CLE)

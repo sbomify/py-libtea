@@ -12,6 +12,7 @@ from libtea._http import TeaHttpClient
 from libtea.discovery import fetch_well_known, select_endpoint
 from libtea.exceptions import TeaChecksumError, TeaValidationError
 from libtea.models import (
+    CLE,
     Artifact,
     Checksum,
     Collection,
@@ -300,6 +301,28 @@ class TeaClient:
         """
         data = self._http.get_json(f"/componentRelease/{_validate_path_segment(uuid)}/collection/{version}")
         return _validate(Collection, data)
+
+    # --- CLE ---
+
+    def get_product_cle(self, uuid: str) -> CLE:
+        """Get CLE (Common Lifecycle Enumeration) data for a product."""
+        data = self._http.get_json(f"/product/{_validate_path_segment(uuid)}/cle")
+        return _validate(CLE, data)
+
+    def get_product_release_cle(self, uuid: str) -> CLE:
+        """Get CLE data for a product release."""
+        data = self._http.get_json(f"/productRelease/{_validate_path_segment(uuid)}/cle")
+        return _validate(CLE, data)
+
+    def get_component_cle(self, uuid: str) -> CLE:
+        """Get CLE data for a component."""
+        data = self._http.get_json(f"/component/{_validate_path_segment(uuid)}/cle")
+        return _validate(CLE, data)
+
+    def get_component_release_cle(self, uuid: str) -> CLE:
+        """Get CLE data for a component release."""
+        data = self._http.get_json(f"/componentRelease/{_validate_path_segment(uuid)}/cle")
+        return _validate(CLE, data)
 
     # --- Artifacts ---
 
