@@ -135,6 +135,10 @@ class TeaHttpClient:
             raise ValueError("Cannot use both token and basic_auth.")
         if parsed.scheme == "http" and token:
             raise ValueError("Cannot use bearer token with plaintext HTTP. Use https:// or remove the token.")
+        if parsed.scheme == "http" and basic_auth:
+            raise ValueError("Cannot use basic auth with plaintext HTTP. Use https:// or remove basic_auth.")
+        if max_retries < 0:
+            raise ValueError(f"max_retries must be >= 0, got {max_retries}")
         if parsed.scheme == "http":
             warnings.warn(
                 "Using plaintext HTTP is insecure. Use HTTPS in production.",
@@ -251,6 +255,7 @@ class TeaHttpClient:
 
     def close(self) -> None:
         self._session.headers.pop("authorization", None)
+        self._session.auth = None
         self._session.close()
 
     def __enter__(self) -> Self:

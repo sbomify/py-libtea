@@ -84,8 +84,18 @@ class TeaClient:
         basic_auth: tuple[str, str] | None = None,
         timeout: float = 30.0,
         mtls: MtlsConfig | None = None,
+        max_retries: int = 3,
+        backoff_factor: float = 0.5,
     ):
-        self._http = TeaHttpClient(base_url=base_url, token=token, basic_auth=basic_auth, timeout=timeout, mtls=mtls)
+        self._http = TeaHttpClient(
+            base_url=base_url,
+            token=token,
+            basic_auth=basic_auth,
+            timeout=timeout,
+            mtls=mtls,
+            max_retries=max_retries,
+            backoff_factor=backoff_factor,
+        )
 
     @classmethod
     def from_well_known(
@@ -99,12 +109,22 @@ class TeaClient:
         scheme: str = "https",
         port: int | None = None,
         mtls: MtlsConfig | None = None,
+        max_retries: int = 3,
+        backoff_factor: float = 0.5,
     ) -> Self:
         """Create a client by discovering the TEA endpoint from a domain's .well-known/tea."""
         well_known = fetch_well_known(domain, timeout=timeout, scheme=scheme, port=port)
         endpoint = select_endpoint(well_known, version)
         base_url = f"{endpoint.url.rstrip('/')}/v{version}"
-        return cls(base_url=base_url, token=token, basic_auth=basic_auth, timeout=timeout, mtls=mtls)
+        return cls(
+            base_url=base_url,
+            token=token,
+            basic_auth=basic_auth,
+            timeout=timeout,
+            mtls=mtls,
+            max_retries=max_retries,
+            backoff_factor=backoff_factor,
+        )
 
     # --- Discovery ---
 

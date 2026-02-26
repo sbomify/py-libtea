@@ -175,6 +175,109 @@ class TestCLICommands:
         result = runner.invoke(app, ["get-collection", uuid, "--component", "--base-url", BASE_URL])
         assert result.exit_code == 0
 
+    @responses.activate
+    def test_get_collection_component_with_version(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/componentRelease/{uuid}/collection/3",
+            json={"uuid": uuid, "version": 3, "artifacts": []},
+        )
+        result = runner.invoke(app, ["get-collection", uuid, "--component", "--version", "3", "--base-url", BASE_URL])
+        assert result.exit_code == 0
+
+    @responses.activate
+    def test_download(self, tmp_path):
+        artifact_url = "https://cdn.example.com/sbom.json"
+        responses.get(artifact_url, body=b'{"bomFormat": "CycloneDX"}')
+        dest = tmp_path / "sbom.json"
+        result = runner.invoke(app, ["download", artifact_url, str(dest), "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        assert dest.exists()
+
+    @responses.activate
+    def test_download_with_checksum(self, tmp_path):
+        import hashlib
+
+        content = b'{"bomFormat": "CycloneDX"}'
+        artifact_url = "https://cdn.example.com/sbom.json"
+        responses.get(artifact_url, body=content)
+        sha256 = hashlib.sha256(content).hexdigest()
+        dest = tmp_path / "sbom.json"
+        result = runner.invoke(
+            app,
+            ["download", artifact_url, str(dest), "--checksum", f"SHA-256:{sha256}", "--base-url", BASE_URL],
+        )
+        assert result.exit_code == 0
+        assert dest.exists()
+
+    def test_download_invalid_checksum_format(self, tmp_path):
+        dest = tmp_path / "sbom.json"
+        result = runner.invoke(
+            app, ["download", "https://cdn.example.com/f", str(dest), "--checksum", "badhash", "--base-url", BASE_URL]
+        )
+        assert result.exit_code == 1
+
+    def test_download_unknown_algorithm(self, tmp_path):
+        dest = tmp_path / "sbom.json"
+        result = runner.invoke(
+            app,
+            ["download", "https://cdn.example.com/f", str(dest), "--checksum", "BOGUS:abc123", "--base-url", BASE_URL],
+        )
+        assert result.exit_code == 1
+
+    @responses.activate
+    def test_inspect(self):
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        uuid = "abc-123"
+        comp_uuid = "comp-456"
+        responses.get(
+            f"{BASE_URL}/discovery",
+            json=[
+                {
+                    "productReleaseUuid": uuid,
+                    "servers": [{"rootUrl": "https://tea.example.com", "versions": ["1.0.0"]}],
+                }
+            ],
+        )
+        responses.get(
+            f"{BASE_URL}/productRelease/{uuid}",
+            json={
+                "uuid": uuid,
+                "version": "1.0.0",
+                "createdDate": "2024-01-01T00:00:00Z",
+                "components": [{"uuid": comp_uuid}],
+            },
+        )
+        responses.get(
+            f"{BASE_URL}/componentRelease/{comp_uuid}",
+            json={
+                "release": {"uuid": comp_uuid, "version": "1.0.0", "createdDate": "2024-01-01T00:00:00Z"},
+                "latestCollection": {"uuid": comp_uuid, "version": 1, "artifacts": []},
+            },
+        )
+        result = runner.invoke(app, ["inspect", tei, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["productRelease"]["uuid"] == uuid
+        assert len(data[0]["components"]) == 1
+
     def test_error_output_goes_to_stderr(self):
         result = runner.invoke(app, ["get-product", "some-uuid"])
+        assert result.exit_code == 1
+
+
+class TestCLIErrorPaths:
+    @responses.activate
+    def test_get_product_server_error(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(f"{BASE_URL}/product/{uuid}", status=500)
+        result = runner.invoke(app, ["get-product", uuid, "--base-url", BASE_URL])
+        assert result.exit_code == 1
+
+    @responses.activate
+    def test_discover_not_found(self):
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        responses.get(f"{BASE_URL}/discovery", status=404, json={"error": "OBJECT_UNKNOWN"})
+        result = runner.invoke(app, ["discover", tei, "--base-url", BASE_URL])
         assert result.exit_code == 1

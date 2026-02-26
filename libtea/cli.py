@@ -3,7 +3,7 @@
 import json
 import sys
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Any, NoReturn, Optional
 
 try:
     import typer
@@ -46,7 +46,7 @@ def _build_client(
     return TeaClient.from_well_known(domain, token=token, timeout=timeout, scheme=scheme, port=port)
 
 
-def _output(data) -> None:
+def _output(data: Any) -> None:
     """Print JSON to stdout."""
     if hasattr(data, "model_dump"):
         data = data.model_dump(mode="json", by_alias=True)
@@ -56,7 +56,7 @@ def _output(data) -> None:
     print()
 
 
-def _error(message: str) -> None:
+def _error(message: str) -> NoReturn:
     """Print error to stderr and exit."""
     print(f"Error: {message}", file=sys.stderr)
     raise typer.Exit(1)
@@ -245,7 +245,13 @@ def download(
             if ":" not in cs:
                 _error(f"Invalid checksum format: {cs!r}. Expected ALG:VALUE (e.g. SHA-256:abcdef...)")
             alg, value = cs.split(":", 1)
-            checksums.append(Checksum(algorithm_type=ChecksumAlgorithm(alg), algorithm_value=value))
+            try:
+                alg_enum = ChecksumAlgorithm(alg)
+            except ValueError:
+                _error(
+                    f"Unknown checksum algorithm: {alg!r}. Supported: {', '.join(e.value for e in ChecksumAlgorithm)}"
+                )
+            checksums.append(Checksum(algorithm_type=alg_enum, algorithm_value=value))
 
     try:
         with _build_client(base_url, token, domain, timeout, use_http, port) as client:

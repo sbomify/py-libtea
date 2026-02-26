@@ -399,13 +399,23 @@ class TestBasicAuth:
         with pytest.raises(ValueError, match="Cannot use both"):
             TeaHttpClient(base_url=BASE_URL, token="tok", basic_auth=("user", "pass"))
 
+    def test_basic_auth_over_http_raises(self):
+        with pytest.raises(ValueError, match="Cannot use basic auth with plaintext HTTP"):
+            TeaHttpClient(base_url="http://example.com/api", basic_auth=("user", "pass"))
+
+    def test_close_clears_auth(self):
+        client = TeaHttpClient(base_url=BASE_URL, basic_auth=("user", "pass"))
+        assert client._session.auth is not None
+        client.close()
+        assert client._session.auth is None
+
     @responses.activate
-    def test_basic_auth_not_sent_to_download(self):
+    def test_basic_auth_not_sent_to_download(self, tmp_path):
         """Basic auth must NOT leak to artifact download URLs."""
         artifact_url = "https://cdn.example.com/sbom.xml"
         responses.get(artifact_url, body=b"content")
         with TeaHttpClient(base_url=BASE_URL, basic_auth=("user", "pass")) as client:
-            client.download_with_hashes(url=artifact_url, dest=Path("/tmp/test_dl.xml"))
+            client.download_with_hashes(url=artifact_url, dest=tmp_path / "test_dl.xml")
         assert "Authorization" not in responses.calls[0].request.headers
 
 
@@ -451,3 +461,7 @@ class TestRetryConfig:
         adapter = client._session.get_adapter(BASE_URL)
         assert adapter.max_retries.total == 0
         client.close()
+
+    def test_negative_retries_raises(self):
+        with pytest.raises(ValueError, match="max_retries must be >= 0"):
+            TeaHttpClient(base_url=BASE_URL, max_retries=-1)
