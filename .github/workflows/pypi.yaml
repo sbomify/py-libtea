@@ -25,8 +25,7 @@ jobs:
         id: version
         run: |
           BASE_VERSION=$(grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          DEV_VERSION="${BASE_VERSION}.dev${GITHUB_RUN_NUMBER}+g${SHORT_SHA}"
+          DEV_VERSION="${BASE_VERSION}.dev${GITHUB_RUN_NUMBER}"
           echo "version=${DEV_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Set dev version
