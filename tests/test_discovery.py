@@ -280,6 +280,16 @@ class TestSelectEndpoint:
             TeaEndpoint(url="https://api.example.com", versions=[])
 
 
+def test_discovery_info_rejects_empty_servers():
+    """Spec requires minItems: 1 for servers array."""
+    from pydantic import ValidationError
+
+    from libtea.models import DiscoveryInfo
+
+    with pytest.raises(ValidationError):
+        DiscoveryInfo(product_release_uuid="d4d9f54a-abcf-11ee-ac79-1a52914d44b1", servers=[])
+
+
 class TestSemVer:
     def test_parse_basic(self):
         v = _SemVer("1.2.3")

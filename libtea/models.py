@@ -327,4 +327,4 @@ class DiscoveryInfo(_TeaModel):
     """Discovery result mapping a TEI to a product release and its servers."""
 
     product_release_uuid: str
-    servers: list[TeaServerInfo]
+    servers: list[TeaServerInfo] = Field(min_length=1)
