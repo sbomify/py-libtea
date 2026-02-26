@@ -1,6 +1,6 @@
 [project]
 name = "libtea"
-version = "0.1.0"
+version = "0.1.1"
 description = "Python client library for the Transparency Exchange API (TEA)"
 authors = [{ name = "sbomify", email = "hello@sbomify.com" }]
 requires-python = ">=3.11"
@@ -19,7 +19,10 @@ classifiers = [
     "Topic :: Security",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-dependencies = []
+dependencies = [
+    "requests>=2.32.0,<3",
+    "pydantic>=2.12.0,<3",
+]
 
 [project.urls]
 Homepage = "https://github.com/sbomify/py-libtea"
@@ -30,10 +33,11 @@ Changelog = "https://github.com/sbomify/py-libtea/releases"
 
 [dependency-groups]
 dev = [
-    "pytest>=8.0.0,<9",
-    "pytest-cov>=4.1.0,<5",
-    "ruff>=0.12.0,<0.13",
-    "pre-commit>=4.2.0,<5",
+    "pytest>=9.0.0,<10",
+    "pytest-cov>=7.0.0,<8",
+    "ruff>=0.15.0,<0.16",
+    "pre-commit>=4.5.0,<5",
+    "responses>=0.26.0,<1",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -46,7 +50,7 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "--cov=libtea --cov-report=term-missing"
+addopts = "--cov=libtea --cov-report=term-missing --cov-branch"
 
 [tool.ruff]
 line-length = 120
