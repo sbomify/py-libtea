@@ -2,6 +2,7 @@
 
 from importlib.metadata import version
 
+from libtea._http import MtlsConfig
 from libtea.client import TEA_SPEC_VERSION, TeaClient
 from libtea.exceptions import (
     TeaAuthenticationError,
@@ -51,6 +52,7 @@ from libtea.models import (
 __version__ = version("libtea")
 __all__ = [
     # Client
+    "MtlsConfig",
     "TEA_SPEC_VERSION",
     "TeaClient",
     # Exceptions

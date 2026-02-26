@@ -8,7 +8,7 @@ from typing import Any, Self, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from libtea._http import TeaHttpClient
+from libtea._http import MtlsConfig, TeaHttpClient
 from libtea.discovery import fetch_well_known, select_endpoint
 from libtea.exceptions import TeaChecksumError, TeaValidationError
 from libtea.models import (
@@ -71,7 +71,9 @@ class TeaClient:
     Args:
         base_url: TEA server base URL (e.g. ``https://tea.example.com/v1``).
         token: Optional bearer token for authentication.
+        basic_auth: Optional (username, password) tuple for HTTP Basic auth.
         timeout: Request timeout in seconds.
+        mtls: Optional mutual TLS configuration.
     """
 
     def __init__(
@@ -79,9 +81,11 @@ class TeaClient:
         base_url: str,
         *,
         token: str | None = None,
+        basic_auth: tuple[str, str] | None = None,
         timeout: float = 30.0,
+        mtls: MtlsConfig | None = None,
     ):
-        self._http = TeaHttpClient(base_url=base_url, token=token, timeout=timeout)
+        self._http = TeaHttpClient(base_url=base_url, token=token, basic_auth=basic_auth, timeout=timeout, mtls=mtls)
 
     @classmethod
     def from_well_known(
@@ -89,16 +93,18 @@ class TeaClient:
         domain: str,
         *,
         token: str | None = None,
+        basic_auth: tuple[str, str] | None = None,
         timeout: float = 30.0,
         version: str = TEA_SPEC_VERSION,
         scheme: str = "https",
         port: int | None = None,
+        mtls: MtlsConfig | None = None,
     ) -> Self:
         """Create a client by discovering the TEA endpoint from a domain's .well-known/tea."""
         well_known = fetch_well_known(domain, timeout=timeout, scheme=scheme, port=port)
         endpoint = select_endpoint(well_known, version)
         base_url = f"{endpoint.url.rstrip('/')}/v{version}"
-        return cls(base_url=base_url, token=token, timeout=timeout)
+        return cls(base_url=base_url, token=token, basic_auth=basic_auth, timeout=timeout, mtls=mtls)
 
     # --- Discovery ---
 

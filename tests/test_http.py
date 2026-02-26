@@ -1,12 +1,13 @@
 import hashlib
 import warnings
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 import requests
 import responses
 
-from libtea._http import TeaHttpClient, _build_hashers, _get_package_version, _validate_download_url
+from libtea._http import MtlsConfig, TeaHttpClient, _build_hashers, _get_package_version, _validate_download_url
 from libtea.exceptions import (
     TeaAuthenticationError,
     TeaChecksumError,
@@ -381,3 +382,72 @@ class TestEmptyBodyErrors:
         with pytest.raises(TeaNotFoundError) as exc_info:
             http_client.get_json("/product/abc")
         assert exc_info.value.error_type is None
+
+
+BASE_URL = "https://api.example.com/tea/v1"
+
+
+class TestBasicAuth:
+    @responses.activate
+    def test_basic_auth_sends_header(self):
+        responses.get(f"{BASE_URL}/test", json={"ok": True})
+        with TeaHttpClient(base_url=BASE_URL, basic_auth=("user", "pass")) as client:
+            client.get_json("/test")
+        assert responses.calls[0].request.headers["Authorization"].startswith("Basic ")
+
+    def test_token_and_basic_auth_raises(self):
+        with pytest.raises(ValueError, match="Cannot use both"):
+            TeaHttpClient(base_url=BASE_URL, token="tok", basic_auth=("user", "pass"))
+
+    @responses.activate
+    def test_basic_auth_not_sent_to_download(self):
+        """Basic auth must NOT leak to artifact download URLs."""
+        artifact_url = "https://cdn.example.com/sbom.xml"
+        responses.get(artifact_url, body=b"content")
+        with TeaHttpClient(base_url=BASE_URL, basic_auth=("user", "pass")) as client:
+            client.download_with_hashes(url=artifact_url, dest=Path("/tmp/test_dl.xml"))
+        assert "Authorization" not in responses.calls[0].request.headers
+
+
+class TestMtlsConfig:
+    def test_mtls_sets_cert_on_session(self):
+        mtls = MtlsConfig(client_cert=Path("/tmp/cert.pem"), client_key=Path("/tmp/key.pem"))
+        client = TeaHttpClient(base_url=BASE_URL, mtls=mtls)
+        assert client._session.cert == ("/tmp/cert.pem", "/tmp/key.pem")
+        client.close()
+
+    def test_mtls_with_ca_bundle(self):
+        mtls = MtlsConfig(
+            client_cert=Path("/tmp/cert.pem"), client_key=Path("/tmp/key.pem"), ca_bundle=Path("/tmp/ca.pem")
+        )
+        client = TeaHttpClient(base_url=BASE_URL, mtls=mtls)
+        assert client._session.verify == "/tmp/ca.pem"
+        client.close()
+
+    def test_mtls_without_ca_uses_default(self):
+        mtls = MtlsConfig(client_cert=Path("/tmp/cert.pem"), client_key=Path("/tmp/key.pem"))
+        client = TeaHttpClient(base_url=BASE_URL, mtls=mtls)
+        assert client._session.verify is True
+        client.close()
+
+
+class TestRetryConfig:
+    def test_default_retry_is_configured(self):
+        client = TeaHttpClient(base_url=BASE_URL)
+        adapter = client._session.get_adapter(BASE_URL)
+        assert adapter.max_retries.total == 3
+        assert 500 in adapter.max_retries.status_forcelist
+        client.close()
+
+    def test_custom_retry_config(self):
+        client = TeaHttpClient(base_url=BASE_URL, max_retries=5, backoff_factor=1.0)
+        adapter = client._session.get_adapter(BASE_URL)
+        assert adapter.max_retries.total == 5
+        assert adapter.max_retries.backoff_factor == 1.0
+        client.close()
+
+    def test_zero_retries_disables(self):
+        client = TeaHttpClient(base_url=BASE_URL, max_retries=0)
+        adapter = client._session.get_adapter(BASE_URL)
+        assert adapter.max_retries.total == 0
+        client.close()

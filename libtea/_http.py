@@ -3,12 +3,15 @@
 import hashlib
 import logging
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Self
 from urllib.parse import urlparse
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from libtea.exceptions import (
     TeaAuthenticationError,
@@ -55,6 +58,15 @@ def _get_package_version() -> str:
 USER_AGENT = f"py-libtea/{_get_package_version()} (hello@sbomify.com)"
 
 _BLOCKED_SCHEMES = frozenset({"file", "ftp", "gopher", "data"})
+
+
+@dataclass(frozen=True)
+class MtlsConfig:
+    """Client certificate configuration for mutual TLS."""
+
+    client_cert: Path
+    client_key: Path
+    ca_bundle: Path | None = None
 
 
 def _build_hashers(algorithms: list[str]) -> dict[str, Any]:
@@ -108,13 +120,19 @@ class TeaHttpClient:
         base_url: str,
         *,
         token: str | None = None,
+        basic_auth: tuple[str, str] | None = None,
         timeout: float = 30.0,
+        mtls: MtlsConfig | None = None,
+        max_retries: int = 3,
+        backoff_factor: float = 0.5,
     ):
         parsed = urlparse(base_url)
         if parsed.scheme not in ("http", "https"):
             raise ValueError(f"base_url must use http or https scheme, got {parsed.scheme!r}")
         if not parsed.hostname:
             raise ValueError(f"base_url must include a hostname: {base_url!r}")
+        if token and basic_auth:
+            raise ValueError("Cannot use both token and basic_auth.")
         if parsed.scheme == "http" and token:
             raise ValueError("Cannot use bearer token with plaintext HTTP. Use https:// or remove the token.")
         if parsed.scheme == "http":
@@ -127,8 +145,27 @@ class TeaHttpClient:
         self._timeout = timeout
         self._session = requests.Session()
         self._session.headers["user-agent"] = USER_AGENT
+
         if token:
             self._session.headers["authorization"] = f"Bearer {token}"
+        elif basic_auth:
+            self._session.auth = basic_auth
+
+        if mtls:
+            self._session.cert = (str(mtls.client_cert), str(mtls.client_key))
+            if mtls.ca_bundle:
+                self._session.verify = str(mtls.ca_bundle)
+
+        retry = Retry(
+            total=max_retries,
+            backoff_factor=backoff_factor,
+            status_forcelist=(500, 502, 503, 504),
+            allowed_methods=["GET", "HEAD", "OPTIONS"],
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+        self._session.mount("https://", adapter)
+        self._session.mount("http://", adapter)
 
     def get_json(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
         """Send GET request and return parsed JSON.
