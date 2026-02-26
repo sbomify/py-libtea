@@ -90,9 +90,11 @@ class TeaClient:
         token: str | None = None,
         timeout: float = 30.0,
         version: str = TEA_SPEC_VERSION,
+        scheme: str = "https",
+        port: int | None = None,
     ) -> Self:
         """Create a client by discovering the TEA endpoint from a domain's .well-known/tea."""
-        well_known = fetch_well_known(domain, timeout=timeout)
+        well_known = fetch_well_known(domain, timeout=timeout, scheme=scheme, port=port)
         endpoint = select_endpoint(well_known, version)
         base_url = f"{endpoint.url.rstrip('/')}/v{version}"
         return cls(base_url=base_url, token=token, timeout=timeout)

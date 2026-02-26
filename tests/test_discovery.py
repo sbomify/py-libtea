@@ -156,6 +156,46 @@ class TestFetchWellKnown:
             fetch_well_known("example.com")
 
     @responses.activate
+    def test_fetch_well_known_http_scheme(self):
+        responses.get(
+            "http://example.com/.well-known/tea",
+            json={"schemaVersion": 1, "endpoints": [{"url": "http://api.example.com", "versions": ["1.0.0"]}]},
+        )
+        wk = fetch_well_known("example.com", scheme="http")
+        assert len(wk.endpoints) == 1
+
+    @responses.activate
+    def test_fetch_well_known_custom_port(self):
+        responses.get(
+            "https://example.com:8443/.well-known/tea",
+            json={"schemaVersion": 1, "endpoints": [{"url": "https://api.example.com", "versions": ["1.0.0"]}]},
+        )
+        wk = fetch_well_known("example.com", port=8443)
+        assert len(wk.endpoints) == 1
+
+    @responses.activate
+    def test_fetch_well_known_default_port_omitted(self):
+        responses.get(
+            "https://example.com/.well-known/tea",
+            json={"schemaVersion": 1, "endpoints": [{"url": "https://api.example.com", "versions": ["1.0.0"]}]},
+        )
+        wk = fetch_well_known("example.com", port=443)
+        assert len(wk.endpoints) == 1
+
+    def test_fetch_well_known_invalid_scheme_raises(self):
+        with pytest.raises(TeaDiscoveryError, match="Invalid scheme"):
+            fetch_well_known("example.com", scheme="ftp")
+
+    @responses.activate
+    def test_fetch_well_known_http_with_custom_port(self):
+        responses.get(
+            "http://example.com:9080/.well-known/tea",
+            json={"schemaVersion": 1, "endpoints": [{"url": "http://api.example.com", "versions": ["1.0.0"]}]},
+        )
+        wk = fetch_well_known("example.com", scheme="http", port=9080)
+        assert len(wk.endpoints) == 1
+
+    @responses.activate
     def test_fetch_well_known_non_json_raises_discovery_error(self):
         responses.get("https://example.com/.well-known/tea", body="not json")
         with pytest.raises(TeaDiscoveryError, match="Invalid JSON"):

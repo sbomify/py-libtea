@@ -155,12 +155,17 @@ def parse_tei(tei: str) -> tuple[str, str, str]:
     return tei_type, domain, identifier
 
 
-def fetch_well_known(domain: str, *, timeout: float = 10.0) -> TeaWellKnown:
+def fetch_well_known(
+    domain: str, *, timeout: float = 10.0, scheme: str = "https", port: int | None = None
+) -> TeaWellKnown:
     """Fetch and parse the .well-known/tea discovery document from a domain.
 
     Args:
         domain: Domain name to resolve (e.g. ``tea.example.com``).
         timeout: HTTP request timeout in seconds.
+        scheme: URL scheme, ``"https"`` (default) or ``"http"``.
+        port: Optional port number. Default ports (443 for https, 80 for http)
+            are omitted from the URL.
 
     Returns:
         Parsed well-known document with endpoint list.
@@ -169,9 +174,17 @@ def fetch_well_known(domain: str, *, timeout: float = 10.0) -> TeaWellKnown:
         TeaDiscoveryError: If the domain is invalid, unreachable, or returns
             an invalid document.
     """
+    if scheme not in ("http", "https"):
+        raise TeaDiscoveryError(f"Invalid scheme: {scheme!r}. Must be 'http' or 'https'.")
     if not domain or not _is_valid_domain(domain):
         raise TeaDiscoveryError(f"Invalid domain: {domain!r}")
-    url = f"https://{domain}/.well-known/tea"
+
+    default_port = 80 if scheme == "http" else 443
+    resolved_port = port if port is not None else default_port
+    if resolved_port == default_port:
+        url = f"{scheme}://{domain}/.well-known/tea"
+    else:
+        url = f"{scheme}://{domain}:{resolved_port}/.well-known/tea"
     try:
         response = requests.get(url, timeout=timeout, allow_redirects=True, headers={"user-agent": USER_AGENT})
         if 300 <= response.status_code < 400:
