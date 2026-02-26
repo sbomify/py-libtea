@@ -304,15 +304,15 @@ class TestSelectEndpoint:
         ep = select_endpoint(wk, "1.0.0")
         assert ep.url == "https://none-priority.example.com"
 
-    def test_semver_matches_without_patch(self):
-        """Version '1.0' in endpoint should match client version '1.0.0'."""
+    def test_invalid_semver_two_part_version_skipped(self):
+        """Two-part version '1.0' is not valid SemVer and is silently skipped."""
         wk = self._make_well_known(
             [
                 {"url": "https://api.example.com", "versions": ["1.0"]},
             ]
         )
-        ep = select_endpoint(wk, "1.0.0")
-        assert ep.url == "https://api.example.com"
+        with pytest.raises(TeaDiscoveryError, match="No compatible endpoint"):
+            select_endpoint(wk, "1.0.0")
 
     def test_semver_matches_with_prerelease(self):
         """Pre-release versions match exactly."""
@@ -407,43 +407,36 @@ class TestIsValidDomain:
 
 
 class TestSemVer:
+    """Tests verifying our usage patterns with the semver library."""
+
     def test_parse_basic(self):
-        v = _SemVer("1.2.3")
+        v = _SemVer.parse("1.2.3")
         assert v.major == 1
         assert v.minor == 2
         assert v.patch == 3
-        assert v.pre == ()
-
-    def test_parse_without_patch(self):
-        v = _SemVer("1.0")
-        assert v.major == 1
-        assert v.minor == 0
-        assert v.patch == 0
+        assert v.prerelease is None
 
     def test_parse_with_prerelease(self):
-        v = _SemVer("0.3.0-beta.2")
+        v = _SemVer.parse("0.3.0-beta.2")
         assert v.major == 0
         assert v.minor == 3
         assert v.patch == 0
-        assert v.pre == ("beta", 2)
-
-    def test_equality_with_and_without_patch(self):
-        assert _SemVer("1.0") == _SemVer("1.0.0")
+        assert v.prerelease == "beta.2"
 
     def test_ordering_major(self):
-        assert _SemVer("1.0.0") < _SemVer("2.0.0")
+        assert _SemVer.parse("1.0.0") < _SemVer.parse("2.0.0")
 
     def test_ordering_minor(self):
-        assert _SemVer("1.0.0") < _SemVer("1.1.0")
+        assert _SemVer.parse("1.0.0") < _SemVer.parse("1.1.0")
 
     def test_ordering_patch(self):
-        assert _SemVer("1.0.0") < _SemVer("1.0.1")
+        assert _SemVer.parse("1.0.0") < _SemVer.parse("1.0.1")
 
     def test_prerelease_lower_than_release(self):
-        assert _SemVer("1.0.0-alpha") < _SemVer("1.0.0")
+        assert _SemVer.parse("1.0.0-alpha") < _SemVer.parse("1.0.0")
 
     def test_prerelease_ordering(self):
-        """SemVer spec example: 1.0.0-alpha < 1.0.0-alpha.1 < 1.0.0-alpha.beta < 1.0.0-beta < 1.0.0-beta.2 < 1.0.0-beta.11 < 1.0.0-rc.1 < 1.0.0"""
+        """SemVer spec example: 1.0.0-alpha < 1.0.0-alpha.1 < ... < 1.0.0"""
         versions = [
             "1.0.0-alpha",
             "1.0.0-alpha.1",
@@ -454,45 +447,25 @@ class TestSemVer:
             "1.0.0-rc.1",
             "1.0.0",
         ]
-        parsed = [_SemVer(v) for v in versions]
+        parsed = [_SemVer.parse(v) for v in versions]
         for i in range(len(parsed) - 1):
             assert parsed[i] < parsed[i + 1], f"{versions[i]} should be < {versions[i + 1]}"
 
     def test_numeric_prerelease_less_than_alpha(self):
-        """Numeric identifiers have lower precedence than alphanumeric."""
-        assert _SemVer("1.0.0-1") < _SemVer("1.0.0-alpha")
+        assert _SemVer.parse("1.0.0-1") < _SemVer.parse("1.0.0-alpha")
 
     def test_invalid_semver_raises(self):
-        with pytest.raises(ValueError, match="Invalid SemVer"):
-            _SemVer("not-a-version")
+        with pytest.raises(ValueError):
+            _SemVer.parse("not-a-version")
 
-    def test_four_part_version_rejected(self):
-        with pytest.raises(ValueError, match="Invalid SemVer"):
-            _SemVer("1.2.3.4")
+    def test_two_part_version_rejected(self):
+        with pytest.raises(ValueError):
+            _SemVer.parse("1.0")
 
     def test_single_number_rejected(self):
-        with pytest.raises(ValueError, match="Invalid SemVer"):
-            _SemVer("1")
+        with pytest.raises(ValueError):
+            _SemVer.parse("1")
 
-    def test_non_numeric_parts_rejected(self):
-        with pytest.raises(ValueError, match="Invalid SemVer"):
-            _SemVer("a.b.c")
-
-    def test_trailing_hyphen_rejected(self):
-        """A trailing hyphen is not valid SemVer (empty pre-release)."""
-        with pytest.raises(ValueError, match="Invalid SemVer"):
-            _SemVer("1.0.0-")
-
-    def test_invalid_prerelease_chars_rejected(self):
-        """SemVer 2.0.0 restricts pre-release to [0-9A-Za-z.-]."""
-        with pytest.raises(ValueError, match="Invalid SemVer"):
-            _SemVer("1.0.0-beta!@#")
-
-    def test_prerelease_with_spaces_rejected(self):
-        with pytest.raises(ValueError, match="Invalid SemVer"):
-            _SemVer("1.0.0-beta 1")
-
-    def test_str_repr(self):
-        v = _SemVer("1.2.3-beta.1")
-        assert str(v) == "1.2.3-beta.1"
-        assert repr(v) == "_SemVer('1.2.3-beta.1')"
+    def test_equality(self):
+        assert _SemVer.parse("1.0.0") == _SemVer.parse("1.0.0")
+        assert _SemVer.parse("1.0.0-beta.2") == _SemVer.parse("1.0.0-beta.2")

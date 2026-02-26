@@ -2,109 +2,14 @@
 
 import logging
 import warnings
-from functools import total_ordering
 
 import requests
 from pydantic import ValidationError
+from semver import Version as _SemVer
 
 from libtea._http import USER_AGENT
 from libtea.exceptions import TeaDiscoveryError, TeaInsecureTransportWarning
 from libtea.models import TeaEndpoint, TeaWellKnown, TeiType
-
-
-@total_ordering
-class _SemVer:
-    """Minimal SemVer 2.0.0 parser for version precedence comparison.
-
-    Implements comparison per https://semver.org/#spec-item-11:
-    - MAJOR.MINOR.PATCH compared numerically left-to-right
-    - Pre-release versions have lower precedence than the normal version
-    - Pre-release identifiers: numeric < alphanumeric, numeric compared as ints,
-      alphanumeric compared lexically; shorter tuple has lower precedence
-    """
-
-    __slots__ = ("major", "minor", "patch", "pre", "_raw")
-
-    _PRE_RELEASE_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-")
-
-    def __init__(self, version_str: str) -> None:
-        self._raw = version_str
-        # Split pre-release: "1.2.3-beta.2" -> "1.2.3", "beta.2"
-        if "-" in version_str:
-            ver_part, pre_part = version_str.split("-", 1)
-        else:
-            ver_part, pre_part = version_str, None
-
-        parts = ver_part.split(".")
-        if len(parts) < 2 or len(parts) > 3:
-            raise ValueError(f"Invalid SemVer string: {version_str!r}")
-        if not all(p.isdigit() for p in parts):
-            raise ValueError(f"Invalid SemVer string: {version_str!r}")
-
-        # Validate pre-release per SemVer spec item 9: [0-9A-Za-z.-] only, non-empty
-        if pre_part is not None:
-            if not pre_part or not all(c in _SemVer._PRE_RELEASE_CHARS for c in pre_part):
-                raise ValueError(f"Invalid SemVer string: {version_str!r}")
-
-        self.major = int(parts[0])
-        self.minor = int(parts[1])
-        self.patch = int(parts[2]) if len(parts) == 3 else 0
-        self.pre: tuple[int | str, ...] = tuple(_SemVer._parse_pre(pre_part)) if pre_part else ()
-
-    @staticmethod
-    def _parse_pre(pre_str: str) -> list[int | str]:
-        parts: list[int | str] = []
-        for part in pre_str.split("."):
-            parts.append(int(part) if part.isdigit() else part)
-        return parts
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, _SemVer):
-            return NotImplemented
-        return (self.major, self.minor, self.patch, self.pre) == (other.major, other.minor, other.patch, other.pre)
-
-    def __hash__(self) -> int:
-        return hash((self.major, self.minor, self.patch, self.pre))
-
-    def __lt__(self, other: object) -> bool:
-        if not isinstance(other, _SemVer):
-            return NotImplemented
-        if (self.major, self.minor, self.patch) != (other.major, other.minor, other.patch):
-            return (self.major, self.minor, self.patch) < (other.major, other.minor, other.patch)
-        # Pre-release has lower precedence than no pre-release
-        if self.pre and not other.pre:
-            return True
-        if not self.pre and other.pre:
-            return False
-        if not self.pre and not other.pre:
-            return False
-        # Compare pre-release identifiers per SemVer spec item 11.4
-        return _SemVer._compare_pre(self.pre, other.pre) < 0
-
-    @staticmethod
-    def _compare_pre(a: tuple[int | str, ...], b: tuple[int | str, ...]) -> int:
-        for ai, bi in zip(a, b):
-            if type(ai) is type(bi):
-                if ai < bi:  # type: ignore[operator]
-                    return -1
-                if ai > bi:  # type: ignore[operator]
-                    return 1
-            else:
-                # Numeric identifiers always have lower precedence than alphanumeric
-                return -1 if isinstance(ai, int) else 1
-        # Shorter set has lower precedence
-        if len(a) < len(b):
-            return -1
-        if len(a) > len(b):
-            return 1
-        return 0
-
-    def __repr__(self) -> str:
-        return f"_SemVer({self._raw!r})"
-
-    def __str__(self) -> str:
-        return self._raw
-
 
 logger = logging.getLogger("libtea")
 
@@ -240,16 +145,14 @@ def select_endpoint(well_known: TeaWellKnown, supported_version: str) -> TeaEndp
     Raises:
         TeaDiscoveryError: If no endpoint supports the requested version.
     """
-    target = _SemVer(supported_version)
+    target = _SemVer.parse(supported_version)
 
-    # For each endpoint, find the highest version matching the target via SemVer equality.
-    # This handles cases like "1.0" matching "1.0.0" (patch defaults to 0).
     candidates: list[tuple[_SemVer, TeaEndpoint]] = []
     for ep in well_known.endpoints:
         best_match: _SemVer | None = None
         for v_str in ep.versions:
             try:
-                v = _SemVer(v_str)
+                v = _SemVer.parse(v_str)
             except ValueError:
                 continue
             if v == target and (best_match is None or v > best_match):
