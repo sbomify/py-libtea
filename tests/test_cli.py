@@ -2,10 +2,14 @@
 
 import json
 
+import pytest
 import responses
-from typer.testing import CliRunner
 
-from libtea.cli import app
+typer = pytest.importorskip("typer", reason="typer not installed (install libtea[cli])")
+
+from typer.testing import CliRunner  # noqa: E402
+
+from libtea.cli import app  # noqa: E402
 
 runner = CliRunner()
 
