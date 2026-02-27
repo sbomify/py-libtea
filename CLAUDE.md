@@ -37,10 +37,12 @@ __init__.py          Public API re-exports (all models, exceptions, client, disc
 client.py            TeaClient — high-level consumer API, input validation, checksum verification
   ↓ uses
 _http.py             TeaHttpClient — low-level requests wrapper, auth, SSRF protection, streaming downloads
-discovery.py         TEI parsing, .well-known/tea fetching, SemVer endpoint selection
+                     Also: probe_endpoint() for endpoint failover, _validate_download_url() for SSRF guards
+discovery.py         TEI parsing, .well-known/tea fetching, SemVer endpoint selection, redirect SSRF protection
 models.py            Pydantic v2 models for all TEA domain objects (frozen, camelCase aliases)
 exceptions.py        Exception hierarchy (all inherit from TeaError)
 cli.py               typer CLI (optional dependency, thin wrapper over TeaClient)
+_cli_fmt.py          Rich output formatters for all CLI commands (tables, panels, escape helpers)
 _cli_entry.py        Entry point wrapper that handles missing typer gracefully
 ```
 
@@ -49,8 +51,12 @@ _cli_entry.py        Entry point wrapper that handles missing typer gracefully
 - `TeaClient` delegates all HTTP to `TeaHttpClient` — never calls `requests` directly
 - Bearer tokens are NOT sent to artifact download URLs (separate unauthenticated session prevents token leakage to CDNs)
 - Downloads follow redirects manually with SSRF validation at each hop
+- Discovery redirects are validated against internal networks (SSRF protection via `_validate_download_url`)
 - `_validate()` wraps Pydantic `ValidationError` into `TeaValidationError` so all client errors are `TeaError` subclasses
 - Endpoint failover: `from_well_known()` probes candidates in priority order, skipping unreachable ones
+- `probe_endpoint()` lives in `_http.py` (not `client.py`) to maintain the HTTP layer boundary
+- `_raise_for_status()` uses bounded reads (201 bytes) for error body snippets to avoid memory issues on streaming responses
+- CLI formatters in `_cli_fmt.py` escape all server-controlled strings with `rich.markup.escape()` to prevent Rich markup injection
 
 **Auth**: Bearer token, basic auth, and mTLS (via `MtlsConfig` dataclass) are mutually configurable. Token and basic_auth are mutually exclusive. HTTP (non-TLS) with credentials is rejected.
 
