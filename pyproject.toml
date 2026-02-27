@@ -48,7 +48,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["libtea"]
+packages = ["src/libtea"]
 
 [build-system]
 requires = ["hatchling"]
@@ -57,7 +57,7 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "--cov=libtea --cov-report=term-missing --cov-branch"
+addopts = "--cov=src/libtea --cov-report=term-missing --cov-branch"
 
 [tool.ruff]
 line-length = 120

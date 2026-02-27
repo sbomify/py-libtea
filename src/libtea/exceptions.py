@@ -81,3 +81,17 @@ class TeaInsecureTransportWarning(UserWarning):
     Triggered by :class:`~libtea.client.TeaClient` or :func:`~libtea.discovery.fetch_well_known`
     when the ``scheme`` is ``"http"``.
     """
+
+
+__all__ = [
+    "TeaAuthenticationError",
+    "TeaChecksumError",
+    "TeaConnectionError",
+    "TeaDiscoveryError",
+    "TeaError",
+    "TeaInsecureTransportWarning",
+    "TeaNotFoundError",
+    "TeaRequestError",
+    "TeaServerError",
+    "TeaValidationError",
+]

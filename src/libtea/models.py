@@ -491,3 +491,43 @@ class DiscoveryInfo(_TeaModel):
 
     product_release_uuid: str
     servers: list[TeaServerInfo] = Field(min_length=1)
+
+
+__all__ = [
+    # Enums
+    "ArtifactType",
+    "ChecksumAlgorithm",
+    "CLEEventType",
+    "CollectionBelongsTo",
+    "CollectionUpdateReasonType",
+    "ErrorType",
+    "IdentifierType",
+    "TeiType",
+    # Models
+    "Artifact",
+    "ArtifactFormat",
+    "CLE",
+    "CLEDefinitions",
+    "CLEEvent",
+    "CLESupportDefinition",
+    "CLEVersionSpecifier",
+    "Checksum",
+    "Collection",
+    "CollectionUpdateReason",
+    "Component",
+    "ComponentRef",
+    "ComponentReleaseWithCollection",
+    "DiscoveryInfo",
+    "Identifier",
+    "PaginatedProductReleaseResponse",
+    "PaginatedProductResponse",
+    "Product",
+    "ProductRelease",
+    "Release",
+    "ReleaseDistribution",
+    "TeaEndpoint",
+    "TeaServerInfo",
+    "TeaWellKnown",
+    # Helpers
+    "normalize_algorithm_name",
+]

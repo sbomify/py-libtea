@@ -11,8 +11,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 uv sync                                    # Install all dependencies
 uv run pytest                              # Run full test suite with coverage
-uv run pytest tests/test_client.py -v      # Run a single test file
-uv run pytest tests/test_http.py::TestSsrfProtection::test_rejects_cgnat_ip -v  # Single test
+uv run pytest tests/client/test_client.py -v      # Run a single test file
+uv run pytest tests/unit/test_security.py::TestSsrfProtection::test_rejects_cgnat_ip -v  # Single test
 uv run ruff check .                        # Lint
 uv run ruff format --check .               # Format check
 uv run ruff format .                       # Auto-format
@@ -21,7 +21,7 @@ uv build                                   # Build wheel and sdist
 
 ## Code Conventions
 
-- **Layout**: Flat package (`libtea/`), hatchling build backend
+- **Layout**: src/ layout (`src/libtea/`), hatchling build backend
 - **Python**: >=3.11 (enables `StrEnum`, `X | Y` union syntax)
 - **Line length**: 120, ruff rules: E, F, I
 - **Models**: Pydantic v2 with `frozen=True`, `extra="ignore"`, `alias_generator=to_camel`
@@ -34,10 +34,13 @@ The library has a layered design with strict separation of concerns:
 
 ```
 __init__.py          Public API re-exports (all models, exceptions, client, discovery)
-client.py            TeaClient — high-level consumer API, input validation, checksum verification
+client.py            TeaClient — high-level consumer API, checksum verification
   ↓ uses
-_http.py             TeaHttpClient — low-level requests wrapper, auth, SSRF protection, streaming downloads
-                     Also: probe_endpoint() for endpoint failover, _validate_download_url() for SSRF guards
+_validation.py       Input validation helpers (path segments, page size/offset, Pydantic wrappers)
+_http.py             TeaHttpClient — low-level requests wrapper, auth, streaming downloads
+                     Also: probe_endpoint() for endpoint failover
+_security.py         SSRF protection (_validate_download_url, DNS rebinding checks, internal IP detection)
+_hashing.py          Checksum hash builders (SHA-*, BLAKE2b-*, MD5)
 discovery.py         TEI parsing, .well-known/tea fetching, SemVer endpoint selection, redirect SSRF protection
 models.py            Pydantic v2 models for all TEA domain objects (frozen, camelCase aliases)
 exceptions.py        Exception hierarchy (all inherit from TeaError)
@@ -51,8 +54,8 @@ _cli_entry.py        Entry point wrapper that handles missing typer gracefully
 - `TeaClient` delegates all HTTP to `TeaHttpClient` — never calls `requests` directly
 - Bearer tokens are NOT sent to artifact download URLs (separate unauthenticated session prevents token leakage to CDNs)
 - Downloads follow redirects manually with SSRF validation at each hop
-- Discovery redirects are validated against internal networks (SSRF protection via `_validate_download_url`)
-- `_validate()` wraps Pydantic `ValidationError` into `TeaValidationError` so all client errors are `TeaError` subclasses
+- Discovery redirects are validated against internal networks (SSRF protection via `_security._validate_download_url`)
+- `_validation._validate()` wraps Pydantic `ValidationError` into `TeaValidationError` so all client errors are `TeaError` subclasses
 - Endpoint failover: `from_well_known()` probes candidates in priority order, skipping unreachable ones
 - `probe_endpoint()` lives in `_http.py` (not `client.py`) to maintain the HTTP layer boundary
 - `_raise_for_status()` uses bounded reads (201 bytes) for error body snippets to avoid memory issues on streaming responses

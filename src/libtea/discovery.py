@@ -14,7 +14,8 @@ import requests
 from pydantic import ValidationError
 from semver import Version as _SemVer
 
-from libtea._http import USER_AGENT, MtlsConfig, _validate_download_url
+from libtea._http import USER_AGENT, MtlsConfig
+from libtea._security import _validate_download_url
 from libtea.exceptions import TeaDiscoveryError, TeaInsecureTransportWarning, TeaValidationError
 from libtea.models import TeaEndpoint, TeaWellKnown, TeiType
 
@@ -235,3 +236,11 @@ def select_endpoint(well_known: TeaWellKnown, supported_version: str) -> TeaEndp
         TeaDiscoveryError: If no endpoint supports the requested version.
     """
     return select_endpoints(well_known, supported_version)[0]
+
+
+__all__ = [
+    "fetch_well_known",
+    "parse_tei",
+    "select_endpoint",
+    "select_endpoints",
+]
