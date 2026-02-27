@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
 
@@ -301,10 +301,19 @@ class CLEEventType(StrEnum):
 
 
 class CLEVersionSpecifier(_TeaModel):
-    """A version specifier: either a single version or a version range in vers format."""
+    """A version specifier: either a single version or a version range in vers format.
+
+    At least one of ``version`` or ``range`` must be set.
+    """
 
     version: str | None = None
     range: str | None = None
+
+    @model_validator(mode="after")
+    def _check_at_least_one_field(self) -> "CLEVersionSpecifier":
+        if self.version is None and self.range is None:
+            raise ValueError("CLEVersionSpecifier requires at least one of 'version' or 'range'")
+        return self
 
 
 class CLESupportDefinition(_TeaModel):
@@ -347,7 +356,7 @@ class CLEEvent(_TeaModel):
 class CLE(_TeaModel):
     """Common Lifecycle Enumeration document per ECMA-428 TC54 TG3 v1.0.0.
 
-    Contains lifecycle events ordered by ID (descending) and optional definitions.
+    Contains lifecycle events and optional definitions. Event ordering is determined by the producer.
     """
 
     events: list[CLEEvent]

@@ -5,12 +5,7 @@ import sys
 from pathlib import Path
 from typing import Annotated, Any, NoReturn, Optional
 
-try:
-    import typer
-except ImportError:
-    print("Error: CLI dependencies not installed. Run: pip install libtea[cli]", file=sys.stderr)
-    raise SystemExit(1)
-
+import typer
 from pydantic import BaseModel
 
 from libtea._http import MtlsConfig

@@ -575,3 +575,7 @@ class TestCLEModels:
         vs = CLEVersionSpecifier.model_validate({"range": "vers:npm/>=1.0.0|<2.0.0"})
         assert vs.version is None
         assert vs.range == "vers:npm/>=1.0.0|<2.0.0"
+
+    def test_version_specifier_empty_rejected(self):
+        with pytest.raises(ValidationError, match="at least one"):
+            CLEVersionSpecifier.model_validate({})

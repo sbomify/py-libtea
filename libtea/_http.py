@@ -111,8 +111,10 @@ _MAX_DOWNLOAD_REDIRECTS = 10
 
 
 def _is_internal_ip(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    """Return True if the IP address is private, loopback, link-local, reserved, or CGNAT."""
+    """Return True if the IP address is non-global: private, loopback, link-local, reserved, unspecified, multicast, or CGNAT."""
     if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+        return True
+    if addr.is_unspecified or addr.is_multicast:
         return True
     if isinstance(addr, ipaddress.IPv4Address) and addr in _CGNAT_NETWORK:
         return True

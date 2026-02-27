@@ -568,6 +568,18 @@ class TestIsInternalIp:
 
         assert _is_internal_ip(ipaddress.IPv6Address("::1"))
 
+    def test_unspecified_is_internal(self):
+        import ipaddress
+
+        assert _is_internal_ip(ipaddress.IPv4Address("0.0.0.0"))
+        assert _is_internal_ip(ipaddress.IPv6Address("::"))
+
+    def test_multicast_is_internal(self):
+        import ipaddress
+
+        assert _is_internal_ip(ipaddress.IPv4Address("224.0.0.1"))
+        assert _is_internal_ip(ipaddress.IPv6Address("ff02::1"))
+
 
 class TestDnsRebindingProtection:
     """DNS rebinding protection via hostname resolution check."""
