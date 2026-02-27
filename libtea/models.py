@@ -252,7 +252,7 @@ class Release(_TeaModel):
     """A specific version of a TEA component with distributions and identifiers.
 
     Attributes:
-        uuid: Server-assigned unique identifier.
+        uuid: Server-assigned UUID.
         component: UUID of the parent component (set when returned in context).
         component_name: Human-readable name of the parent component.
         version: Version string (e.g. ``"1.2.3"``).
@@ -299,7 +299,7 @@ class ProductRelease(_TeaModel):
     typically yields a product release UUID.
 
     Attributes:
-        uuid: Server-assigned unique identifier.
+        uuid: Server-assigned UUID.
         product: UUID of the parent product (set when returned in context).
         product_name: Human-readable name of the parent product.
         version: Version string (e.g. ``"2.0.0"``).
