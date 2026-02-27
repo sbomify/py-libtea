@@ -44,7 +44,7 @@ class TestCliEntryPoint:
         """Verify pyproject.toml points to the wrapper, not directly to cli:app."""
         from pathlib import Path
 
-        pyproject = Path(__file__).parent.parent / "pyproject.toml"
+        pyproject = Path(__file__).parent.parent.parent / "pyproject.toml"
         content = pyproject.read_text()
         assert 'tea-cli = "libtea._cli_entry:main"' in content
 
