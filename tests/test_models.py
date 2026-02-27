@@ -510,6 +510,62 @@ class TestCLEModels:
         with pytest.raises(ValidationError):
             CLEEvent.model_validate({"id": 1})
 
+    def test_superseded_by_event(self):
+        event = CLEEvent.model_validate(
+            {
+                "id": 6,
+                "type": "supersededBy",
+                "effective": "2025-06-01T00:00:00Z",
+                "published": "2025-05-01T00:00:00Z",
+                "versions": [{"range": "vers:npm/>=1.0.0|<2.0.0"}],
+                "supersededByVersion": "2.0.0",
+            }
+        )
+        assert event.type == CLEEventType.SUPERSEDED_BY
+        assert event.superseded_by_version == "2.0.0"
+        assert len(event.versions) == 1
+
+    def test_end_of_life_event(self):
+        event = CLEEvent.model_validate(
+            {
+                "id": 7,
+                "type": "endOfLife",
+                "effective": "2026-01-01T00:00:00Z",
+                "published": "2025-06-01T00:00:00Z",
+                "versions": [{"version": "1.0.0"}],
+                "supportId": "standard",
+            }
+        )
+        assert event.type == CLEEventType.END_OF_LIFE
+        assert event.support_id == "standard"
+
+    def test_end_of_distribution_event(self):
+        event = CLEEvent.model_validate(
+            {
+                "id": 8,
+                "type": "endOfDistribution",
+                "effective": "2026-03-01T00:00:00Z",
+                "published": "2025-12-01T00:00:00Z",
+                "versions": [{"version": "1.0.0"}, {"range": "vers:npm/>=0.9.0|<1.0.0"}],
+            }
+        )
+        assert event.type == CLEEventType.END_OF_DISTRIBUTION
+        assert len(event.versions) == 2
+
+    def test_end_of_marketing_event(self):
+        event = CLEEvent.model_validate(
+            {
+                "id": 9,
+                "type": "endOfMarketing",
+                "effective": "2026-06-01T00:00:00Z",
+                "published": "2026-01-01T00:00:00Z",
+                "versions": [{"version": "1.0.0"}],
+                "description": "No longer marketed",
+            }
+        )
+        assert event.type == CLEEventType.END_OF_MARKETING
+        assert event.description == "No longer marketed"
+
     def test_version_specifier_with_version(self):
         vs = CLEVersionSpecifier.model_validate({"version": "1.0.0"})
         assert vs.version == "1.0.0"
