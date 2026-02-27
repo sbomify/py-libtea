@@ -26,6 +26,7 @@ from libtea.models import (
     PaginatedProductResponse,
     Product,
     ProductRelease,
+    ReleaseDistribution,
 )
 
 _console = Console()
@@ -60,6 +61,22 @@ def _pagination_header(data: PaginatedProductResponse | PaginatedProductReleaseR
     console.print(Text(f"Results {data.page_start_index + 1}-{end} of {data.total_results}", style="dim"))
 
 
+def _distributions_table(distributions: list[ReleaseDistribution], *, console: Console) -> None:
+    """Render a table of :class:`ReleaseDistribution` objects."""
+    if not distributions:
+        return
+    tbl = Table(title="Distributions")
+    tbl.add_column("Type")
+    tbl.add_column("Description")
+    tbl.add_column("URL")
+    tbl.add_column("Signature URL")
+    tbl.add_column("Checksums")
+    for d in distributions:
+        checksums = ", ".join(f"{cs.algorithm_type}:{cs.algorithm_value[:12]}..." for cs in d.checksums) or "-"
+        tbl.add_row(d.distribution_type, _opt(d.description), _opt(d.url), _opt(d.signature_url), checksums)
+    console.print(tbl)
+
+
 def _artifacts_table(artifacts: list[Artifact], *, console: Console) -> None:
     """Render a table of :class:`Artifact` model objects."""
     if not artifacts:
@@ -68,10 +85,12 @@ def _artifacts_table(artifacts: list[Artifact], *, console: Console) -> None:
     tbl.add_column("UUID", style="cyan", no_wrap=True)
     tbl.add_column("Name")
     tbl.add_column("Type")
+    tbl.add_column("Applies To")
     tbl.add_column("Formats")
     for a in artifacts:
         fmt_str = ", ".join(f.media_type for f in a.formats) or "-"
-        tbl.add_row(a.uuid, a.name, a.type, fmt_str)
+        applies = ", ".join(a.distribution_types) if a.distribution_types else "-"
+        tbl.add_row(a.uuid, a.name, a.type, applies, fmt_str)
     console.print(tbl)
 
 
@@ -81,11 +100,13 @@ def _formats_table(formats: list[ArtifactFormat], *, console: Console) -> None:
         return
     tbl = Table(title="Formats")
     tbl.add_column("Media Type")
+    tbl.add_column("Description")
     tbl.add_column("URL")
+    tbl.add_column("Signature URL")
     tbl.add_column("Checksums")
     for f in formats:
         checksums = ", ".join(f"{cs.algorithm_type}:{cs.algorithm_value[:12]}..." for cs in f.checksums) or "-"
-        tbl.add_row(f.media_type, f.url, checksums)
+        tbl.add_row(f.media_type, _opt(f.description), f.url, _opt(f.signature_url), checksums)
     console.print(tbl)
 
 
@@ -180,6 +201,7 @@ def fmt_component_release(data: ComponentReleaseWithCollection, *, console: Cons
         ],
         console=console,
     )
+    _distributions_table(r.distributions, console=console)
     col = data.latest_collection
     _kv_panel(
         "Latest Collection",
@@ -228,32 +250,103 @@ def fmt_artifact(data: Artifact, *, console: Console) -> None:
 def fmt_inspect(data: list[dict], *, console: Console) -> None:
     """Render the full inspect output (discovery + release + components)."""
     for entry in data:
-        disc = entry["discovery"]
         pr = entry["productRelease"]
-        _kv_panel(
-            "Product Release",
-            [
-                ("UUID", pr["uuid"]),
-                ("Version", pr["version"]),
-                ("Created", str(pr.get("createdDate", "-"))),
-                ("Discovery UUID", disc["productReleaseUuid"]),
-            ],
-            console=console,
-        )
+        fields = [
+            ("UUID", pr["uuid"]),
+            ("Product", _opt(pr.get("productName"))),
+            ("Version", pr["version"]),
+            ("Created", str(pr.get("createdDate", "-"))),
+            ("Released", _opt(pr.get("releaseDate"))),
+            ("Pre-release", _opt(pr.get("preRelease"))),
+        ]
+        identifiers = pr.get("identifiers", [])
+        if identifiers:
+            id_str = ", ".join(f"{i['idType']}:{i['idValue']}" for i in identifiers)
+            fields.append(("Identifiers", id_str))
+        _kv_panel("Product Release", fields, console=console)
         components = entry.get("components", [])
         if components:
             tbl = Table(title="Components")
             tbl.add_column("UUID", style="cyan", no_wrap=True)
             tbl.add_column("Version")
             tbl.add_column("Name")
+            tbl.add_column("Note", style="dim")
             for comp in components:
                 comp_uuid = comp.get("uuid") or comp.get("release", {}).get("uuid", "-")
                 version = comp.get("version") or comp.get("release", {}).get("version", "-")
                 name = comp.get("name") or comp.get("release", {}).get("componentName", "-")
-                tbl.add_row(str(comp_uuid), str(version), _opt(name))
+                note = comp.get("resolvedNote", "")
+                tbl.add_row(str(comp_uuid), str(version), _opt(name), note)
             console.print(tbl)
+            # Show artifact details for each component
+            for comp in components:
+                _inspect_component_details(comp, console=console)
         if entry.get("truncated"):
             console.print(Text(f"Showing {len(components)} of {entry['totalComponents']} components", style="dim"))
+
+
+def _inspect_component_details(comp: dict, *, console: Console) -> None:
+    """Render distributions and artifact details for a component in inspect output."""
+    # Distributions come from the release object
+    release = comp.get("release") or (comp.get("resolvedRelease") or {}).get("release") or {}
+    distributions = release.get("distributions") or []
+    if distributions:
+        comp_name = comp.get("name") or release.get("componentName", "Component")
+        tbl = Table(title=f"Distributions ({escape(str(comp_name))})")
+        tbl.add_column("Type")
+        tbl.add_column("Description")
+        tbl.add_column("URL")
+        tbl.add_column("Signature URL")
+        tbl.add_column("Checksums")
+        for d in distributions:
+            checksums_list = d.get("checksums") or []
+            checksums = (
+                ", ".join(f"{cs.get('algType', '?')}:{cs.get('algValue', '')[:12]}..." for cs in checksums_list) or "-"
+            )
+            tbl.add_row(
+                d.get("distributionType", "-"),
+                _opt(d.get("description")),
+                _opt(d.get("url")),
+                _opt(d.get("signatureUrl")),
+                checksums,
+            )
+        console.print(tbl)
+
+    # Artifacts come from either a direct componentRelease or a resolvedRelease
+    release_data = comp.get("latestCollection") or (comp.get("resolvedRelease") or {}).get("latestCollection")
+    if not release_data:
+        return
+    artifacts = release_data.get("artifacts", [])
+    if not artifacts:
+        return
+    comp_name = comp.get("name") or comp.get("release", {}).get("componentName", "Component")
+    tbl = Table(title=f"Artifacts ({escape(str(comp_name))})")
+    tbl.add_column("UUID", style="cyan", no_wrap=True)
+    tbl.add_column("Name")
+    tbl.add_column("Type")
+    tbl.add_column("Applies To")
+    tbl.add_column("Media Type")
+    tbl.add_column("Description")
+    tbl.add_column("URL")
+    tbl.add_column("Signature URL")
+    for art in artifacts:
+        applies = ", ".join(art.get("distributionTypes") or []) or "-"
+        formats = art.get("formats", [])
+        if formats:
+            for fmt in formats:
+                tbl.add_row(
+                    art.get("uuid", "-"),
+                    art.get("name", "-"),
+                    art.get("type", "-"),
+                    applies,
+                    fmt.get("mediaType", "-"),
+                    _opt(fmt.get("description")),
+                    fmt.get("url", "-"),
+                    _opt(fmt.get("signatureUrl")),
+                )
+        else:
+            tbl.add_row(art.get("uuid", "-"), art.get("name", "-"), art.get("type", "-"), applies, "-", "-", "-", "-")
+    console.print(tbl)
 
 
 # --- Dispatch ---

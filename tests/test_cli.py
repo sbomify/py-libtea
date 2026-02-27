@@ -537,7 +537,8 @@ class TestCLIInspectGetComponentFallback:
     """Test the inspect command's get_component fallback for ComponentRef without release."""
 
     @responses.activate
-    def test_inspect_component_ref_without_release(self):
+    def test_inspect_component_ref_without_release_no_releases(self):
+        """Unpinned component with no releases — shows basic component data only."""
         tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
         uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
         comp_uuid = "c3d4e5f6-a7b8-9012-cdef-123456789099"
@@ -563,11 +564,109 @@ class TestCLIInspectGetComponentFallback:
             f"{BASE_URL}/component/{comp_uuid}",
             json={"uuid": comp_uuid, "name": "Component Without Release", "identifiers": []},
         )
+        responses.get(f"{BASE_URL}/component/{comp_uuid}/releases", json=[])
         result = runner.invoke(app, ["--json", "inspect", tei, "--base-url", BASE_URL])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert len(data[0]["components"]) == 1
         assert data[0]["components"][0]["name"] == "Component Without Release"
+        assert "resolvedRelease" not in data[0]["components"][0]
+
+    @responses.activate
+    def test_inspect_component_ref_resolves_latest_release(self):
+        """Unpinned component with releases — resolves latest and includes artifacts."""
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        comp_uuid = "c3d4e5f6-a7b8-9012-cdef-123456789099"
+        rel_uuid = "d4e5f6a7-b8c9-0123-defa-456789012345"
+        responses.get(
+            f"{BASE_URL}/discovery",
+            json=[
+                {
+                    "productReleaseUuid": uuid,
+                    "servers": [{"rootUrl": "https://tea.example.com", "versions": ["1.0.0"]}],
+                }
+            ],
+        )
+        responses.get(
+            f"{BASE_URL}/productRelease/{uuid}",
+            json={
+                "uuid": uuid,
+                "version": "1.0.0",
+                "createdDate": "2024-01-01T00:00:00Z",
+                "components": [{"uuid": comp_uuid}],
+            },
+        )
+        responses.get(
+            f"{BASE_URL}/component/{comp_uuid}",
+            json={"uuid": comp_uuid, "name": "App Component", "identifiers": []},
+        )
+        responses.get(
+            f"{BASE_URL}/component/{comp_uuid}/releases",
+            json=[{"uuid": rel_uuid, "version": "2.0.0", "createdDate": "2024-06-01T00:00:00Z"}],
+        )
+        responses.get(
+            f"{BASE_URL}/componentRelease/{rel_uuid}",
+            json={
+                "release": {"uuid": rel_uuid, "version": "2.0.0", "createdDate": "2024-06-01T00:00:00Z"},
+                "latestCollection": {
+                    "uuid": uuid,
+                    "version": 1,
+                    "artifacts": [
+                        {
+                            "uuid": rel_uuid,
+                            "name": "SBOM",
+                            "type": "BOM",
+                            "formats": [{"mediaType": "application/json", "url": "https://cdn/sbom.json"}],
+                        }
+                    ],
+                },
+            },
+        )
+        result = runner.invoke(app, ["--json", "inspect", tei, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        comp = data[0]["components"][0]
+        assert comp["name"] == "App Component"
+        assert comp["resolvedNote"] == "latest release (not pinned)"
+        assert comp["resolvedRelease"]["release"]["version"] == "2.0.0"
+        assert comp["resolvedRelease"]["latestCollection"]["artifacts"][0]["name"] == "SBOM"
+
+    @responses.activate
+    def test_inspect_component_ref_release_resolution_error(self):
+        """Unpinned component where release resolution fails — falls back to basic data."""
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        comp_uuid = "c3d4e5f6-a7b8-9012-cdef-123456789099"
+        responses.get(
+            f"{BASE_URL}/discovery",
+            json=[
+                {
+                    "productReleaseUuid": uuid,
+                    "servers": [{"rootUrl": "https://tea.example.com", "versions": ["1.0.0"]}],
+                }
+            ],
+        )
+        responses.get(
+            f"{BASE_URL}/productRelease/{uuid}",
+            json={
+                "uuid": uuid,
+                "version": "1.0.0",
+                "createdDate": "2024-01-01T00:00:00Z",
+                "components": [{"uuid": comp_uuid}],
+            },
+        )
+        responses.get(
+            f"{BASE_URL}/component/{comp_uuid}",
+            json={"uuid": comp_uuid, "name": "Broken Component", "identifiers": []},
+        )
+        responses.get(f"{BASE_URL}/component/{comp_uuid}/releases", status=500)
+        result = runner.invoke(app, ["--json", "inspect", tei, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        comp = data[0]["components"][0]
+        assert comp["name"] == "Broken Component"
+        assert "resolvedRelease" not in comp
 
 
 class TestCLITeiAutoDiscovery:

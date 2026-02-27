@@ -39,6 +39,7 @@ from libtea.models import (  # noqa: E402
     Product,
     ProductRelease,
     Release,
+    ReleaseDistribution,
     TeaServerInfo,
 )
 
@@ -46,7 +47,7 @@ from libtea.models import (  # noqa: E402
 def _capture(fn, *args, **kwargs) -> str:
     """Call a formatter with a StringIO-backed Console and return the output."""
     buf = StringIO()
-    console = Console(file=buf, force_terminal=True, width=120)
+    console = Console(file=buf, force_terminal=True, width=200)
     fn(*args, console=console, **kwargs)
     return buf.getvalue()
 
@@ -298,6 +299,33 @@ class TestFmtInspect:
         assert "Components" in output
         assert "libbar" in output
 
+    def test_renders_all_product_release_fields(self):
+        """Panel should show product name, release date, pre-release, and identifiers."""
+        data = [
+            {
+                "discovery": {"productReleaseUuid": UUID},
+                "productRelease": {
+                    "uuid": UUID,
+                    "version": "2.0.0",
+                    "productName": "My Product",
+                    "createdDate": "2024-01-01T00:00:00Z",
+                    "releaseDate": "2024-01-15T00:00:00Z",
+                    "preRelease": False,
+                    "identifiers": [
+                        {"idType": "PURL", "idValue": "pkg:pypi/test"},
+                        {"idType": "ASIN", "idValue": "B07FDJMC9Q"},
+                    ],
+                },
+                "components": [],
+            }
+        ]
+        output = _capture(fmt_inspect, data)
+        assert "My Product" in output
+        assert "2024-01-15" in output
+        assert "False" in output
+        assert "PURL:pkg:pypi/test" in output
+        assert "ASIN:B07FDJMC9Q" in output
+
     def test_truncated_output(self):
         data = [
             {
@@ -337,6 +365,82 @@ class TestFmtInspect:
         output = _capture(fmt_inspect, data)
         assert UUID2 in output
         assert "3.0.0" in output
+
+    def test_resolved_unpinned_component_with_artifacts(self):
+        """Unpinned component with a resolved release should show artifacts."""
+        data = [
+            {
+                "discovery": {"productReleaseUuid": UUID},
+                "productRelease": {"uuid": UUID, "version": "1.0.0", "createdDate": "2024-01-01"},
+                "components": [
+                    {
+                        "uuid": UUID2,
+                        "name": "App",
+                        "identifiers": [],
+                        "resolvedNote": "latest release (not pinned)",
+                        "resolvedRelease": {
+                            "release": {"uuid": UUID2, "version": "1.0.0", "createdDate": "2024-01-01"},
+                            "latestCollection": {
+                                "uuid": UUID,
+                                "version": 1,
+                                "artifacts": [
+                                    {
+                                        "uuid": UUID2,
+                                        "name": "SPDX SBOM",
+                                        "type": "BOM",
+                                        "formats": [
+                                            {
+                                                "mediaType": "application/spdx+json",
+                                                "url": "https://cdn.example.com/sbom.json",
+                                                "checksums": [],
+                                            }
+                                        ],
+                                    }
+                                ],
+                            },
+                        },
+                    }
+                ],
+            }
+        ]
+        output = _capture(fmt_inspect, data)
+        assert "App" in output
+        assert "latest release (not pinned)" in output
+        assert "Artifacts" in output
+        assert "SPDX SBOM" in output
+        assert "BOM" in output
+        assert "application/spdx+json" in output
+        assert "https://cdn.example.com/sbom.json" in output
+
+    def test_pinned_component_with_collection_artifacts(self):
+        """Pinned component (from componentRelease) should show artifacts from latestCollection."""
+        data = [
+            {
+                "discovery": {"productReleaseUuid": UUID},
+                "productRelease": {"uuid": UUID, "version": "1.0.0", "createdDate": "2024-01-01"},
+                "components": [
+                    {
+                        "release": {"uuid": UUID2, "version": "2.0.0", "componentName": "libfoo"},
+                        "latestCollection": {
+                            "uuid": UUID,
+                            "version": 1,
+                            "artifacts": [
+                                {
+                                    "uuid": UUID2,
+                                    "name": "VEX",
+                                    "type": "VULNERABILITIES",
+                                    "formats": [{"mediaType": "application/json", "url": "https://cdn/vex.json"}],
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+        ]
+        output = _capture(fmt_inspect, data)
+        assert "libfoo" in output
+        assert "VEX" in output
+        assert "application/json" in output
 
 
 class TestFormatOutputDispatch:
@@ -395,3 +499,168 @@ class TestMarkupEscape:
         )
         output = _capture(fmt_product, product)
         assert "safe" in output
+
+
+class TestDistributionsTable:
+    """Test display of release-distribution fields."""
+
+    def test_component_release_with_distributions(self):
+        data = ComponentReleaseWithCollection(
+            release=Release(
+                uuid=UUID,
+                version="11.0.7",
+                component_name="tomcat",
+                created_date="2024-01-01T00:00:00Z",
+                distributions=[
+                    ReleaseDistribution(
+                        distribution_type="zip",
+                        description="Core binary distribution, zip archive",
+                        url="https://repo.example.com/tomcat-11.0.7.zip",
+                        signature_url="https://repo.example.com/tomcat-11.0.7.zip.asc",
+                        checksums=[
+                            Checksum(algorithm_type=ChecksumAlgorithm.SHA_256, algorithm_value="abcdef1234567890")
+                        ],
+                    ),
+                    ReleaseDistribution(
+                        distribution_type="tar.gz",
+                        description="Core binary distribution, tar.gz archive",
+                        url="https://repo.example.com/tomcat-11.0.7.tar.gz",
+                    ),
+                ],
+            ),
+            latest_collection=Collection(uuid=UUID, version=1, artifacts=[]),
+        )
+        output = _capture(fmt_component_release, data)
+        assert "Distributions" in output
+        assert "zip" in output
+        assert "tar.gz" in output
+        assert "Core binary distribution, zip archive" in output
+        assert "https://repo.example.com/tomcat-11.0.7.zip" in output
+        assert "tomcat-11.0.7.zip.asc" in output
+        assert "SHA-256:abcdef123456" in output
+
+    def test_component_release_without_distributions(self):
+        data = ComponentReleaseWithCollection(
+            release=Release(uuid=UUID, version="1.0.0", created_date="2024-01-01T00:00:00Z"),
+            latest_collection=Collection(uuid=UUID, version=1, artifacts=[]),
+        )
+        output = _capture(fmt_component_release, data)
+        assert "Distributions" not in output
+
+    def test_inspect_component_with_distributions(self):
+        """Inspect output should show distributions from the release dict."""
+        data = [
+            {
+                "discovery": {"productReleaseUuid": UUID},
+                "productRelease": {"uuid": UUID, "version": "1.0.0", "createdDate": "2024-01-01"},
+                "components": [
+                    {
+                        "release": {
+                            "uuid": UUID2,
+                            "version": "11.0.7",
+                            "componentName": "tomcat",
+                            "distributions": [
+                                {
+                                    "distributionType": "zip",
+                                    "description": "Zip archive",
+                                    "url": "https://repo.example.com/tomcat.zip",
+                                    "signatureUrl": "https://repo.example.com/tomcat.zip.asc",
+                                    "checksums": [{"algType": "SHA-256", "algValue": "abc123def456"}],
+                                }
+                            ],
+                        },
+                        "latestCollection": {"uuid": UUID, "version": 1, "artifacts": []},
+                    }
+                ],
+            }
+        ]
+        output = _capture(fmt_inspect, data)
+        assert "Distributions" in output
+        assert "zip" in output
+        assert "Zip archive" in output
+        assert "https://repo.example.com/tomcat.zip" in output
+        assert "tomcat.zip.asc" in output
+        assert "SHA-256:abc123def456" in output
+
+
+class TestArtifactFormatDetails:
+    """Test display of artifact-format description, signatureUrl, and distributionTypes."""
+
+    def test_formats_table_shows_description_and_signature(self):
+        data = Artifact(
+            uuid=UUID,
+            name="Build SBOM",
+            type="BOM",
+            formats=[
+                ArtifactFormat(
+                    media_type="application/vnd.cyclonedx+xml",
+                    description="CycloneDX SBOM (XML)",
+                    url="https://repo.example.com/sbom.xml",
+                    signature_url="https://repo.example.com/sbom.xml.asc",
+                    checksums=[Checksum(algorithm_type=ChecksumAlgorithm.SHA_256, algorithm_value="abcdef1234567890")],
+                )
+            ],
+        )
+        output = _capture(fmt_artifact, data)
+        assert "CycloneDX SBOM (XML)" in output
+        assert "sbom.xml.asc" in output
+        assert "application/vnd.cyclonedx+xml" in output
+
+    def test_artifacts_table_shows_distribution_types(self):
+        data = Collection(
+            uuid=UUID,
+            version=1,
+            artifacts=[
+                Artifact(
+                    uuid=UUID,
+                    name="Build SBOM",
+                    type="BOM",
+                    distribution_types=["zip", "tar.gz"],
+                    formats=[ArtifactFormat(media_type="application/xml", url="https://example.com/sbom.xml")],
+                )
+            ],
+        )
+        output = _capture(fmt_collection, data)
+        assert "zip, tar.gz" in output
+
+    def test_inspect_artifact_shows_description_and_signature(self):
+        """Inspect output should show description and signatureUrl for artifact formats."""
+        data = [
+            {
+                "discovery": {"productReleaseUuid": UUID},
+                "productRelease": {"uuid": UUID, "version": "1.0.0", "createdDate": "2024-01-01"},
+                "components": [
+                    {
+                        "uuid": UUID2,
+                        "name": "App",
+                        "resolvedRelease": {
+                            "release": {"uuid": UUID2, "version": "1.0.0", "createdDate": "2024-01-01"},
+                            "latestCollection": {
+                                "uuid": UUID,
+                                "version": 1,
+                                "artifacts": [
+                                    {
+                                        "uuid": UUID2,
+                                        "name": "VDR",
+                                        "type": "VULNERABILITIES",
+                                        "distributionTypes": ["zip"],
+                                        "formats": [
+                                            {
+                                                "mediaType": "application/vnd.cyclonedx+xml",
+                                                "description": "CycloneDX VDR (XML)",
+                                                "url": "https://example.com/vdr.xml",
+                                                "signatureUrl": "https://example.com/vdr.xml.asc",
+                                            }
+                                        ],
+                                    }
+                                ],
+                            },
+                        },
+                    }
+                ],
+            }
+        ]
+        output = _capture(fmt_inspect, data)
+        assert "CycloneDX VDR (XML)" in output
+        assert "vdr.xml.asc" in output
+        assert "zip" in output

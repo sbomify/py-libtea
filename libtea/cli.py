@@ -437,8 +437,19 @@ def inspect(
                         cr = client.get_component_release(comp_ref.release)
                         components.append(cr.model_dump(mode="json", by_alias=True))
                     else:
+                        # Unpinned component — resolve latest release like rearm does
                         comp = client.get_component(comp_ref.uuid)
-                        components.append(comp.model_dump(mode="json", by_alias=True))
+                        comp_data = comp.model_dump(mode="json", by_alias=True)
+                        try:
+                            releases = client.get_component_releases(comp_ref.uuid)
+                            if releases:
+                                latest = releases[0]
+                                cr = client.get_component_release(latest.uuid)
+                                comp_data["resolvedRelease"] = cr.model_dump(mode="json", by_alias=True)
+                                comp_data["resolvedNote"] = "latest release (not pinned)"
+                        except TeaError:
+                            pass  # Keep basic component data if release resolution fails
+                        components.append(comp_data)
                 truncated = len(pr.components) > max_components
                 entry: dict[str, Any] = {
                     "discovery": disc.model_dump(mode="json", by_alias=True),
