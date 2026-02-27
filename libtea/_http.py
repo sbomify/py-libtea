@@ -1,4 +1,8 @@
-"""Internal HTTP client wrapping requests with TEA error handling."""
+"""Internal HTTP client wrapping ``requests`` with TEA-specific error handling.
+
+This module is an implementation detail. Public consumers should use
+:class:`~libtea.client.TeaClient` instead.
+"""
 
 import hashlib
 import ipaddress
@@ -64,7 +68,14 @@ _BLOCKED_SCHEMES = frozenset({"file", "ftp", "gopher", "data"})
 
 @dataclass(frozen=True)
 class MtlsConfig:
-    """Client certificate configuration for mutual TLS."""
+    """Client certificate configuration for mutual TLS (mTLS).
+
+    Attributes:
+        client_cert: Path to the PEM-encoded client certificate.
+        client_key: Path to the PEM-encoded client private key.
+        ca_bundle: Optional path to a CA bundle for server certificate
+            verification. When ``None``, the system default CA store is used.
+    """
 
     client_cert: Path
     client_key: Path
@@ -72,7 +83,17 @@ class MtlsConfig:
 
 
 def _build_hashers(algorithms: list[str]) -> dict[str, Any]:
-    """Build hashlib hasher objects for the given algorithm names."""
+    """Build ``hashlib`` hasher objects for the given TEA algorithm names.
+
+    Args:
+        algorithms: List of TEA checksum algorithm names (e.g. ``["SHA-256", "BLAKE2b-256"]``).
+
+    Returns:
+        Dict mapping algorithm name to a fresh hashlib hash object.
+
+    Raises:
+        TeaChecksumError: If BLAKE3 is requested (not in stdlib) or the algorithm is unknown.
+    """
     hashers: dict[str, Any] = {}
     for alg in algorithms:
         if alg == "BLAKE3":
@@ -174,12 +195,22 @@ class TeaHttpClient:
 
     Handles authentication headers, error mapping, and streaming downloads.
     Uses a separate unauthenticated session for artifact downloads to avoid
-    leaking bearer tokens to third-party hosts.
+    leaking bearer tokens to third-party hosts (CDNs, Maven Central, etc.).
 
     Args:
-        base_url: TEA server base URL.
-        token: Optional bearer token. Rejected with plaintext HTTP.
-        timeout: Request timeout in seconds.
+        base_url: TEA server base URL (e.g. ``https://tea.example.com/v1``).
+        token: Optional bearer token. Mutually exclusive with ``basic_auth``.
+            Rejected when ``base_url`` uses plaintext HTTP.
+        basic_auth: Optional ``(username, password)`` tuple for HTTP Basic auth.
+            Mutually exclusive with ``token``. Rejected with plaintext HTTP.
+        timeout: Request timeout in seconds (default 30).
+        mtls: Optional :class:`MtlsConfig` for mutual TLS authentication.
+        max_retries: Number of retries on 5xx responses (default 3). Set to 0 to disable.
+        backoff_factor: Exponential backoff factor between retries (default 0.5).
+
+    Raises:
+        ValueError: If ``base_url`` is invalid, or both ``token`` and ``basic_auth`` are set,
+            or credentials are used with plaintext HTTP.
     """
 
     def __init__(
@@ -356,6 +387,7 @@ class TeaHttpClient:
         return {alg: h.hexdigest() for alg, h in hashers.items()}
 
     def close(self) -> None:
+        """Close the HTTP session and clear sensitive credentials from memory."""
         self._session.headers.pop("authorization", None)
         self._session.auth = None
         self._session.cert = None
@@ -374,7 +406,13 @@ class TeaHttpClient:
 
     @staticmethod
     def _raise_for_status(response: requests.Response) -> None:
-        """Map HTTP status codes to typed exceptions."""
+        """Map HTTP status codes to typed :mod:`~libtea.exceptions`.
+
+        2xx passes through, 3xx raises :class:`TeaRequestError`,
+        401/403 raises :class:`TeaAuthenticationError`, 404 raises
+        :class:`TeaNotFoundError`, 5xx raises :class:`TeaServerError`,
+        and remaining 4xx codes raise :class:`TeaRequestError`.
+        """
         status = response.status_code
         if 200 <= status < 300:
             return

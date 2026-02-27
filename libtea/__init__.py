@@ -1,4 +1,16 @@
-"""libtea - Python client library for the Transparency Exchange API (TEA)."""
+"""libtea — Python client library for the Transparency Exchange API (TEA).
+
+Quick start::
+
+    from libtea import TeaClient
+
+    with TeaClient("https://tea.example.com/v1", token="...") as client:
+        results = client.discover("urn:tei:purl:example.com:pkg:pypi/lib@1.0")
+
+Or auto-discover the server from a domain's ``.well-known/tea``::
+
+    client = TeaClient.from_well_known("tea.example.com", token="...")
+"""
 
 from importlib.metadata import version
 

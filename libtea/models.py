@@ -1,4 +1,9 @@
-"""Pydantic data models for TEA API objects."""
+"""Pydantic v2 data models for TEA API objects.
+
+All models use camelCase aliases for JSON serialization (matching the TEA wire
+format), are frozen (immutable after creation), and silently ignore unknown
+fields for forward-compatibility with future TEA spec versions.
+"""
 
 from datetime import datetime
 from enum import StrEnum
@@ -9,7 +14,14 @@ from pydantic.alias_generators import to_camel
 
 
 class _TeaModel(BaseModel):
-    """Base model with camelCase alias support."""
+    """Base model for all TEA API objects.
+
+    Configuration:
+        - ``alias_generator=to_camel``: JSON keys use camelCase.
+        - ``populate_by_name=True``: Fields can be set by Python name or alias.
+        - ``extra="ignore"``: Unknown fields from newer spec versions are silently dropped.
+        - ``frozen=True``: Instances are immutable (hashable, safe to cache).
+    """
 
     model_config = ConfigDict(
         alias_generator=to_camel,
@@ -203,6 +215,14 @@ class Collection(_TeaModel):
     The UUID matches the owning component or product release. The version
     integer starts at 1 and increments on each content change.
     Per spec, all fields are optional.
+
+    Attributes:
+        uuid: UUID of the owning component or product release.
+        version: Collection version number (starts at 1, increments on change).
+        date: Timestamp when this collection version was created.
+        belongs_to: Whether this collection belongs to a component or product release.
+        update_reason: Why this collection version was created.
+        artifacts: The artifacts (SBOMs, VEX documents, etc.) in this collection.
     """
 
     uuid: str | None = None
@@ -229,7 +249,19 @@ class Component(_TeaModel):
 
 
 class Release(_TeaModel):
-    """A specific version of a TEA component with distributions and identifiers."""
+    """A specific version of a TEA component with distributions and identifiers.
+
+    Attributes:
+        uuid: Server-assigned unique identifier.
+        component: UUID of the parent component (set when returned in context).
+        component_name: Human-readable name of the parent component.
+        version: Version string (e.g. ``"1.2.3"``).
+        created_date: When the release record was created on the TEA server.
+        release_date: Actual release date (may differ from ``created_date``).
+        pre_release: ``True`` if this is a pre-release / unstable version.
+        identifiers: External identifiers (PURLs, CPEs, etc.).
+        distributions: Available distribution formats (binary, source, etc.).
+    """
 
     uuid: str
     component: str | None = None
@@ -263,7 +295,19 @@ class Product(_TeaModel):
 class ProductRelease(_TeaModel):
     """A specific version of a TEA product with its component references.
 
-    This is the primary entry point from TEI discovery.
+    This is the primary entry point from TEI discovery — resolving a TEI
+    typically yields a product release UUID.
+
+    Attributes:
+        uuid: Server-assigned unique identifier.
+        product: UUID of the parent product (set when returned in context).
+        product_name: Human-readable name of the parent product.
+        version: Version string (e.g. ``"2.0.0"``).
+        created_date: When the release record was created on the TEA server.
+        release_date: Actual release date (may differ from ``created_date``).
+        pre_release: ``True`` if this is a pre-release / unstable version.
+        identifiers: External identifiers (PURLs, CPEs, etc.).
+        components: References to the components included in this product release.
     """
 
     uuid: str
@@ -327,8 +371,24 @@ class CLEDefinitions(_TeaModel):
 class CLEEvent(_TeaModel):
     """A discrete lifecycle event from the CLE specification.
 
-    Required fields: id, type, effective, published.
-    Other fields are event-type-specific (e.g. version for released, eventId for withdrawn).
+    Required fields: ``id``, ``type``, ``effective``, ``published``.
+    Other fields are event-type-specific.
+
+    Attributes:
+        id: Unique event identifier within the CLE document.
+        type: Lifecycle event type (e.g. ``released``, ``endOfLife``).
+        effective: When the event takes/took effect.
+        published: When the event was published.
+        version: Single version this event applies to (e.g. for ``released``).
+        versions: Version range specifiers (e.g. for ``endOfSupport``).
+        support_id: Reference to a :class:`CLESupportDefinition` id.
+        license: SPDX license expression (for ``released`` events).
+        superseded_by_version: Replacement version (for ``supersededBy`` events).
+        identifiers: External identifiers associated with this event.
+        event_id: Reference to another event id (for ``withdrawn`` events).
+        reason: Human-readable reason for the event.
+        description: Additional description or context.
+        references: List of reference URLs.
     """
 
     id: int
@@ -384,7 +444,14 @@ class PaginatedProductReleaseResponse(_TeaModel):
 
 
 class TeaEndpoint(_TeaModel):
-    """A TEA server endpoint from the .well-known/tea discovery document."""
+    """A TEA server endpoint from the .well-known/tea discovery document.
+
+    Attributes:
+        url: Base URL of the endpoint (e.g. ``https://tea.example.com/api``).
+        versions: SemVer version strings this endpoint supports (at least one).
+        priority: Optional priority hint between 0.0 (lowest) and 1.0 (highest).
+            Defaults to 1.0 per spec when not specified.
+    """
 
     url: str
     versions: list[str] = Field(min_length=1)
@@ -407,7 +474,11 @@ class TeaServerInfo(_TeaModel):
 
 
 class DiscoveryInfo(_TeaModel):
-    """Discovery result mapping a TEI to a product release and its servers."""
+    """Discovery result mapping a TEI to a product release and its servers.
+
+    Returned by ``GET /discovery?tei=...``. Each result provides the UUID
+    of the matching product release and the list of servers that host it.
+    """
 
     product_release_uuid: str
     servers: list[TeaServerInfo] = Field(min_length=1)

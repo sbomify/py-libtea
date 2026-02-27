@@ -1,4 +1,9 @@
-"""TEI parsing, .well-known/tea fetching, and endpoint selection."""
+"""TEI parsing, .well-known/tea fetching, and SemVer-based endpoint selection.
+
+Implements the TEA discovery flow: parse a TEI URN, fetch the ``.well-known/tea``
+document from the TEI's domain, and select the best-matching endpoint using
+SemVer 2.0.0 comparison and priority-based ordering.
+"""
 
 import logging
 import warnings
@@ -20,7 +25,11 @@ _DOMAIN_LABEL_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTU
 
 
 def _is_valid_domain(domain: str) -> bool:
-    """Validate domain per RFC 952/1123: alnum labels, internal hyphens, max 63 chars per label, max 253 total."""
+    """Validate a domain name per RFC 952 / RFC 1123.
+
+    Rules: each label is 1-63 characters of ``[a-zA-Z0-9-]`` with no leading
+    or trailing hyphens, and the total length is at most 253 characters.
+    """
     if not domain or len(domain) > 253:
         return False
     for label in domain.split("."):

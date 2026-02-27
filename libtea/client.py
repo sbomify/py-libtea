@@ -1,4 +1,9 @@
-"""TeaClient - main entry point for the TEA consumer API."""
+"""TeaClient — main entry point for the TEA consumer (read-only) API.
+
+Provides high-level methods for discovery, product/component lookup,
+collection retrieval, CLE queries, and artifact download with checksum
+verification. All HTTP is delegated to :class:`~libtea._http.TeaHttpClient`.
+"""
 
 import hmac
 import logging
@@ -46,7 +51,12 @@ _SAFE_PATH_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWX
 
 
 def _validate(model_cls: type[_M], data: Any) -> _M:
-    """Validate data against a Pydantic model, wrapping errors in TeaValidationError."""
+    """Validate a JSON-decoded value against a Pydantic model.
+
+    Wraps :meth:`pydantic.BaseModel.model_validate`, converting any
+    :class:`~pydantic.ValidationError` into :class:`TeaValidationError`
+    so callers only need to catch the ``TeaError`` hierarchy.
+    """
     try:
         return model_cls.model_validate(data)
     except ValidationError as exc:
@@ -54,7 +64,11 @@ def _validate(model_cls: type[_M], data: Any) -> _M:
 
 
 def _validate_list(model_cls: type[_M], data: Any) -> list[_M]:
-    """Validate a list of items against a Pydantic model."""
+    """Validate a JSON array where each element conforms to a Pydantic model.
+
+    Raises :class:`TeaValidationError` if ``data`` is not a list or any
+    element fails validation.
+    """
     if not isinstance(data, list):
         raise TeaValidationError(f"Expected list for {model_cls.__name__}, got {type(data).__name__}")
     try:
@@ -64,7 +78,12 @@ def _validate_list(model_cls: type[_M], data: Any) -> list[_M]:
 
 
 def _validate_path_segment(value: str, name: str = "uuid") -> str:
-    """Validate that a value is safe to interpolate into a URL path."""
+    """Validate that a value is safe to interpolate into a URL path.
+
+    Rejects empty strings, strings longer than 128 characters, and any
+    character outside the RFC 3986 unreserved set to prevent path
+    traversal and injection attacks.
+    """
     if not value:
         raise TeaValidationError(f"Invalid {name}: must not be empty.")
     if len(value) > 128 or not all(c in _SAFE_PATH_CHARS for c in value):
@@ -131,14 +150,23 @@ def _probe_endpoint(url: str, timeout: float = 5.0, mtls: MtlsConfig | None = No
 
 
 class TeaClient:
-    """Synchronous client for the Transparency Exchange API.
+    """Synchronous client for the Transparency Exchange API (consumer / read-only).
+
+    Supports context-manager usage for automatic resource cleanup::
+
+        with TeaClient("https://tea.example.com/v1", token="...") as client:
+            product = client.get_product(uuid)
 
     Args:
         base_url: TEA server base URL (e.g. ``https://tea.example.com/v1``).
-        token: Optional bearer token for authentication.
-        basic_auth: Optional (username, password) tuple for HTTP Basic auth.
-        timeout: Request timeout in seconds.
-        mtls: Optional mutual TLS configuration.
+        token: Optional bearer token for authentication. Mutually exclusive
+            with ``basic_auth``. Rejected with plaintext HTTP.
+        basic_auth: Optional ``(username, password)`` tuple for HTTP Basic auth.
+            Mutually exclusive with ``token``. Rejected with plaintext HTTP.
+        timeout: Request timeout in seconds (default 30).
+        mtls: Optional :class:`~libtea.MtlsConfig` for mutual TLS authentication.
+        max_retries: Number of automatic retries on 5xx responses (default 3).
+        backoff_factor: Exponential backoff multiplier between retries (default 0.5).
     """
 
     def __init__(
@@ -179,9 +207,30 @@ class TeaClient:
     ) -> Self:
         """Create a client by discovering the TEA endpoint from a domain's .well-known/tea.
 
-        Tries each compatible endpoint in priority order. If an endpoint is
-        unreachable or returns a server error, the next candidate is tried
-        (per TEA spec: "MUST retry … with the next endpoint").
+        Fetches the ``.well-known/tea`` document, selects all endpoints compatible
+        with the requested ``version`` (SemVer match), and probes each in priority
+        order. If an endpoint is unreachable or returns a server error, the next
+        candidate is tried (per TEA spec: "MUST retry ... with the next endpoint").
+
+        Args:
+            domain: Domain name to resolve (e.g. ``tea.example.com``).
+            token: Optional bearer token.
+            basic_auth: Optional ``(username, password)`` tuple.
+            timeout: Request timeout in seconds (default 30).
+            version: TEA spec SemVer to match against (default: library's built-in version).
+            scheme: URL scheme for discovery — ``"https"`` (default) or ``"http"``.
+            port: Optional port for ``.well-known`` resolution.
+            mtls: Optional :class:`~libtea.MtlsConfig`.
+            max_retries: Retry count on 5xx (default 3).
+            backoff_factor: Backoff multiplier (default 0.5).
+
+        Returns:
+            A connected :class:`TeaClient` pointing at the best reachable endpoint.
+
+        Raises:
+            TeaDiscoveryError: If no compatible or reachable endpoint is found.
+            TeaConnectionError: If all candidate endpoints are unreachable.
+            TeaServerError: If all candidate endpoints return 5xx.
         """
         well_known = fetch_well_known(domain, timeout=timeout, scheme=scheme, port=port, mtls=mtls)
         candidates = select_endpoints(well_known, version)
@@ -233,7 +282,17 @@ class TeaClient:
     def search_products(
         self, id_type: str, id_value: str, *, page_offset: int = 0, page_size: int = 100
     ) -> PaginatedProductResponse:
-        """Search for products by identifier (e.g. PURL, CPE, TEI)."""
+        """Search for products by identifier (e.g. PURL, CPE, TEI).
+
+        Args:
+            id_type: Identifier type (e.g. ``"PURL"``, ``"CPE"``, ``"TEI"``).
+            id_value: Identifier value to search for.
+            page_offset: Zero-based page offset (default 0).
+            page_size: Number of results per page (default 100, max 10000).
+
+        Returns:
+            Paginated response containing matching products.
+        """
         _validate_page_size(page_size)
         _validate_page_offset(page_offset)
         data = self._http.get_json(
@@ -280,7 +339,17 @@ class TeaClient:
     def search_product_releases(
         self, id_type: str, id_value: str, *, page_offset: int = 0, page_size: int = 100
     ) -> PaginatedProductReleaseResponse:
-        """Search for product releases by identifier (e.g. PURL, CPE, TEI)."""
+        """Search for product releases by identifier (e.g. PURL, CPE, TEI).
+
+        Args:
+            id_type: Identifier type (e.g. ``"PURL"``, ``"CPE"``, ``"TEI"``).
+            id_value: Identifier value to search for.
+            page_offset: Zero-based page offset (default 0).
+            page_size: Number of results per page (default 100, max 10000).
+
+        Returns:
+            Paginated response containing matching product releases.
+        """
         _validate_page_size(page_size)
         _validate_page_offset(page_offset)
         data = self._http.get_json(
@@ -530,7 +599,14 @@ class TeaClient:
 
     @staticmethod
     def _verify_checksums(checksums: list[Checksum], computed: dict[str, str], url: str, dest: Path) -> None:
-        """Verify computed checksums against expected values, cleaning up on failure."""
+        """Verify computed checksums against expected values, cleaning up on failure.
+
+        Uses :func:`hmac.compare_digest` for constant-time comparison.
+        Deletes the downloaded file at ``dest`` on the first mismatch.
+
+        Raises:
+            TeaChecksumError: If any checksum does not match.
+        """
         for cs in checksums:
             alg_name = cs.algorithm_type.value
             expected = cs.algorithm_value.lower()
@@ -562,6 +638,7 @@ class TeaClient:
     # --- Lifecycle ---
 
     def close(self) -> None:
+        """Close the underlying HTTP session and clear credentials."""
         self._http.close()
 
     def __enter__(self) -> Self:

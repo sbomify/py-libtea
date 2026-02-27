@@ -1,4 +1,10 @@
-"""CLI for the Transparency Exchange API."""
+"""CLI for the Transparency Exchange API.
+
+Provides the ``tea-cli`` command backed by typer. Each subcommand maps
+to a :class:`~libtea.client.TeaClient` method and outputs JSON to stdout.
+All commands accept ``--base-url`` / ``--domain`` for server selection,
+and ``--token`` / ``--auth`` / ``--client-cert`` for authentication.
+"""
 
 import json
 import sys
@@ -33,7 +39,11 @@ _ca_bundle_opt = typer.Option(help="Path to CA bundle for mTLS server verificati
 
 
 def _parse_basic_auth(auth: str | None) -> tuple[str, str] | None:
-    """Parse 'USER:PASSWORD' into a tuple, or return None."""
+    """Parse a ``USER:PASSWORD`` string into a ``(user, password)`` tuple.
+
+    Returns ``None`` if ``auth`` is ``None`` or empty. Calls :func:`_error`
+    (which exits) if the format is invalid.
+    """
     if not auth:
         return None
     if ":" not in auth:
@@ -43,7 +53,11 @@ def _parse_basic_auth(auth: str | None) -> tuple[str, str] | None:
 
 
 def _build_mtls(client_cert: str | None, client_key: str | None, ca_bundle: str | None) -> MtlsConfig | None:
-    """Build MtlsConfig from CLI options, or return None."""
+    """Build an :class:`~libtea.MtlsConfig` from CLI options, or return ``None``.
+
+    Both ``--client-cert`` and ``--client-key`` must be provided together.
+    Calls :func:`_error` if only one is specified.
+    """
     if not client_cert and not client_key:
         return None
     if client_cert and not client_key:
@@ -58,7 +72,10 @@ def _build_mtls(client_cert: str | None, client_key: str | None, ca_bundle: str 
 
 
 def _domain_from_tei(tei: str | None) -> str | None:
-    """Extract domain from a TEI URN, or return None if not a valid TEI."""
+    """Extract the domain component from a TEI URN for auto-discovery.
+
+    Returns ``None`` if ``tei`` is falsy or not a valid TEI URN.
+    """
     if not tei:
         return None
     try:
@@ -103,7 +120,11 @@ def _build_client(
 
 
 def _output(data: Any) -> None:
-    """Print JSON to stdout."""
+    """Serialize ``data`` as pretty-printed JSON to stdout.
+
+    Pydantic models are serialized using ``model_dump(mode="json", by_alias=True)``
+    to produce camelCase keys matching the TEA API wire format.
+    """
     if isinstance(data, BaseModel):
         data = data.model_dump(mode="json", by_alias=True)
     elif isinstance(data, list):
@@ -113,7 +134,7 @@ def _output(data: Any) -> None:
 
 
 def _error(message: str) -> NoReturn:
-    """Print error to stderr and exit."""
+    """Print an error message to stderr and exit with code 1."""
     print(f"Error: {message}", file=sys.stderr)
     raise typer.Exit(1)
 
@@ -423,6 +444,7 @@ def inspect(
 
 
 def _version_callback(value: bool) -> None:
+    """Eager callback for ``--version`` that prints version info and exits."""
     if value:
         from libtea import __version__
 
