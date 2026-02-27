@@ -98,7 +98,7 @@ class TestFmtDiscover:
         output = _capture(fmt_discover, data)
         assert "Discovery Results" in output
         assert UUID in output
-        assert "tea.example.com" in output
+        assert "https://tea.example.com" in output
         assert "0.8" in output
 
     def test_empty_list_renders_empty_table(self):

@@ -598,11 +598,11 @@ class TestValidatePathSegment:
     def test_accepts_uuid(self):
         assert _validate_path_segment("d4d9f54a-abcf-11ee-ac79-1a52914d44b1") == "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
 
-    def test_accepts_uppercase_uuid(self):
-        assert _validate_path_segment("D4D9F54A-ABCF-11EE-AC79-1A52914D44B1") == "D4D9F54A-ABCF-11EE-AC79-1A52914D44B1"
+    def test_normalizes_uppercase_uuid(self):
+        assert _validate_path_segment("D4D9F54A-ABCF-11EE-AC79-1A52914D44B1") == "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
 
-    def test_accepts_uuid_without_hyphens(self):
-        assert _validate_path_segment("d4d9f54aabcf11eeac791a52914d44b1") == "d4d9f54aabcf11eeac791a52914d44b1"
+    def test_normalizes_uuid_without_hyphens(self):
+        assert _validate_path_segment("d4d9f54aabcf11eeac791a52914d44b1") == "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
 
     @pytest.mark.parametrize(
         "value",

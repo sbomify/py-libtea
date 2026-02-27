@@ -125,7 +125,7 @@ def fetch_well_known(
 
     try:
         response = requests.get(url, **kwargs)
-        # Validate the final URL after any redirects (SSRF protection)
+        # Validate the final URL scheme after any redirects
         final_parsed = urlparse(response.url)
         if final_parsed.scheme not in ("http", "https"):
             raise TeaDiscoveryError(f"Discovery redirected to unsupported scheme: {final_parsed.scheme!r}")

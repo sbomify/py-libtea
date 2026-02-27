@@ -86,12 +86,12 @@ def _validate_path_segment(value: str, name: str = "uuid") -> str:
     if not value:
         raise TeaValidationError(f"Invalid {name}: must not be empty.")
     try:
-        _uuid.UUID(value)
+        parsed = _uuid.UUID(value)
     except ValueError:
         raise TeaValidationError(
             f"Invalid {name}: {value!r}. Must be a valid UUID (e.g. 'd4d9f54a-abcf-11ee-ac79-1a52914d44b1')."
         )
-    return value
+    return str(parsed)
 
 
 _MAX_PAGE_SIZE = 10000
@@ -144,6 +144,7 @@ def _probe_endpoint(url: str, timeout: float = 5.0, mtls: MtlsConfig | None = No
             kwargs["verify"] = str(mtls.ca_bundle)
     try:
         resp = requests.head(url, **kwargs)
+        resp.close()
     except requests.RequestException as exc:
         raise TeaConnectionError(str(exc)) from exc
     if resp.status_code >= 500:
