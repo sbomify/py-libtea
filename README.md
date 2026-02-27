@@ -239,7 +239,7 @@ client = TeaClient.from_well_known(
 
 ## CLI
 
-The `tea-cli` command provides a terminal interface for all TEA operations. Install with `pip install libtea[cli]`. See the [man page](docs/tea-cli.1) for full reference (`man docs/tea-cli.1`).
+The `tea-cli` command provides a terminal interface for all TEA operations. Install with `pip install libtea[cli]`. See the [full CLI reference](docs/cli.md) for detailed documentation.
 
 ### Global options
 
