@@ -123,6 +123,7 @@ def fetch_well_known(
         if mtls.ca_bundle:
             kwargs["verify"] = str(mtls.ca_bundle)
 
+    logger.debug("Fetching well-known discovery document: %s", url)
     try:
         response = requests.get(url, **kwargs)
         # Validate the final URL scheme after any redirects

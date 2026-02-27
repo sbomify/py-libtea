@@ -7,6 +7,7 @@ and ``--token`` / ``--auth`` / ``--client-cert`` for authentication.
 """
 
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import Annotated, Any, NoReturn
@@ -23,6 +24,7 @@ from libtea.models import Checksum, ChecksumAlgorithm
 app = typer.Typer(help="TEA (Transparency Exchange API) CLI client.", no_args_is_help=True)
 
 _json_output: bool = False
+_debug_output: bool = False
 
 # --- Shared options ---
 
@@ -154,6 +156,7 @@ def _error(message: str) -> NoReturn:
 @app.command()
 def discover(
     tei: str,
+    quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Output only UUIDs, one per line")] = False,
     base_url: Annotated[str | None, _base_url_opt] = None,
     token: Annotated[str | None, _token_opt] = None,
     auth: Annotated[str | None, _auth_opt] = None,
@@ -171,7 +174,11 @@ def discover(
             base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle, tei=tei
         ) as client:
             result = client.discover(tei)
-        _output(result, command="discover")
+        if quiet:
+            for d in result:
+                print(d.product_release_uuid)
+        else:
+            _output(result, command="discover")
     except TeaError as exc:
         _error(str(exc))
 
@@ -469,7 +476,12 @@ def main(
     output_json: Annotated[
         bool, typer.Option("--json", help="Output raw JSON instead of rich-formatted tables")
     ] = False,
+    debug: Annotated[bool, typer.Option("--debug", "-d", help="Show debug output (HTTP requests, timing)")] = False,
 ):
     """TEA (Transparency Exchange API) CLI client."""
-    global _json_output  # noqa: PLW0603
+    global _json_output, _debug_output  # noqa: PLW0603
     _json_output = output_json
+    _debug_output = debug
+    if debug:
+        logging.basicConfig(format="%(levelname)s %(name)s: %(message)s", stream=sys.stderr)
+        logging.getLogger("libtea").setLevel(logging.DEBUG)

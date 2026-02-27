@@ -287,6 +287,7 @@ class TeaHttpClient:
             TeaServerError: On HTTP 5xx.
         """
         url = f"{self._base_url}{path}"
+        logger.debug("GET %s params=%s", url, params)
         try:
             response = self._session.get(url, params=params, timeout=self._timeout, allow_redirects=False)
         except requests.ConnectionError as exc:
@@ -299,6 +300,7 @@ class TeaHttpClient:
             logger.warning("Request error for %s: %s", url, exc)
             raise TeaConnectionError(str(exc)) from exc
 
+        logger.debug("HTTP %d %s (%.3fs)", response.status_code, response.url, response.elapsed.total_seconds())
         self._raise_for_status(response)
         try:
             return response.json()
@@ -334,6 +336,7 @@ class TeaHttpClient:
             TeaValidationError: If download exceeds max_download_bytes or fails SSRF check.
         """
         _validate_download_url(url)
+        logger.debug("DOWNLOAD %s -> %s", url, dest)
         hashers = _build_hashers(algorithms) if algorithms else {}
 
         dest.parent.mkdir(parents=True, exist_ok=True)

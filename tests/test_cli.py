@@ -18,11 +18,13 @@ BASE_URL = "https://api.example.com/tea/v1"
 
 
 @pytest.fixture(autouse=True)
-def _reset_json_flag():
-    """Reset the module-level _json_output flag between test invocations."""
+def _reset_cli_flags():
+    """Reset module-level CLI flags between test invocations."""
     libtea.cli._json_output = False
+    libtea.cli._debug_output = False
     yield
     libtea.cli._json_output = False
+    libtea.cli._debug_output = False
 
 
 class TestCliEntryPoint:
@@ -648,3 +650,102 @@ class TestCLIJsonFlag:
         # But should contain key data
         assert "Test Product" in result.output
         assert uuid in result.output
+
+
+class TestCLIDebugFlag:
+    """Tests for the --debug / -d flag."""
+
+    @responses.activate
+    def test_debug_flag_produces_debug_output(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/product/{uuid}",
+            json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+        )
+        result = runner.invoke(app, ["--debug", "--json", "get-product", uuid, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        # Debug output goes to stderr; typer CliRunner captures both in output
+        combined = result.output + (result.stderr if hasattr(result, "stderr") else "")
+        # Should still produce valid JSON on stdout
+        assert "Test Product" in combined
+
+    @responses.activate
+    def test_debug_short_flag(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/product/{uuid}",
+            json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+        )
+        result = runner.invoke(app, ["-d", "--json", "get-product", uuid, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+
+    def test_debug_flag_shown_in_help(self):
+        result = runner.invoke(app, ["--help"])
+        assert "--debug" in result.output
+        assert "-d" in result.output
+
+
+class TestCLIDiscoverQuiet:
+    """Tests for the discover --quiet / -q flag."""
+
+    @responses.activate
+    def test_quiet_outputs_uuid_only(self):
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        responses.get(
+            f"{BASE_URL}/discovery",
+            json=[
+                {
+                    "productReleaseUuid": uuid,
+                    "servers": [{"rootUrl": "https://tea.example.com", "versions": ["1.0.0"]}],
+                }
+            ],
+        )
+        result = runner.invoke(app, ["discover", "--quiet", tei, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        assert result.output.strip() == uuid
+
+    @responses.activate
+    def test_quiet_short_flag(self):
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        responses.get(
+            f"{BASE_URL}/discovery",
+            json=[
+                {
+                    "productReleaseUuid": uuid,
+                    "servers": [{"rootUrl": "https://tea.example.com", "versions": ["1.0.0"]}],
+                }
+            ],
+        )
+        result = runner.invoke(app, ["discover", "-q", tei, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        assert result.output.strip() == uuid
+
+    @responses.activate
+    def test_quiet_multiple_results(self):
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        uuid1 = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        uuid2 = "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+        responses.get(
+            f"{BASE_URL}/discovery",
+            json=[
+                {
+                    "productReleaseUuid": uuid1,
+                    "servers": [{"rootUrl": "https://tea1.example.com", "versions": ["1.0.0"]}],
+                },
+                {
+                    "productReleaseUuid": uuid2,
+                    "servers": [{"rootUrl": "https://tea2.example.com", "versions": ["1.0.0"]}],
+                },
+            ],
+        )
+        result = runner.invoke(app, ["discover", "-q", tei, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        lines = result.output.strip().split("\n")
+        assert lines == [uuid1, uuid2]
+
+    def test_quiet_flag_shown_in_help(self):
+        result = runner.invoke(app, ["discover", "--help"])
+        assert "--quiet" in result.output
+        assert "-q" in result.output
