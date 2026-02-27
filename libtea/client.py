@@ -7,7 +7,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, Self, TypeVar
 
-import requests as _requests
+import requests
 from pydantic import BaseModel, ValidationError
 
 from libtea._http import USER_AGENT, MtlsConfig, TeaHttpClient
@@ -123,10 +123,8 @@ def _probe_endpoint(url: str, timeout: float = 5.0, mtls: MtlsConfig | None = No
         if mtls.ca_bundle:
             kwargs["verify"] = str(mtls.ca_bundle)
     try:
-        resp = _requests.head(url, **kwargs)
-    except (_requests.ConnectionError, _requests.Timeout) as exc:
-        raise TeaConnectionError(str(exc)) from exc
-    except _requests.RequestException as exc:
+        resp = requests.head(url, **kwargs)
+    except requests.RequestException as exc:
         raise TeaConnectionError(str(exc)) from exc
     if resp.status_code >= 500:
         raise TeaServerError(f"Server error: HTTP {resp.status_code}")
@@ -209,7 +207,7 @@ class TeaClient:
 
         if last_error:
             raise last_error
-        raise TeaDiscoveryError(f"No reachable endpoint found for version {version!r}")
+        raise TeaDiscoveryError(f"No reachable endpoint found for version {version!r}")  # pragma: no cover
 
     # --- Discovery ---
 

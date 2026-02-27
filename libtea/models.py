@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
@@ -14,7 +14,7 @@ class _TeaModel(BaseModel):
     model_config = ConfigDict(
         alias_generator=to_camel,
         populate_by_name=True,
-        extra="ignore",
+        extra="ignore",  # forward-compat: silently drop unknown fields from future spec versions
         frozen=True,
     )
 
@@ -277,12 +277,6 @@ class ProductRelease(_TeaModel):
     components: list[ComponentRef]
 
 
-class ErrorResponse(_TeaModel):
-    """Error response body from TEA API 404 responses."""
-
-    error: ErrorType
-
-
 # --- CLE (Common Lifecycle Enumeration) ---
 
 
@@ -310,7 +304,7 @@ class CLEVersionSpecifier(_TeaModel):
     range: str | None = None
 
     @model_validator(mode="after")
-    def _check_at_least_one_field(self) -> "CLEVersionSpecifier":
+    def _check_at_least_one_field(self) -> Self:
         if self.version is None and self.range is None:
             raise ValueError("CLEVersionSpecifier requires at least one of 'version' or 'range'")
         return self

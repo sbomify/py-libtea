@@ -366,10 +366,14 @@ class TestFromWellKnown:
         responses.head("http://api.example.com/v0.3.0-beta.2", status=200)
         import warnings
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
+        from libtea.exceptions import TeaInsecureTransportWarning
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             client = TeaClient.from_well_known("example.com", scheme="http", port=9080)
         assert client is not None
+        insecure_warnings = [x for x in w if issubclass(x.category, TeaInsecureTransportWarning)]
+        assert len(insecure_warnings) >= 1
         client.close()
 
     @responses.activate
@@ -419,6 +423,13 @@ class TestProbeEndpoint:
     @responses.activate
     def test_probe_timeout_raises(self):
         responses.head("https://api.example.com/v1", body=requests.Timeout("timed out"))
+        with pytest.raises(TeaConnectionError):
+            _probe_endpoint("https://api.example.com/v1")
+
+    @responses.activate
+    def test_probe_request_exception_raises(self):
+        """Generic RequestException (not ConnectionError/Timeout) also raises TeaConnectionError."""
+        responses.head("https://api.example.com/v1", body=requests.exceptions.TooManyRedirects("too many"))
         with pytest.raises(TeaConnectionError):
             _probe_endpoint("https://api.example.com/v1")
 

@@ -300,6 +300,7 @@ class TestCLICommands:
     def test_error_output_goes_to_stderr(self):
         result = runner.invoke(app, ["get-product", "some-uuid"])
         assert result.exit_code == 1
+        assert "Error:" in result.output
 
 
 class TestCLIErrorPaths:
@@ -427,11 +428,154 @@ class TestCLIInspectOptions:
             )
         result = runner.invoke(app, ["inspect", tei, "--max-components", "2", "--base-url", BASE_URL])
         assert result.exit_code == 0
-        # CliRunner mixes stdout/stderr; extract JSON before the warning line
         output = result.output
-        json_end = output.rfind("]") + 1
-        data = json.loads(output[:json_end])
+        # CliRunner mixes stdout/stderr; extract JSON array from the output
+        json_start = output.index("[")
+        json_end = output.rindex("]") + 1
+        data = json.loads(output[json_start:json_end])
         assert len(data[0]["components"]) == 2
         assert data[0]["truncated"] is True
         assert data[0]["totalComponents"] == 5
         assert "Warning: truncated" in output
+
+
+class TestCLIMoreErrorPaths:
+    """Additional CLI error path coverage."""
+
+    @responses.activate
+    def test_search_products_error(self):
+        responses.get(f"{BASE_URL}/products", status=500)
+        result = runner.invoke(
+            app, ["search-products", "--id-type", "PURL", "--id-value", "pkg:pypi/test", "--base-url", BASE_URL]
+        )
+        assert result.exit_code == 1
+
+    @responses.activate
+    def test_search_releases_error(self):
+        responses.get(f"{BASE_URL}/productReleases", status=500)
+        result = runner.invoke(
+            app, ["search-releases", "--id-type", "PURL", "--id-value", "pkg:pypi/test", "--base-url", BASE_URL]
+        )
+        assert result.exit_code == 1
+
+    @responses.activate
+    def test_get_release_error(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(f"{BASE_URL}/productRelease/{uuid}", status=500)
+        result = runner.invoke(app, ["get-release", uuid, "--base-url", BASE_URL])
+        assert result.exit_code == 1
+
+    @responses.activate
+    def test_get_collection_error(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(f"{BASE_URL}/productRelease/{uuid}/collection/latest", status=500)
+        result = runner.invoke(app, ["get-collection", uuid, "--base-url", BASE_URL])
+        assert result.exit_code == 1
+
+    @responses.activate
+    def test_get_artifact_error(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(f"{BASE_URL}/artifact/{uuid}", status=500)
+        result = runner.invoke(app, ["get-artifact", uuid, "--base-url", BASE_URL])
+        assert result.exit_code == 1
+
+    @responses.activate
+    def test_download_server_error(self, tmp_path):
+        artifact_url = "https://cdn.example.com/sbom.json"
+        responses.get(artifact_url, status=500)
+        dest = tmp_path / "sbom.json"
+        result = runner.invoke(app, ["download", artifact_url, str(dest), "--base-url", BASE_URL])
+        assert result.exit_code == 1
+
+    @responses.activate
+    def test_inspect_error(self):
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        responses.get(f"{BASE_URL}/discovery", status=500)
+        result = runner.invoke(app, ["inspect", tei, "--base-url", BASE_URL])
+        assert result.exit_code == 1
+
+
+class TestCLIInspectGetComponentFallback:
+    """Test the inspect command's get_component fallback for ComponentRef without release."""
+
+    @responses.activate
+    def test_inspect_component_ref_without_release(self):
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        uuid = "abc-123"
+        comp_uuid = "comp-no-release"
+        responses.get(
+            f"{BASE_URL}/discovery",
+            json=[
+                {
+                    "productReleaseUuid": uuid,
+                    "servers": [{"rootUrl": "https://tea.example.com", "versions": ["1.0.0"]}],
+                }
+            ],
+        )
+        responses.get(
+            f"{BASE_URL}/productRelease/{uuid}",
+            json={
+                "uuid": uuid,
+                "version": "1.0.0",
+                "createdDate": "2024-01-01T00:00:00Z",
+                "components": [{"uuid": comp_uuid}],
+            },
+        )
+        responses.get(
+            f"{BASE_URL}/component/{comp_uuid}",
+            json={"uuid": comp_uuid, "name": "Component Without Release", "identifiers": []},
+        )
+        result = runner.invoke(app, ["inspect", tei, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data[0]["components"]) == 1
+        assert data[0]["components"][0]["name"] == "Component Without Release"
+
+
+class TestCLITeiAutoDiscovery:
+    """Test TEI auto-discovery: when neither --base-url nor --domain is given."""
+
+    @responses.activate
+    def test_discover_auto_extracts_domain_from_tei(self):
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        responses.get(
+            "https://example.com/.well-known/tea",
+            json={
+                "schemaVersion": 1,
+                "endpoints": [{"url": "https://api.example.com", "versions": ["0.3.0-beta.2"]}],
+            },
+        )
+        responses.head("https://api.example.com/v0.3.0-beta.2", status=200)
+        responses.get(
+            "https://api.example.com/v0.3.0-beta.2/discovery",
+            json=[
+                {
+                    "productReleaseUuid": "abc-123",
+                    "servers": [{"rootUrl": "https://tea.example.com", "versions": ["1.0.0"]}],
+                }
+            ],
+        )
+        result = runner.invoke(app, ["discover", tei])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 1
+
+
+class TestCLIEntryPointErrors:
+    """Test _cli_entry.py error handling."""
+
+    def test_cli_entry_import_error(self):
+        """Test that _cli_entry handles missing typer gracefully."""
+        from libtea._cli_entry import main
+
+        assert callable(main)
+
+    def test_cli_entry_main_invokes_app(self):
+        """Test that main() calls app() when typer is available."""
+        from unittest.mock import patch
+
+        with patch("libtea.cli.app") as mock_app:
+            from libtea._cli_entry import main
+
+            main()
+            mock_app.assert_called_once()

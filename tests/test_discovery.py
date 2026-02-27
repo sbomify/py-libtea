@@ -2,7 +2,6 @@ import pytest
 import requests
 import responses
 from pydantic import ValidationError
-from semver import Version as SemVer
 
 from libtea.discovery import _is_valid_domain, fetch_well_known, parse_tei, select_endpoint, select_endpoints
 from libtea.exceptions import TeaDiscoveryError
@@ -268,9 +267,19 @@ class TestFetchWellKnownSsrfProtection:
     @responses.activate
     def test_rejects_redirect_to_unsupported_scheme(self):
         """If the server redirects to a non-http(s) scheme, raise."""
-        # responses library doesn't truly redirect to non-http schemes,
-        # so we test that the final URL scheme validation exists by
-        # verifying a successful redirect still works
+        from unittest.mock import MagicMock, patch
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.url = "ftp://evil.example.com/.well-known/tea"
+
+        with patch("libtea.discovery.requests.get", return_value=mock_response):
+            with pytest.raises(TeaDiscoveryError, match="unsupported scheme.*ftp"):
+                fetch_well_known("example.com")
+
+    @responses.activate
+    def test_allows_https_redirect(self):
+        """A normal HTTPS redirect should succeed."""
         responses.get(
             "https://example.com/.well-known/tea",
             json={
@@ -443,71 +452,6 @@ class TestIsValidDomain:
         domain = ".".join(["a" * 61] * 4)
         assert len(domain) <= 253
         assert _is_valid_domain(domain)
-
-
-class TestSemVer:
-    """Tests verifying our usage patterns with the semver library."""
-
-    def test_parse_basic(self):
-        v = SemVer.parse("1.2.3")
-        assert v.major == 1
-        assert v.minor == 2
-        assert v.patch == 3
-        assert v.prerelease is None
-
-    def test_parse_with_prerelease(self):
-        v = SemVer.parse("0.3.0-beta.2")
-        assert v.major == 0
-        assert v.minor == 3
-        assert v.patch == 0
-        assert v.prerelease == "beta.2"
-
-    def test_ordering_major(self):
-        assert SemVer.parse("1.0.0") < SemVer.parse("2.0.0")
-
-    def test_ordering_minor(self):
-        assert SemVer.parse("1.0.0") < SemVer.parse("1.1.0")
-
-    def test_ordering_patch(self):
-        assert SemVer.parse("1.0.0") < SemVer.parse("1.0.1")
-
-    def test_prerelease_lower_than_release(self):
-        assert SemVer.parse("1.0.0-alpha") < SemVer.parse("1.0.0")
-
-    def test_prerelease_ordering(self):
-        """SemVer spec example: 1.0.0-alpha < 1.0.0-alpha.1 < ... < 1.0.0"""
-        versions = [
-            "1.0.0-alpha",
-            "1.0.0-alpha.1",
-            "1.0.0-alpha.beta",
-            "1.0.0-beta",
-            "1.0.0-beta.2",
-            "1.0.0-beta.11",
-            "1.0.0-rc.1",
-            "1.0.0",
-        ]
-        parsed = [SemVer.parse(v) for v in versions]
-        for i in range(len(parsed) - 1):
-            assert parsed[i] < parsed[i + 1], f"{versions[i]} should be < {versions[i + 1]}"
-
-    def test_numeric_prerelease_less_than_alpha(self):
-        assert SemVer.parse("1.0.0-1") < SemVer.parse("1.0.0-alpha")
-
-    def test_invalid_semver_raises(self):
-        with pytest.raises(ValueError):
-            SemVer.parse("not-a-version")
-
-    def test_two_part_version_rejected(self):
-        with pytest.raises(ValueError):
-            SemVer.parse("1.0")
-
-    def test_single_number_rejected(self):
-        with pytest.raises(ValueError):
-            SemVer.parse("1")
-
-    def test_equality(self):
-        assert SemVer.parse("1.0.0") == SemVer.parse("1.0.0")
-        assert SemVer.parse("1.0.0-beta.2") == SemVer.parse("1.0.0-beta.2")
 
 
 class TestSelectEndpoints:

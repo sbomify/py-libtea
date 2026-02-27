@@ -2,6 +2,7 @@
 
 import logging
 import warnings
+from typing import Any
 from urllib.parse import urlparse
 
 import requests
@@ -107,7 +108,7 @@ def fetch_well_known(
     else:
         url = f"{scheme}://{domain}:{resolved_port}/.well-known/tea"
 
-    kwargs: dict = {"timeout": timeout, "allow_redirects": True, "headers": {"user-agent": USER_AGENT}}
+    kwargs: dict[str, Any] = {"timeout": timeout, "allow_redirects": True, "headers": {"user-agent": USER_AGENT}}
     if mtls:
         kwargs["cert"] = (str(mtls.client_cert), str(mtls.client_key))
         if mtls.ca_bundle:

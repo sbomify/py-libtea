@@ -3,7 +3,7 @@
 import json
 import sys
 from pathlib import Path
-from typing import Annotated, Any, NoReturn, Optional
+from typing import Annotated, Any, NoReturn
 
 import typer
 from pydantic import BaseModel
@@ -124,16 +124,16 @@ def _error(message: str) -> NoReturn:
 @app.command()
 def discover(
     tei: str,
-    base_url: Annotated[Optional[str], _base_url_opt] = None,
-    token: Annotated[Optional[str], _token_opt] = None,
-    auth: Annotated[Optional[str], _auth_opt] = None,
-    domain: Annotated[Optional[str], _domain_opt] = None,
+    base_url: Annotated[str | None, _base_url_opt] = None,
+    token: Annotated[str | None, _token_opt] = None,
+    auth: Annotated[str | None, _auth_opt] = None,
+    domain: Annotated[str | None, _domain_opt] = None,
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[Optional[int], _port_opt] = None,
-    client_cert: Annotated[Optional[str], _client_cert_opt] = None,
-    client_key: Annotated[Optional[str], _client_key_opt] = None,
-    ca_bundle: Annotated[Optional[str], _ca_bundle_opt] = None,
+    port: Annotated[int | None, _port_opt] = None,
+    client_cert: Annotated[str | None, _client_cert_opt] = None,
+    client_key: Annotated[str | None, _client_key_opt] = None,
+    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ):
     """Resolve a TEI to product release UUID(s)."""
     try:
@@ -152,16 +152,16 @@ def search_products(
     id_value: Annotated[str, typer.Option("--id-value", help="Identifier value")],
     page_offset: Annotated[int, typer.Option("--page-offset", help="Page offset")] = 0,
     page_size: Annotated[int, typer.Option("--page-size", help="Page size")] = 100,
-    base_url: Annotated[Optional[str], _base_url_opt] = None,
-    token: Annotated[Optional[str], _token_opt] = None,
-    auth: Annotated[Optional[str], _auth_opt] = None,
-    domain: Annotated[Optional[str], _domain_opt] = None,
+    base_url: Annotated[str | None, _base_url_opt] = None,
+    token: Annotated[str | None, _token_opt] = None,
+    auth: Annotated[str | None, _auth_opt] = None,
+    domain: Annotated[str | None, _domain_opt] = None,
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[Optional[int], _port_opt] = None,
-    client_cert: Annotated[Optional[str], _client_cert_opt] = None,
-    client_key: Annotated[Optional[str], _client_key_opt] = None,
-    ca_bundle: Annotated[Optional[str], _ca_bundle_opt] = None,
+    port: Annotated[int | None, _port_opt] = None,
+    client_cert: Annotated[str | None, _client_cert_opt] = None,
+    client_key: Annotated[str | None, _client_key_opt] = None,
+    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ):
     """Search for products by identifier."""
     try:
@@ -180,16 +180,16 @@ def search_releases(
     id_value: Annotated[str, typer.Option("--id-value", help="Identifier value")],
     page_offset: Annotated[int, typer.Option("--page-offset", help="Page offset")] = 0,
     page_size: Annotated[int, typer.Option("--page-size", help="Page size")] = 100,
-    base_url: Annotated[Optional[str], _base_url_opt] = None,
-    token: Annotated[Optional[str], _token_opt] = None,
-    auth: Annotated[Optional[str], _auth_opt] = None,
-    domain: Annotated[Optional[str], _domain_opt] = None,
+    base_url: Annotated[str | None, _base_url_opt] = None,
+    token: Annotated[str | None, _token_opt] = None,
+    auth: Annotated[str | None, _auth_opt] = None,
+    domain: Annotated[str | None, _domain_opt] = None,
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[Optional[int], _port_opt] = None,
-    client_cert: Annotated[Optional[str], _client_cert_opt] = None,
-    client_key: Annotated[Optional[str], _client_key_opt] = None,
-    ca_bundle: Annotated[Optional[str], _ca_bundle_opt] = None,
+    port: Annotated[int | None, _port_opt] = None,
+    client_cert: Annotated[str | None, _client_cert_opt] = None,
+    client_key: Annotated[str | None, _client_key_opt] = None,
+    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ):
     """Search for product releases by identifier."""
     try:
@@ -205,16 +205,16 @@ def search_releases(
 @app.command("get-product")
 def get_product(
     uuid: str,
-    base_url: Annotated[Optional[str], _base_url_opt] = None,
-    token: Annotated[Optional[str], _token_opt] = None,
-    auth: Annotated[Optional[str], _auth_opt] = None,
-    domain: Annotated[Optional[str], _domain_opt] = None,
+    base_url: Annotated[str | None, _base_url_opt] = None,
+    token: Annotated[str | None, _token_opt] = None,
+    auth: Annotated[str | None, _auth_opt] = None,
+    domain: Annotated[str | None, _domain_opt] = None,
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[Optional[int], _port_opt] = None,
-    client_cert: Annotated[Optional[str], _client_cert_opt] = None,
-    client_key: Annotated[Optional[str], _client_key_opt] = None,
-    ca_bundle: Annotated[Optional[str], _ca_bundle_opt] = None,
+    port: Annotated[int | None, _port_opt] = None,
+    client_cert: Annotated[str | None, _client_cert_opt] = None,
+    client_key: Annotated[str | None, _client_key_opt] = None,
+    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ):
     """Get a product by UUID."""
     try:
@@ -233,16 +233,16 @@ def get_release(
     component: Annotated[
         bool, typer.Option("--component", help="Get a component release instead of product release")
     ] = False,
-    base_url: Annotated[Optional[str], _base_url_opt] = None,
-    token: Annotated[Optional[str], _token_opt] = None,
-    auth: Annotated[Optional[str], _auth_opt] = None,
-    domain: Annotated[Optional[str], _domain_opt] = None,
+    base_url: Annotated[str | None, _base_url_opt] = None,
+    token: Annotated[str | None, _token_opt] = None,
+    auth: Annotated[str | None, _auth_opt] = None,
+    domain: Annotated[str | None, _domain_opt] = None,
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[Optional[int], _port_opt] = None,
-    client_cert: Annotated[Optional[str], _client_cert_opt] = None,
-    client_key: Annotated[Optional[str], _client_key_opt] = None,
-    ca_bundle: Annotated[Optional[str], _ca_bundle_opt] = None,
+    port: Annotated[int | None, _port_opt] = None,
+    client_cert: Annotated[str | None, _client_cert_opt] = None,
+    client_key: Annotated[str | None, _client_key_opt] = None,
+    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ):
     """Get a product or component release by UUID."""
     try:
@@ -261,20 +261,20 @@ def get_release(
 @app.command("get-collection")
 def get_collection(
     uuid: str,
-    version: Annotated[Optional[int], typer.Option("--version", help="Collection version (default: latest)")] = None,
+    version: Annotated[int | None, typer.Option("--version", help="Collection version (default: latest)")] = None,
     component: Annotated[
         bool, typer.Option("--component", help="Get from component release instead of product release")
     ] = False,
-    base_url: Annotated[Optional[str], _base_url_opt] = None,
-    token: Annotated[Optional[str], _token_opt] = None,
-    auth: Annotated[Optional[str], _auth_opt] = None,
-    domain: Annotated[Optional[str], _domain_opt] = None,
+    base_url: Annotated[str | None, _base_url_opt] = None,
+    token: Annotated[str | None, _token_opt] = None,
+    auth: Annotated[str | None, _auth_opt] = None,
+    domain: Annotated[str | None, _domain_opt] = None,
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[Optional[int], _port_opt] = None,
-    client_cert: Annotated[Optional[str], _client_cert_opt] = None,
-    client_key: Annotated[Optional[str], _client_key_opt] = None,
-    ca_bundle: Annotated[Optional[str], _ca_bundle_opt] = None,
+    port: Annotated[int | None, _port_opt] = None,
+    client_cert: Annotated[str | None, _client_cert_opt] = None,
+    client_key: Annotated[str | None, _client_key_opt] = None,
+    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ):
     """Get a collection (latest or by version)."""
     try:
@@ -299,16 +299,16 @@ def get_collection(
 @app.command("get-artifact")
 def get_artifact(
     uuid: str,
-    base_url: Annotated[Optional[str], _base_url_opt] = None,
-    token: Annotated[Optional[str], _token_opt] = None,
-    auth: Annotated[Optional[str], _auth_opt] = None,
-    domain: Annotated[Optional[str], _domain_opt] = None,
+    base_url: Annotated[str | None, _base_url_opt] = None,
+    token: Annotated[str | None, _token_opt] = None,
+    auth: Annotated[str | None, _auth_opt] = None,
+    domain: Annotated[str | None, _domain_opt] = None,
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[Optional[int], _port_opt] = None,
-    client_cert: Annotated[Optional[str], _client_cert_opt] = None,
-    client_key: Annotated[Optional[str], _client_key_opt] = None,
-    ca_bundle: Annotated[Optional[str], _ca_bundle_opt] = None,
+    port: Annotated[int | None, _port_opt] = None,
+    client_cert: Annotated[str | None, _client_cert_opt] = None,
+    client_key: Annotated[str | None, _client_key_opt] = None,
+    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ):
     """Get artifact metadata by UUID."""
     try:
@@ -325,22 +325,20 @@ def get_artifact(
 def download(
     url: str,
     dest: Path,
-    checksum: Annotated[
-        Optional[list[str]], typer.Option("--checksum", help="Checksum as ALG:VALUE (repeatable)")
-    ] = None,
+    checksum: Annotated[list[str] | None, typer.Option("--checksum", help="Checksum as ALG:VALUE (repeatable)")] = None,
     max_download_bytes: Annotated[
-        Optional[int], typer.Option("--max-download-bytes", help="Maximum download size in bytes")
+        int | None, typer.Option("--max-download-bytes", help="Maximum download size in bytes")
     ] = None,
-    base_url: Annotated[Optional[str], _base_url_opt] = None,
-    token: Annotated[Optional[str], _token_opt] = None,
-    auth: Annotated[Optional[str], _auth_opt] = None,
-    domain: Annotated[Optional[str], _domain_opt] = None,
+    base_url: Annotated[str | None, _base_url_opt] = None,
+    token: Annotated[str | None, _token_opt] = None,
+    auth: Annotated[str | None, _auth_opt] = None,
+    domain: Annotated[str | None, _domain_opt] = None,
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[Optional[int], _port_opt] = None,
-    client_cert: Annotated[Optional[str], _client_cert_opt] = None,
-    client_key: Annotated[Optional[str], _client_key_opt] = None,
-    ca_bundle: Annotated[Optional[str], _ca_bundle_opt] = None,
+    port: Annotated[int | None, _port_opt] = None,
+    client_cert: Annotated[str | None, _client_cert_opt] = None,
+    client_key: Annotated[str | None, _client_key_opt] = None,
+    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ):
     """Download an artifact file with optional checksum verification."""
     checksums = None
@@ -376,16 +374,16 @@ def inspect(
     max_components: Annotated[
         int, typer.Option("--max-components", help="Maximum number of components to fetch per release")
     ] = 50,
-    base_url: Annotated[Optional[str], _base_url_opt] = None,
-    token: Annotated[Optional[str], _token_opt] = None,
-    auth: Annotated[Optional[str], _auth_opt] = None,
-    domain: Annotated[Optional[str], _domain_opt] = None,
+    base_url: Annotated[str | None, _base_url_opt] = None,
+    token: Annotated[str | None, _token_opt] = None,
+    auth: Annotated[str | None, _auth_opt] = None,
+    domain: Annotated[str | None, _domain_opt] = None,
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[Optional[int], _port_opt] = None,
-    client_cert: Annotated[Optional[str], _client_cert_opt] = None,
-    client_key: Annotated[Optional[str], _client_key_opt] = None,
-    ca_bundle: Annotated[Optional[str], _ca_bundle_opt] = None,
+    port: Annotated[int | None, _port_opt] = None,
+    client_cert: Annotated[str | None, _client_cert_opt] = None,
+    client_key: Annotated[str | None, _client_key_opt] = None,
+    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ):
     """Full flow: TEI -> discovery -> releases -> artifacts."""
     try:
@@ -435,7 +433,7 @@ def _version_callback(value: bool) -> None:
 @app.callback()
 def main(
     version: Annotated[
-        Optional[bool], typer.Option("--version", callback=_version_callback, is_eager=True, help="Show version")
+        bool | None, typer.Option("--version", callback=_version_callback, is_eager=True, help="Show version")
     ] = None,
 ):
     """TEA (Transparency Exchange API) CLI client."""

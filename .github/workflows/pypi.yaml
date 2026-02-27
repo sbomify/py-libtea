@@ -53,6 +53,11 @@ jobs:
 
       - uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b # v7.3.0
 
+      - name: Run tests
+        run: |
+          uv sync
+          uv run pytest --cov=libtea --cov-report=term-missing --cov-fail-under=90
+
       - name: Build package
         run: uv build
 
