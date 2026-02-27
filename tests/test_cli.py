@@ -848,3 +848,298 @@ class TestCLIDiscoverQuiet:
         result = runner.invoke(app, ["discover", "--help"])
         assert "--quiet" in result.output
         assert "-q" in result.output
+
+
+class TestNewCommands:
+    """Tests for newly added CLI commands: get-product-releases, get-component,
+    get-component-releases, list-collections, get-cle."""
+
+    @responses.activate
+    def test_get_product_releases(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/product/{uuid}/releases",
+            json={
+                "timestamp": "2024-01-01T00:00:00Z",
+                "pageStartIndex": 0,
+                "pageSize": 100,
+                "totalResults": 1,
+                "results": [
+                    {
+                        "uuid": uuid,
+                        "version": "1.0.0",
+                        "createdDate": "2024-01-01T00:00:00Z",
+                        "components": [],
+                    }
+                ],
+            },
+        )
+        result = runner.invoke(app, ["--json", "get-product-releases", uuid, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["totalResults"] == 1
+        assert data["results"][0]["version"] == "1.0.0"
+
+    @responses.activate
+    def test_get_product_releases_with_pagination(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/product/{uuid}/releases",
+            json={
+                "timestamp": "2024-01-01T00:00:00Z",
+                "pageStartIndex": 10,
+                "pageSize": 5,
+                "totalResults": 20,
+                "results": [],
+            },
+        )
+        result = runner.invoke(
+            app,
+            ["--json", "get-product-releases", uuid, "--page-offset", "10", "--page-size", "5", "--base-url", BASE_URL],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["pageStartIndex"] == 10
+
+    @responses.activate
+    def test_get_component(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/component/{uuid}",
+            json={"uuid": uuid, "name": "My Component", "identifiers": []},
+        )
+        result = runner.invoke(app, ["--json", "get-component", uuid, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["name"] == "My Component"
+
+    @responses.activate
+    def test_get_component_rich_output(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/component/{uuid}",
+            json={"uuid": uuid, "name": "My Component", "identifiers": []},
+        )
+        result = runner.invoke(app, ["get-component", uuid, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        assert "My Component" in result.output
+
+    @responses.activate
+    def test_get_component_releases(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        rel_uuid = "e5e0a65b-bddf-22ff-bd8a-2b63a25e55c2"
+        responses.get(
+            f"{BASE_URL}/component/{uuid}/releases",
+            json=[
+                {"uuid": rel_uuid, "version": "1.0.0", "createdDate": "2024-01-01T00:00:00Z"},
+                {"uuid": uuid, "version": "2.0.0", "createdDate": "2024-06-01T00:00:00Z"},
+            ],
+        )
+        result = runner.invoke(app, ["--json", "get-component-releases", uuid, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 2
+        assert data[0]["version"] == "1.0.0"
+
+    @responses.activate
+    def test_get_component_releases_rich_output(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/component/{uuid}/releases",
+            json=[
+                {
+                    "uuid": uuid,
+                    "version": "1.0.0",
+                    "componentName": "App",
+                    "createdDate": "2024-01-01T00:00:00Z",
+                },
+            ],
+        )
+        result = runner.invoke(app, ["get-component-releases", uuid, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        assert "Component Releases" in result.output
+
+    @responses.activate
+    def test_list_collections_product_release(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/productRelease/{uuid}/collections",
+            json=[
+                {"uuid": uuid, "version": 1, "artifacts": []},
+                {"uuid": uuid, "version": 2, "artifacts": []},
+            ],
+        )
+        result = runner.invoke(app, ["--json", "list-collections", uuid, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 2
+
+    @responses.activate
+    def test_list_collections_component_release(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/componentRelease/{uuid}/collections",
+            json=[{"uuid": uuid, "version": 1, "artifacts": []}],
+        )
+        result = runner.invoke(app, ["--json", "list-collections", uuid, "--component", "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 1
+
+    @responses.activate
+    def test_list_collections_rich_output(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/productRelease/{uuid}/collections",
+            json=[
+                {"uuid": uuid, "version": 1, "date": "2024-01-01T00:00:00Z", "artifacts": []},
+                {"uuid": uuid, "version": 2, "date": "2024-06-01T00:00:00Z", "artifacts": []},
+            ],
+        )
+        result = runner.invoke(app, ["list-collections", uuid, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        assert "Collections" in result.output
+
+    @responses.activate
+    def test_get_cle_product_release(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/productRelease/{uuid}/cle",
+            json={
+                "events": [
+                    {
+                        "id": 1,
+                        "type": "released",
+                        "effective": "2024-01-15T00:00:00Z",
+                        "published": "2024-01-15T00:00:00Z",
+                        "version": "1.0.0",
+                    }
+                ]
+            },
+        )
+        result = runner.invoke(app, ["--json", "get-cle", uuid, "--entity", "product-release", "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data["events"]) == 1
+        assert data["events"][0]["type"] == "released"
+
+    @responses.activate
+    def test_get_cle_product(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/product/{uuid}/cle",
+            json={
+                "events": [
+                    {
+                        "id": 1,
+                        "type": "endOfLife",
+                        "effective": "2025-12-31T00:00:00Z",
+                        "published": "2025-01-01T00:00:00Z",
+                    }
+                ]
+            },
+        )
+        result = runner.invoke(app, ["--json", "get-cle", uuid, "--entity", "product", "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["events"][0]["type"] == "endOfLife"
+
+    @responses.activate
+    def test_get_cle_component(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/component/{uuid}/cle",
+            json={
+                "events": [
+                    {
+                        "id": 1,
+                        "type": "released",
+                        "effective": "2024-01-15T00:00:00Z",
+                        "published": "2024-01-15T00:00:00Z",
+                        "version": "1.0.0",
+                    }
+                ]
+            },
+        )
+        result = runner.invoke(app, ["--json", "get-cle", uuid, "--entity", "component", "--base-url", BASE_URL])
+        assert result.exit_code == 0
+
+    @responses.activate
+    def test_get_cle_component_release(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/componentRelease/{uuid}/cle",
+            json={
+                "events": [
+                    {
+                        "id": 1,
+                        "type": "released",
+                        "effective": "2024-01-15T00:00:00Z",
+                        "published": "2024-01-15T00:00:00Z",
+                        "version": "1.0.0",
+                    }
+                ]
+            },
+        )
+        result = runner.invoke(
+            app, ["--json", "get-cle", uuid, "--entity", "component-release", "--base-url", BASE_URL]
+        )
+        assert result.exit_code == 0
+
+    def test_get_cle_invalid_entity(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        result = runner.invoke(app, ["get-cle", uuid, "--entity", "invalid", "--base-url", BASE_URL])
+        assert result.exit_code == 1
+        assert "Invalid --entity" in result.output
+
+    @responses.activate
+    def test_get_cle_default_entity_is_product_release(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/productRelease/{uuid}/cle",
+            json={
+                "events": [
+                    {
+                        "id": 1,
+                        "type": "released",
+                        "effective": "2024-01-15T00:00:00Z",
+                        "published": "2024-01-15T00:00:00Z",
+                        "version": "1.0.0",
+                    }
+                ]
+            },
+        )
+        result = runner.invoke(app, ["--json", "get-cle", uuid, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data["events"]) == 1
+
+    @responses.activate
+    def test_get_cle_rich_output(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/productRelease/{uuid}/cle",
+            json={
+                "events": [
+                    {
+                        "id": 1,
+                        "type": "released",
+                        "effective": "2024-01-15T00:00:00Z",
+                        "published": "2024-01-15T00:00:00Z",
+                        "version": "1.0.0",
+                    }
+                ]
+            },
+        )
+        result = runner.invoke(app, ["get-cle", uuid, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        assert "Lifecycle Events" in result.output
+
+    def test_new_commands_in_help(self):
+        result = runner.invoke(app, ["--help"])
+        assert result.exit_code == 0
+        assert "get-product-releases" in result.output
+        assert "get-component" in result.output
+        assert "get-component-releases" in result.output
+        assert "list-collections" in result.output
+        assert "get-cle" in result.output

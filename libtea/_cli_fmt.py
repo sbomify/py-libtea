@@ -16,9 +16,11 @@ from rich.table import Table
 from rich.text import Text
 
 from libtea.models import (
+    CLE,
     Artifact,
     ArtifactFormat,
     Collection,
+    Component,
     ComponentReleaseWithCollection,
     DiscoveryInfo,
     Identifier,
@@ -26,6 +28,7 @@ from libtea.models import (
     PaginatedProductResponse,
     Product,
     ProductRelease,
+    Release,
     ReleaseDistribution,
 )
 
@@ -247,6 +250,103 @@ def fmt_artifact(data: Artifact, *, console: Console) -> None:
     _formats_table(data.formats, console=console)
 
 
+def fmt_component(data: Component, *, console: Console) -> None:
+    """Render a single component as a panel."""
+    _kv_panel(
+        "Component",
+        [("UUID", data.uuid), ("Name", data.name), ("Identifiers", _fmt_identifiers(data.identifiers))],
+        console=console,
+    )
+
+
+def fmt_releases(data: list[Release], *, console: Console) -> None:
+    """Render a list of component releases as a table."""
+    tbl = Table(title="Component Releases")
+    tbl.add_column("UUID", style="cyan", no_wrap=True)
+    tbl.add_column("Version")
+    tbl.add_column("Component")
+    tbl.add_column("Created")
+    tbl.add_column("Released")
+    tbl.add_column("Pre-release")
+    tbl.add_column("Identifiers")
+    for r in data:
+        tbl.add_row(
+            r.uuid,
+            r.version,
+            _opt(r.component_name),
+            str(r.created_date),
+            _opt(r.release_date),
+            _opt(r.pre_release),
+            _fmt_identifiers(r.identifiers),
+        )
+    console.print(tbl)
+
+
+def fmt_collections(data: list[Collection], *, console: Console) -> None:
+    """Render a list of collections as a table."""
+    tbl = Table(title="Collections")
+    tbl.add_column("UUID", style="cyan", no_wrap=True)
+    tbl.add_column("Version", justify="right")
+    tbl.add_column("Date")
+    tbl.add_column("Belongs To")
+    tbl.add_column("Artifacts")
+    for col in data:
+        tbl.add_row(
+            _opt(col.uuid),
+            _opt(col.version),
+            _opt(col.date),
+            _opt(col.belongs_to),
+            str(len(col.artifacts)),
+        )
+    console.print(tbl)
+
+
+def fmt_cle(data: CLE, *, console: Console) -> None:
+    """Render a CLE document with events table and optional definitions."""
+    if data.definitions and data.definitions.support:
+        tbl = Table(title="Support Definitions")
+        tbl.add_column("ID", style="cyan")
+        tbl.add_column("Description")
+        tbl.add_column("URL")
+        for defn in data.definitions.support:
+            tbl.add_row(defn.id, defn.description, _opt(defn.url))
+        console.print(tbl)
+
+    tbl = Table(title="Lifecycle Events")
+    tbl.add_column("ID", justify="right")
+    tbl.add_column("Type", style="bold")
+    tbl.add_column("Effective")
+    tbl.add_column("Published")
+    tbl.add_column("Version")
+    tbl.add_column("Details")
+    for ev in data.events:
+        details_parts: list[str] = []
+        if ev.support_id:
+            details_parts.append(f"support={ev.support_id}")
+        if ev.license:
+            details_parts.append(f"license={ev.license}")
+        if ev.superseded_by_version:
+            details_parts.append(f"superseded_by={ev.superseded_by_version}")
+        if ev.reason:
+            details_parts.append(f"reason={ev.reason}")
+        if ev.event_id is not None:
+            details_parts.append(f"event_id={ev.event_id}")
+        details = ", ".join(details_parts) or "-"
+        version = ev.version or "-"
+        if ev.versions:
+            ranges = ", ".join(v.version or v.range or "?" for v in ev.versions)
+            version = ranges
+        tbl.add_row(
+            str(ev.id),
+            ev.type.value,
+            str(ev.effective),
+            str(ev.published),
+            version,
+            details,
+        )
+    console.print(tbl)
+
+
 def fmt_inspect(data: list[dict], *, console: Console) -> None:
     """Render the full inspect output (discovery + release + components)."""
     for entry in data:
@@ -357,6 +457,8 @@ _TYPE_FORMATTERS = {
     ComponentReleaseWithCollection: fmt_component_release,
     Collection: fmt_collection,
     Artifact: fmt_artifact,
+    Component: fmt_component,
+    CLE: fmt_cle,
     PaginatedProductResponse: fmt_search_products,
     PaginatedProductReleaseResponse: fmt_search_releases,
 }
@@ -375,6 +477,14 @@ def format_output(data: object, *, command: str | None = None, console: Console 
 
     if command == "discover" and isinstance(data, list):
         fmt_discover(data, console=c)
+        return
+
+    if command == "releases" and isinstance(data, list):
+        fmt_releases(data, console=c)
+        return
+
+    if command == "collections" and isinstance(data, list):
+        fmt_collections(data, console=c)
         return
 
     for model_type, formatter in _TYPE_FORMATTERS.items():

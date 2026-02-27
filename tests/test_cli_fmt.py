@@ -12,25 +12,35 @@ from libtea._cli_fmt import (  # noqa: E402
     _fmt_identifiers,
     _opt,
     fmt_artifact,
+    fmt_cle,
     fmt_collection,
+    fmt_collections,
+    fmt_component,
     fmt_component_release,
     fmt_discover,
     fmt_inspect,
     fmt_product,
     fmt_product_release,
+    fmt_releases,
     fmt_search_products,
     fmt_search_releases,
     format_output,
 )
 from libtea.models import (  # noqa: E402
+    CLE,
     Artifact,
     ArtifactFormat,
     Checksum,
     ChecksumAlgorithm,
+    CLEDefinitions,
+    CLEEvent,
+    CLEEventType,
+    CLESupportDefinition,
     Collection,
     CollectionBelongsTo,
     CollectionUpdateReason,
     CollectionUpdateReasonType,
+    Component,
     ComponentReleaseWithCollection,
     DiscoveryInfo,
     Identifier,
@@ -664,3 +674,171 @@ class TestArtifactFormatDetails:
         assert "CycloneDX VDR (XML)" in output
         assert "vdr.xml.asc" in output
         assert "zip" in output
+
+
+UUID = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+UUID2 = "e5e0a65b-bddf-22ff-bd8a-2b63a25e55c2"
+
+
+class TestComponentFormatter:
+    def test_fmt_component(self):
+        comp = Component(
+            uuid=UUID,
+            name="My Component",
+            identifiers=[Identifier(id_type="PURL", id_value="pkg:pypi/test")],
+        )
+        output = _capture(fmt_component, comp)
+        assert UUID in output
+        assert "My Component" in output
+        assert "PURL:pkg:pypi/test" in output
+
+    def test_format_output_dispatches_component(self):
+        comp = Component(uuid=UUID, name="Comp", identifiers=[])
+        output = _capture(format_output, comp)
+        assert "Comp" in output
+
+
+class TestReleasesFormatter:
+    def test_fmt_releases(self):
+        releases = [
+            Release(
+                uuid=UUID,
+                version="1.0.0",
+                component_name="App",
+                created_date="2024-01-01T00:00:00Z",
+                release_date="2024-02-01T00:00:00Z",
+                pre_release=False,
+            ),
+            Release(
+                uuid=UUID2,
+                version="2.0.0",
+                component_name="App",
+                created_date="2024-06-01T00:00:00Z",
+            ),
+        ]
+        output = _capture(fmt_releases, releases)
+        assert "Component Releases" in output
+        assert "1.0.0" in output
+        assert "2.0.0" in output
+        assert "App" in output
+
+    def test_format_output_releases_command(self):
+        releases = [
+            Release(uuid=UUID, version="1.0.0", created_date="2024-01-01T00:00:00Z"),
+        ]
+        output = _capture(format_output, releases, command="releases")
+        assert "Component Releases" in output
+        assert "1.0.0" in output
+
+
+class TestCollectionsFormatter:
+    def test_fmt_collections(self):
+        cols = [
+            Collection(uuid=UUID, version=1, date="2024-01-01T00:00:00Z", belongs_to="COMPONENT_RELEASE", artifacts=[]),
+            Collection(
+                uuid=UUID2,
+                version=2,
+                date="2024-06-01T00:00:00Z",
+                belongs_to="COMPONENT_RELEASE",
+                artifacts=[Artifact(uuid=UUID, name="SBOM", type="BOM", formats=[])],
+            ),
+        ]
+        output = _capture(fmt_collections, cols)
+        assert "Collections" in output
+        assert UUID in output
+        assert UUID2 in output
+        # Second collection has 1 artifact
+        assert "1" in output
+
+    def test_format_output_collections_command(self):
+        cols = [Collection(uuid=UUID, version=1, artifacts=[])]
+        output = _capture(format_output, cols, command="collections")
+        assert "Collections" in output
+
+
+class TestCLEFormatter:
+    def test_fmt_cle_basic(self):
+        cle = CLE(
+            events=[
+                CLEEvent(
+                    id=1,
+                    type=CLEEventType.RELEASED,
+                    effective="2024-01-15T00:00:00Z",
+                    published="2024-01-15T00:00:00Z",
+                    version="1.0.0",
+                    license="Apache-2.0",
+                ),
+                CLEEvent(
+                    id=2,
+                    type=CLEEventType.END_OF_SUPPORT,
+                    effective="2025-01-15T00:00:00Z",
+                    published="2024-06-01T00:00:00Z",
+                    support_id="standard",
+                    reason="EOL",
+                ),
+            ]
+        )
+        output = _capture(fmt_cle, cle)
+        assert "Lifecycle Events" in output
+        assert "released" in output
+        assert "endOfSupport" in output
+        assert "1.0.0" in output
+        assert "license=Apache-2.0" in output
+        assert "support=standard" in output
+        assert "reason=EOL" in output
+
+    def test_fmt_cle_with_definitions(self):
+        cle = CLE(
+            definitions=CLEDefinitions(
+                support=[
+                    CLESupportDefinition(
+                        id="standard", description="Standard support", url="https://example.com/support"
+                    ),
+                ]
+            ),
+            events=[
+                CLEEvent(
+                    id=1,
+                    type=CLEEventType.RELEASED,
+                    effective="2024-01-15T00:00:00Z",
+                    published="2024-01-15T00:00:00Z",
+                    version="1.0.0",
+                ),
+            ],
+        )
+        output = _capture(fmt_cle, cle)
+        assert "Support Definitions" in output
+        assert "standard" in output
+        assert "Standard support" in output
+        assert "example.com/support" in output
+
+    def test_fmt_cle_superseded(self):
+        cle = CLE(
+            events=[
+                CLEEvent(
+                    id=1,
+                    type=CLEEventType.SUPERSEDED_BY,
+                    effective="2024-01-15T00:00:00Z",
+                    published="2024-01-15T00:00:00Z",
+                    superseded_by_version="2.0.0",
+                ),
+            ]
+        )
+        output = _capture(fmt_cle, cle)
+        assert "supersededBy" in output
+        assert "superseded_by=2.0.0" in output
+
+    def test_format_output_dispatches_cle(self):
+        cle = CLE(
+            events=[
+                CLEEvent(
+                    id=1,
+                    type=CLEEventType.RELEASED,
+                    effective="2024-01-15T00:00:00Z",
+                    published="2024-01-15T00:00:00Z",
+                    version="1.0.0",
+                ),
+            ]
+        )
+        output = _capture(format_output, cle)
+        assert "Lifecycle Events" in output

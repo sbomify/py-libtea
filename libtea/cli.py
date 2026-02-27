@@ -333,6 +333,154 @@ def get_collection(
         _error(str(exc))
 
 
+@app.command("get-product-releases")
+def get_product_releases(
+    uuid: str,
+    page_offset: Annotated[int, typer.Option("--page-offset", help="Page offset")] = 0,
+    page_size: Annotated[int, typer.Option("--page-size", help="Page size")] = 100,
+    base_url: Annotated[str | None, _base_url_opt] = None,
+    token: Annotated[str | None, _token_opt] = None,
+    auth: Annotated[str | None, _auth_opt] = None,
+    domain: Annotated[str | None, _domain_opt] = None,
+    timeout: Annotated[float, _timeout_opt] = 30.0,
+    use_http: Annotated[bool, _use_http_opt] = False,
+    port: Annotated[int | None, _port_opt] = None,
+    client_cert: Annotated[str | None, _client_cert_opt] = None,
+    client_key: Annotated[str | None, _client_key_opt] = None,
+    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
+):
+    """List releases for a product UUID."""
+    try:
+        with _build_client(
+            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle
+        ) as client:
+            result = client.get_product_releases(uuid, page_offset=page_offset, page_size=page_size)
+        _output(result)
+    except TeaError as exc:
+        _error(str(exc))
+
+
+@app.command("get-component")
+def get_component(
+    uuid: str,
+    base_url: Annotated[str | None, _base_url_opt] = None,
+    token: Annotated[str | None, _token_opt] = None,
+    auth: Annotated[str | None, _auth_opt] = None,
+    domain: Annotated[str | None, _domain_opt] = None,
+    timeout: Annotated[float, _timeout_opt] = 30.0,
+    use_http: Annotated[bool, _use_http_opt] = False,
+    port: Annotated[int | None, _port_opt] = None,
+    client_cert: Annotated[str | None, _client_cert_opt] = None,
+    client_key: Annotated[str | None, _client_key_opt] = None,
+    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
+):
+    """Get a component by UUID."""
+    try:
+        with _build_client(
+            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle
+        ) as client:
+            result = client.get_component(uuid)
+        _output(result)
+    except TeaError as exc:
+        _error(str(exc))
+
+
+@app.command("get-component-releases")
+def get_component_releases(
+    uuid: str,
+    base_url: Annotated[str | None, _base_url_opt] = None,
+    token: Annotated[str | None, _token_opt] = None,
+    auth: Annotated[str | None, _auth_opt] = None,
+    domain: Annotated[str | None, _domain_opt] = None,
+    timeout: Annotated[float, _timeout_opt] = 30.0,
+    use_http: Annotated[bool, _use_http_opt] = False,
+    port: Annotated[int | None, _port_opt] = None,
+    client_cert: Annotated[str | None, _client_cert_opt] = None,
+    client_key: Annotated[str | None, _client_key_opt] = None,
+    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
+):
+    """List releases for a component UUID."""
+    try:
+        with _build_client(
+            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle
+        ) as client:
+            result = client.get_component_releases(uuid)
+        _output(result, command="releases")
+    except TeaError as exc:
+        _error(str(exc))
+
+
+@app.command("list-collections")
+def list_collections(
+    uuid: str,
+    component: Annotated[
+        bool, typer.Option("--component", help="List collections for a component release instead of product release")
+    ] = False,
+    base_url: Annotated[str | None, _base_url_opt] = None,
+    token: Annotated[str | None, _token_opt] = None,
+    auth: Annotated[str | None, _auth_opt] = None,
+    domain: Annotated[str | None, _domain_opt] = None,
+    timeout: Annotated[float, _timeout_opt] = 30.0,
+    use_http: Annotated[bool, _use_http_opt] = False,
+    port: Annotated[int | None, _port_opt] = None,
+    client_cert: Annotated[str | None, _client_cert_opt] = None,
+    client_key: Annotated[str | None, _client_key_opt] = None,
+    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
+):
+    """List all collection versions for a release UUID."""
+    try:
+        with _build_client(
+            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle
+        ) as client:
+            if component:
+                result = client.get_component_release_collections(uuid)
+            else:
+                result = client.get_product_release_collections(uuid)
+        _output(result, command="collections")
+    except TeaError as exc:
+        _error(str(exc))
+
+
+@app.command("get-cle")
+def get_cle(
+    uuid: str,
+    entity: Annotated[
+        str,
+        typer.Option(
+            "--entity",
+            help="Entity type: product, product-release, component, or component-release",
+        ),
+    ] = "product-release",
+    base_url: Annotated[str | None, _base_url_opt] = None,
+    token: Annotated[str | None, _token_opt] = None,
+    auth: Annotated[str | None, _auth_opt] = None,
+    domain: Annotated[str | None, _domain_opt] = None,
+    timeout: Annotated[float, _timeout_opt] = 30.0,
+    use_http: Annotated[bool, _use_http_opt] = False,
+    port: Annotated[int | None, _port_opt] = None,
+    client_cert: Annotated[str | None, _client_cert_opt] = None,
+    client_key: Annotated[str | None, _client_key_opt] = None,
+    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
+):
+    """Get Common Lifecycle Enumeration (CLE) for an entity."""
+    entity_methods = {
+        "product": "get_product_cle",
+        "product-release": "get_product_release_cle",
+        "component": "get_component_cle",
+        "component-release": "get_component_release_cle",
+    }
+    if entity not in entity_methods:
+        _error(f"Invalid --entity: {entity!r}. Must be one of: {', '.join(entity_methods)}")
+    try:
+        with _build_client(
+            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle
+        ) as client:
+            result = getattr(client, entity_methods[entity])(uuid)
+        _output(result)
+    except TeaError as exc:
+        _error(str(exc))
+
+
 @app.command("get-artifact")
 def get_artifact(
     uuid: str,
