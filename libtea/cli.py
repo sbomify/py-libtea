@@ -1,7 +1,8 @@
 """CLI for the Transparency Exchange API.
 
 Provides the ``tea-cli`` command backed by typer. Each subcommand maps
-to a :class:`~libtea.client.TeaClient` method and outputs JSON to stdout.
+to a :class:`~libtea.client.TeaClient` method and outputs rich-formatted
+tables and panels by default (or JSON when ``--json`` is specified).
 All commands accept ``--base-url`` / ``--domain`` for server selection,
 and ``--token`` / ``--auth`` / ``--client-cert`` for authentication.
 """
@@ -19,12 +20,11 @@ from libtea._http import MtlsConfig
 from libtea.client import TEA_SPEC_VERSION, TeaClient
 from libtea.discovery import parse_tei
 from libtea.exceptions import TeaDiscoveryError, TeaError
-from libtea.models import Checksum, ChecksumAlgorithm
+from libtea.models import _CHECKSUM_NAME_TO_VALUE, Checksum, ChecksumAlgorithm
 
 app = typer.Typer(help="TEA (Transparency Exchange API) CLI client.", no_args_is_help=True)
 
 _json_output: bool = False
-_debug_output: bool = False
 
 # --- Shared options ---
 
@@ -533,6 +533,8 @@ def download(
             if ":" not in cs:
                 _error(f"Invalid checksum format: {cs!r}. Expected ALG:VALUE (e.g. SHA-256:abcdef...)")
             alg, value = cs.split(":", 1)
+            # Normalize underscore form (SHA_256) to hyphen form (SHA-256)
+            alg = _CHECKSUM_NAME_TO_VALUE.get(alg, alg)
             try:
                 alg_enum = ChecksumAlgorithm(alg)
             except ValueError:
@@ -638,9 +640,8 @@ def main(
     debug: Annotated[bool, typer.Option("--debug", "-d", help="Show debug output (HTTP requests, timing)")] = False,
 ):
     """TEA (Transparency Exchange API) CLI client."""
-    global _json_output, _debug_output  # noqa: PLW0603
+    global _json_output  # noqa: PLW0603
     _json_output = output_json
-    _debug_output = debug
     if debug:
         logging.basicConfig(format="%(levelname)s %(name)s: %(message)s", stream=sys.stderr)
         logging.getLogger("libtea").setLevel(logging.DEBUG)

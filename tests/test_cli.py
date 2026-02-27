@@ -28,10 +28,8 @@ def _strip_ansi(text: str) -> str:
 def _reset_cli_flags():
     """Reset module-level CLI flags between test invocations."""
     libtea.cli._json_output = False
-    libtea.cli._debug_output = False
     yield
     libtea.cli._json_output = False
-    libtea.cli._debug_output = False
 
 
 class TestCliEntryPoint:
@@ -266,6 +264,23 @@ class TestCLICommands:
             ["download", "https://cdn.example.com/f", str(dest), "--checksum", "BOGUS:abc123", "--base-url", BASE_URL],
         )
         assert result.exit_code == 1
+
+    @responses.activate
+    def test_download_checksum_underscore_normalization(self, tmp_path):
+        """Underscore form (SHA_256) is normalized to hyphen form (SHA-256)."""
+        artifact_url = "https://cdn.example.com/sbom.json"
+        content = b'{"bomFormat": "CycloneDX"}'
+        import hashlib
+
+        sha256 = hashlib.sha256(content).hexdigest()
+        responses.get(artifact_url, body=content)
+        dest = tmp_path / "sbom.json"
+        result = runner.invoke(
+            app,
+            ["download", artifact_url, str(dest), "--checksum", f"SHA_256:{sha256}", "--base-url", BASE_URL],
+        )
+        assert result.exit_code == 0
+        assert dest.exists()
 
     @responses.activate
     def test_download_with_max_download_bytes(self, tmp_path):

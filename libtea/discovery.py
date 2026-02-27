@@ -130,6 +130,13 @@ def fetch_well_known(
         final_parsed = urlparse(response.url)
         if final_parsed.scheme not in ("http", "https"):
             raise TeaDiscoveryError(f"Discovery redirected to unsupported scheme: {final_parsed.scheme!r}")
+        if scheme == "https" and final_parsed.scheme == "http":
+            warnings.warn(
+                f"Discovery for {domain} was downgraded from HTTPS to HTTP via redirect. "
+                "This may indicate a misconfigured server.",
+                TeaInsecureTransportWarning,
+                stacklevel=2,
+            )
         if response.status_code >= 400:
             body_snippet = (response.text or "")[:200]
             if len(response.text or "") > 200:

@@ -4,7 +4,7 @@ import responses
 from pydantic import ValidationError
 
 from libtea.discovery import _is_valid_domain, fetch_well_known, parse_tei, select_endpoint, select_endpoints
-from libtea.exceptions import TeaDiscoveryError
+from libtea.exceptions import TeaDiscoveryError, TeaInsecureTransportWarning
 from libtea.models import DiscoveryInfo, TeaEndpoint, TeaWellKnown, TeiType
 
 
@@ -289,6 +289,23 @@ class TestFetchWellKnownSsrfProtection:
         )
         wk = fetch_well_known("example.com")
         assert wk.schema_version == 1
+
+    def test_warns_on_https_to_http_downgrade(self):
+        """HTTPS→HTTP redirect should emit a warning."""
+        from unittest.mock import MagicMock, patch
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.url = "http://example.com/.well-known/tea"
+        mock_response.json.return_value = {
+            "schemaVersion": 1,
+            "endpoints": [{"url": "https://api.example.com", "versions": ["1.0.0"]}],
+        }
+        mock_response.text = ""
+
+        with patch("libtea.discovery.requests.get", return_value=mock_response):
+            with pytest.warns(TeaInsecureTransportWarning, match="downgraded from HTTPS to HTTP"):
+                fetch_well_known("example.com")
 
 
 class TestSelectEndpoint:

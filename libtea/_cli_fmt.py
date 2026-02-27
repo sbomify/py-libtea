@@ -43,6 +43,11 @@ def _opt(value: object) -> str:
     return "-" if value is None else str(value)
 
 
+def _esc(value: object) -> str:
+    """Like :func:`_opt` but also escapes Rich markup for safe table rendering."""
+    return escape(_opt(value))
+
+
 def _fmt_identifiers(identifiers: list[Identifier]) -> str:
     """Format a list of :class:`Identifier` objects as comma-joined ``type:value``."""
     if not identifiers:
@@ -76,7 +81,9 @@ def _distributions_table(distributions: list[ReleaseDistribution], *, console: C
     tbl.add_column("Checksums")
     for d in distributions:
         checksums = ", ".join(f"{cs.algorithm_type}:{cs.algorithm_value[:12]}..." for cs in d.checksums) or "-"
-        tbl.add_row(d.distribution_type, _opt(d.description), _opt(d.url), _opt(d.signature_url), checksums)
+        tbl.add_row(
+            _esc(d.distribution_type), _esc(d.description), _esc(d.url), _esc(d.signature_url), escape(checksums)
+        )
     console.print(tbl)
 
 
@@ -93,7 +100,7 @@ def _artifacts_table(artifacts: list[Artifact], *, console: Console) -> None:
     for a in artifacts:
         fmt_str = ", ".join(f.media_type for f in a.formats) or "-"
         applies = ", ".join(a.distribution_types) if a.distribution_types else "-"
-        tbl.add_row(a.uuid, a.name, a.type, applies, fmt_str)
+        tbl.add_row(escape(a.uuid), escape(a.name), escape(a.type), escape(applies), escape(fmt_str))
     console.print(tbl)
 
 
@@ -109,7 +116,7 @@ def _formats_table(formats: list[ArtifactFormat], *, console: Console) -> None:
     tbl.add_column("Checksums")
     for f in formats:
         checksums = ", ".join(f"{cs.algorithm_type}:{cs.algorithm_value[:12]}..." for cs in f.checksums) or "-"
-        tbl.add_row(f.media_type, _opt(f.description), f.url, _opt(f.signature_url), checksums)
+        tbl.add_row(escape(f.media_type), _esc(f.description), escape(f.url), _esc(f.signature_url), escape(checksums))
     console.print(tbl)
 
 
@@ -125,7 +132,9 @@ def fmt_discover(data: list[DiscoveryInfo], *, console: Console) -> None:
     tbl.add_column("Priority", justify="right")
     for d in data:
         for s in d.servers:
-            tbl.add_row(d.product_release_uuid, s.root_url, ", ".join(s.versions), _opt(s.priority))
+            tbl.add_row(
+                escape(d.product_release_uuid), escape(s.root_url), escape(", ".join(s.versions)), _esc(s.priority)
+            )
     console.print(tbl)
 
 
@@ -137,7 +146,7 @@ def fmt_search_products(data: PaginatedProductResponse, *, console: Console) -> 
     tbl.add_column("Name")
     tbl.add_column("Identifiers")
     for p in data.results:
-        tbl.add_row(p.uuid, p.name, _fmt_identifiers(p.identifiers))
+        tbl.add_row(escape(p.uuid), escape(p.name), escape(_fmt_identifiers(p.identifiers)))
     console.print(tbl)
 
 
@@ -151,7 +160,7 @@ def fmt_search_releases(data: PaginatedProductReleaseResponse, *, console: Conso
     tbl.add_column("Release Date")
     tbl.add_column("Pre-release")
     for r in data.results:
-        tbl.add_row(r.uuid, r.version, _opt(r.product_name), _opt(r.release_date), _opt(r.pre_release))
+        tbl.add_row(escape(r.uuid), escape(r.version), _esc(r.product_name), _esc(r.release_date), _esc(r.pre_release))
     console.print(tbl)
 
 
@@ -184,7 +193,7 @@ def fmt_product_release(data: ProductRelease, *, console: Console) -> None:
         tbl.add_column("UUID", style="cyan", no_wrap=True)
         tbl.add_column("Release UUID")
         for comp in data.components:
-            tbl.add_row(comp.uuid, _opt(comp.release))
+            tbl.add_row(escape(comp.uuid), _esc(comp.release))
         console.print(tbl)
 
 
@@ -271,13 +280,13 @@ def fmt_releases(data: list[Release], *, console: Console) -> None:
     tbl.add_column("Identifiers")
     for r in data:
         tbl.add_row(
-            r.uuid,
-            r.version,
-            _opt(r.component_name),
-            str(r.created_date),
-            _opt(r.release_date),
-            _opt(r.pre_release),
-            _fmt_identifiers(r.identifiers),
+            escape(r.uuid),
+            escape(r.version),
+            _esc(r.component_name),
+            escape(str(r.created_date)),
+            _esc(r.release_date),
+            _esc(r.pre_release),
+            escape(_fmt_identifiers(r.identifiers)),
         )
     console.print(tbl)
 
@@ -292,10 +301,10 @@ def fmt_collections(data: list[Collection], *, console: Console) -> None:
     tbl.add_column("Artifacts")
     for col in data:
         tbl.add_row(
-            _opt(col.uuid),
-            _opt(col.version),
-            _opt(col.date),
-            _opt(col.belongs_to),
+            _esc(col.uuid),
+            _esc(col.version),
+            _esc(col.date),
+            _esc(col.belongs_to),
             str(len(col.artifacts)),
         )
     console.print(tbl)
@@ -309,7 +318,7 @@ def fmt_cle(data: CLE, *, console: Console) -> None:
         tbl.add_column("Description")
         tbl.add_column("URL")
         for defn in data.definitions.support:
-            tbl.add_row(defn.id, defn.description, _opt(defn.url))
+            tbl.add_row(escape(defn.id), escape(defn.description), _esc(defn.url))
         console.print(tbl)
 
     tbl = Table(title="Lifecycle Events")
@@ -338,11 +347,11 @@ def fmt_cle(data: CLE, *, console: Console) -> None:
             version = ranges
         tbl.add_row(
             str(ev.id),
-            ev.type.value,
-            str(ev.effective),
-            str(ev.published),
-            version,
-            details,
+            escape(ev.type.value),
+            escape(str(ev.effective)),
+            escape(str(ev.published)),
+            escape(version),
+            escape(details),
         )
     console.print(tbl)
 
@@ -376,7 +385,7 @@ def fmt_inspect(data: list[dict], *, console: Console) -> None:
                 version = comp.get("version") or comp.get("release", {}).get("version", "-")
                 name = comp.get("name") or comp.get("release", {}).get("componentName", "-")
                 note = comp.get("resolvedNote", "")
-                tbl.add_row(str(comp_uuid), str(version), _opt(name), note)
+                tbl.add_row(escape(str(comp_uuid)), escape(str(version)), _esc(name), escape(note))
             console.print(tbl)
             # Show artifact details for each component
             for comp in components:
@@ -404,11 +413,11 @@ def _inspect_component_details(comp: dict, *, console: Console) -> None:
                 ", ".join(f"{cs.get('algType', '?')}:{cs.get('algValue', '')[:12]}..." for cs in checksums_list) or "-"
             )
             tbl.add_row(
-                d.get("distributionType", "-"),
-                _opt(d.get("description")),
-                _opt(d.get("url")),
-                _opt(d.get("signatureUrl")),
-                checksums,
+                escape(d.get("distributionType", "-")),
+                _esc(d.get("description")),
+                _esc(d.get("url")),
+                _esc(d.get("signatureUrl")),
+                escape(checksums),
             )
         console.print(tbl)
 
@@ -435,17 +444,26 @@ def _inspect_component_details(comp: dict, *, console: Console) -> None:
         if formats:
             for fmt in formats:
                 tbl.add_row(
-                    art.get("uuid", "-"),
-                    art.get("name", "-"),
-                    art.get("type", "-"),
-                    applies,
-                    fmt.get("mediaType", "-"),
-                    _opt(fmt.get("description")),
-                    fmt.get("url", "-"),
-                    _opt(fmt.get("signatureUrl")),
+                    escape(art.get("uuid", "-")),
+                    escape(art.get("name", "-")),
+                    escape(art.get("type", "-")),
+                    escape(applies),
+                    escape(fmt.get("mediaType", "-")),
+                    _esc(fmt.get("description")),
+                    escape(fmt.get("url", "-")),
+                    _esc(fmt.get("signatureUrl")),
                 )
         else:
-            tbl.add_row(art.get("uuid", "-"), art.get("name", "-"), art.get("type", "-"), applies, "-", "-", "-", "-")
+            tbl.add_row(
+                escape(art.get("uuid", "-")),
+                escape(art.get("name", "-")),
+                escape(art.get("type", "-")),
+                escape(applies),
+                "-",
+                "-",
+                "-",
+                "-",
+            )
     console.print(tbl)
 
 
