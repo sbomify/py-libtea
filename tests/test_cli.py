@@ -9,11 +9,20 @@ typer = pytest.importorskip("typer", reason="typer not installed (install libtea
 
 from typer.testing import CliRunner  # noqa: E402
 
+import libtea.cli  # noqa: E402
 from libtea.cli import app  # noqa: E402
 
 runner = CliRunner()
 
 BASE_URL = "https://api.example.com/tea/v1"
+
+
+@pytest.fixture(autouse=True)
+def _reset_json_flag():
+    """Reset the module-level _json_output flag between test invocations."""
+    libtea.cli._json_output = False
+    yield
+    libtea.cli._json_output = False
 
 
 class TestCliEntryPoint:
@@ -65,7 +74,7 @@ class TestCLICommands:
             f"{BASE_URL}/product/{uuid}",
             json={"uuid": uuid, "name": "Test Product", "identifiers": []},
         )
-        result = runner.invoke(app, ["get-product", uuid, "--base-url", BASE_URL])
+        result = runner.invoke(app, ["--json", "get-product", uuid, "--base-url", BASE_URL])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["name"] == "Test Product"
@@ -82,7 +91,7 @@ class TestCLICommands:
                 }
             ],
         )
-        result = runner.invoke(app, ["discover", tei, "--base-url", BASE_URL])
+        result = runner.invoke(app, ["--json", "discover", tei, "--base-url", BASE_URL])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert len(data) == 1
@@ -94,7 +103,7 @@ class TestCLICommands:
             f"{BASE_URL}/artifact/{uuid}",
             json={"uuid": uuid, "name": "SBOM", "type": "BOM", "formats": []},
         )
-        result = runner.invoke(app, ["get-artifact", uuid, "--base-url", BASE_URL])
+        result = runner.invoke(app, ["--json", "get-artifact", uuid, "--base-url", BASE_URL])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["name"] == "SBOM"
@@ -291,7 +300,7 @@ class TestCLICommands:
                 "latestCollection": {"uuid": comp_uuid, "version": 1, "artifacts": []},
             },
         )
-        result = runner.invoke(app, ["inspect", tei, "--base-url", BASE_URL])
+        result = runner.invoke(app, ["--json", "inspect", tei, "--base-url", BASE_URL])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert len(data) == 1
@@ -340,7 +349,7 @@ class TestCLIDiscoveryPath:
             "https://api.example.com/v0.3.0-beta.2/product/" + uuid,
             json={"uuid": uuid, "name": "Test Product", "identifiers": []},
         )
-        result = runner.invoke(app, ["get-product", uuid, "--domain", "example.com"])
+        result = runner.invoke(app, ["--json", "get-product", uuid, "--domain", "example.com"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["name"] == "Test Product"
@@ -453,7 +462,7 @@ class TestCLIInspectOptions:
                     "latestCollection": {"uuid": c, "version": 1, "artifacts": []},
                 },
             )
-        result = runner.invoke(app, ["inspect", tei, "--max-components", "2", "--base-url", BASE_URL])
+        result = runner.invoke(app, ["--json", "inspect", tei, "--max-components", "2", "--base-url", BASE_URL])
         assert result.exit_code == 0
         output = result.output
         # CliRunner mixes stdout/stderr; extract JSON array from the output
@@ -552,7 +561,7 @@ class TestCLIInspectGetComponentFallback:
             f"{BASE_URL}/component/{comp_uuid}",
             json={"uuid": comp_uuid, "name": "Component Without Release", "identifiers": []},
         )
-        result = runner.invoke(app, ["inspect", tei, "--base-url", BASE_URL])
+        result = runner.invoke(app, ["--json", "inspect", tei, "--base-url", BASE_URL])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert len(data[0]["components"]) == 1
@@ -582,7 +591,7 @@ class TestCLITeiAutoDiscovery:
                 }
             ],
         )
-        result = runner.invoke(app, ["discover", tei])
+        result = runner.invoke(app, ["--json", "discover", tei])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert len(data) == 1
@@ -606,3 +615,36 @@ class TestCLIEntryPointErrors:
 
             main()
             mock_app.assert_called_once()
+
+
+class TestCLIJsonFlag:
+    """Tests for the --json flag and default rich output."""
+
+    @responses.activate
+    def test_json_flag_produces_valid_json(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/product/{uuid}",
+            json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+        )
+        result = runner.invoke(app, ["--json", "get-product", uuid, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["uuid"] == uuid
+        assert data["name"] == "Test Product"
+
+    @responses.activate
+    def test_default_output_is_rich_not_json(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/product/{uuid}",
+            json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+        )
+        result = runner.invoke(app, ["get-product", uuid, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        # Rich output should NOT be valid JSON
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(result.output)
+        # But should contain key data
+        assert "Test Product" in result.output
+        assert uuid in result.output

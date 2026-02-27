@@ -33,7 +33,7 @@ Documentation = "https://github.com/sbomify/py-libtea#readme"
 Changelog = "https://github.com/sbomify/py-libtea/releases"
 
 [project.optional-dependencies]
-cli = ["typer>=0.12.0,<1"]
+cli = ["typer>=0.12.0,<1", "rich>=13.0.0"]
 
 [project.scripts]
 tea-cli = "libtea._cli_entry:main"

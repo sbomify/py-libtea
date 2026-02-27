@@ -22,6 +22,8 @@ from libtea.models import Checksum, ChecksumAlgorithm
 
 app = typer.Typer(help="TEA (Transparency Exchange API) CLI client.", no_args_is_help=True)
 
+_json_output: bool = False
+
 # --- Shared options ---
 
 _base_url_opt = typer.Option(envvar="TEA_BASE_URL", help="TEA server base URL")
@@ -119,18 +121,25 @@ def _build_client(
     )
 
 
-def _output(data: Any) -> None:
-    """Serialize ``data`` as pretty-printed JSON to stdout.
+def _output(data: Any, *, command: str | None = None) -> None:
+    """Output ``data`` as JSON (when ``--json``) or rich-formatted tables/panels.
 
-    Pydantic models are serialized using ``model_dump(mode="json", by_alias=True)``
-    to produce camelCase keys matching the TEA API wire format.
+    In JSON mode, Pydantic models are serialized via ``model_dump(mode="json",
+    by_alias=True)`` to produce camelCase keys matching the TEA API wire format.
     """
-    if isinstance(data, BaseModel):
-        data = data.model_dump(mode="json", by_alias=True)
-    elif isinstance(data, list):
-        data = [item.model_dump(mode="json", by_alias=True) if isinstance(item, BaseModel) else item for item in data]
-    json.dump(data, sys.stdout, indent=2, default=str)
-    print()
+    if _json_output:
+        if isinstance(data, BaseModel):
+            data = data.model_dump(mode="json", by_alias=True)
+        elif isinstance(data, list):
+            data = [
+                item.model_dump(mode="json", by_alias=True) if isinstance(item, BaseModel) else item for item in data
+            ]
+        json.dump(data, sys.stdout, indent=2, default=str)
+        print()
+    else:
+        from libtea._cli_fmt import format_output
+
+        format_output(data, command=command)
 
 
 def _error(message: str) -> NoReturn:
@@ -162,7 +171,7 @@ def discover(
             base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle, tei=tei
         ) as client:
             result = client.discover(tei)
-        _output(result)
+        _output(result, command="discover")
     except TeaError as exc:
         _error(str(exc))
 
@@ -438,7 +447,7 @@ def inspect(
                         file=sys.stderr,
                     )
                 result.append(entry)
-            _output(result)
+            _output(result, command="inspect")
     except TeaError as exc:
         _error(str(exc))
 
@@ -457,5 +466,10 @@ def main(
     version: Annotated[
         bool | None, typer.Option("--version", callback=_version_callback, is_eager=True, help="Show version")
     ] = None,
+    output_json: Annotated[
+        bool, typer.Option("--json", help="Output raw JSON instead of rich-formatted tables")
+    ] = False,
 ):
     """TEA (Transparency Exchange API) CLI client."""
+    global _json_output  # noqa: PLW0603
+    _json_output = output_json

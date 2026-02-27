@@ -293,6 +293,7 @@ dependencies = [
 
 [package.optional-dependencies]
 cli = [
+    { name = "rich" },
     { name = "typer" },
 ]
 
@@ -309,6 +310,7 @@ dev = [
 requires-dist = [
     { name = "pydantic", specifier = ">=2.1.0,<3" },
     { name = "requests", specifier = ">=2.32.4,<3" },
+    { name = "rich", marker = "extra == 'cli'", specifier = ">=13.0.0" },
     { name = "semver", specifier = ">=3.0.4,<4" },
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.12.0,<1" },
 ]
