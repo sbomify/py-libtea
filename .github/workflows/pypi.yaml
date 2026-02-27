@@ -55,8 +55,8 @@ jobs:
 
       - name: Run tests
         run: |
-          uv sync
-          uv run pytest --cov=libtea --cov-report=term-missing --cov-fail-under=90
+          uv sync --extra cli
+          uv run pytest --cov-fail-under=90
 
       - name: Build package
         run: uv build

@@ -92,6 +92,8 @@ def probe_endpoint(url: str, timeout: float = 5.0, mtls: MtlsConfig | None = Non
         resp.close()
     except requests.RequestException as exc:
         raise TeaConnectionError(str(exc)) from exc
+    if 300 <= resp.status_code < 400:
+        raise TeaConnectionError(f"Endpoint probe returned redirect: HTTP {resp.status_code}")
     if resp.status_code >= 500:
         raise TeaServerError(f"Server error: HTTP {resp.status_code}")
 
@@ -207,20 +209,25 @@ class TeaHttpClient:
             logger.warning("Request error for %s: %s", url, exc)
             raise TeaConnectionError(str(exc)) from exc
 
-        logger.debug("HTTP %d %s (%.3fs)", response.status_code, response.url, response.elapsed.total_seconds())
-        self._raise_for_status(response)
-        content_length = response.headers.get("Content-Length")
-        if content_length and content_length.isdigit() and int(content_length) > self._max_response_bytes:
-            raise TeaValidationError(f"Response too large: {content_length} bytes (limit {self._max_response_bytes})")
-        body = response.content
-        if len(body) > self._max_response_bytes:
-            raise TeaValidationError(
-                f"Response body exceeds limit: {len(body)} bytes (limit {self._max_response_bytes})"
-            )
         try:
-            return response.json()
-        except ValueError as exc:
-            raise TeaValidationError(f"Invalid JSON in response: {exc}") from exc
+            logger.debug("HTTP %d %s (%.3fs)", response.status_code, response.url, response.elapsed.total_seconds())
+            self._raise_for_status(response)
+            content_length = response.headers.get("Content-Length")
+            if content_length and content_length.isdigit() and int(content_length) > self._max_response_bytes:
+                raise TeaValidationError(
+                    f"Response too large: {content_length} bytes (limit {self._max_response_bytes})"
+                )
+            body = response.content
+            if len(body) > self._max_response_bytes:
+                raise TeaValidationError(
+                    f"Response body exceeds limit: {len(body)} bytes (limit {self._max_response_bytes})"
+                )
+            try:
+                return response.json()
+            except ValueError as exc:
+                raise TeaValidationError(f"Invalid JSON in response: {exc}") from exc
+        finally:
+            response.close()
 
     def download_with_hashes(
         self,

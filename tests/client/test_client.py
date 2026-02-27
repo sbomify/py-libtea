@@ -413,6 +413,20 @@ class TestProbeEndpoint:
         probe_endpoint("https://api.example.com/v1")  # should not raise
 
     @responses.activate
+    def test_probe_redirect_raises_connection_error(self):
+        """3xx means the server redirects — probe should fail since get_json rejects redirects."""
+        responses.head("https://api.example.com/v1", status=301, headers={"Location": "/v1/"})
+        with pytest.raises(TeaConnectionError, match="redirect"):
+            probe_endpoint("https://api.example.com/v1")
+
+    @responses.activate
+    def test_probe_302_raises_connection_error(self):
+        """302 redirect also treated as probe failure."""
+        responses.head("https://api.example.com/v1", status=302, headers={"Location": "/elsewhere"})
+        with pytest.raises(TeaConnectionError, match="redirect"):
+            probe_endpoint("https://api.example.com/v1")
+
+    @responses.activate
     def test_probe_500_raises_server_error(self):
         responses.head("https://api.example.com/v1", status=500)
         with pytest.raises(TeaServerError):
@@ -473,7 +487,7 @@ class TestEndpointFailover:
         client.close()
 
     @responses.activate
-    def test_all_endpoints_fail_raises_last_error(self):
+    def test_all_endpoints_fail_raises_discovery_error(self):
         responses.get("https://example.com/.well-known/tea", json=self.WELL_KNOWN_DOC)
         responses.head(
             "https://primary.example.com/v0.3.0-beta.2",
@@ -484,8 +498,23 @@ class TestEndpointFailover:
             body=requests.ConnectionError("also refused"),
         )
 
-        with pytest.raises(TeaConnectionError):
+        with pytest.raises(TeaDiscoveryError, match="All 2 endpoint") as exc_info:
             TeaClient.from_well_known("example.com")
+        assert exc_info.value.__cause__ is not None
+
+    @responses.activate
+    def test_all_endpoints_fail_mixed_errors_raises_discovery_error(self):
+        """Mixed TeaConnectionError + TeaServerError still raises TeaDiscoveryError."""
+        responses.get("https://example.com/.well-known/tea", json=self.WELL_KNOWN_DOC)
+        responses.head(
+            "https://primary.example.com/v0.3.0-beta.2",
+            body=requests.ConnectionError("refused"),
+        )
+        responses.head("https://fallback.example.com/v0.3.0-beta.2", status=500)
+
+        with pytest.raises(TeaDiscoveryError, match="All 2 endpoint") as exc_info:
+            TeaClient.from_well_known("example.com")
+        assert isinstance(exc_info.value.__cause__, TeaServerError)
 
     @responses.activate
     def test_single_endpoint_success_no_failover(self):

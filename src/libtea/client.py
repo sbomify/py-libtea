@@ -130,21 +130,20 @@ class TeaClient:
             A connected :class:`TeaClient` pointing at the best reachable endpoint.
 
         Raises:
-            TeaDiscoveryError: If no compatible or reachable endpoint is found.
-            TeaConnectionError: If all candidate endpoints are unreachable.
-            TeaServerError: If all candidate endpoints return 5xx.
+            TeaDiscoveryError: If no compatible or reachable endpoint is found
+                (wraps the last probe failure as ``__cause__``).
         """
         well_known = fetch_well_known(domain, timeout=timeout, scheme=scheme, port=port, mtls=mtls)
         candidates = select_endpoints(well_known, version)
 
-        last_error: Exception | None = None
+        errors: list[tuple[str, Exception]] = []
         for endpoint in candidates:
             base_url = f"{endpoint.url.rstrip('/')}/v{version}"
             try:
                 probe_endpoint(base_url, timeout=min(timeout, 5.0), mtls=mtls)
             except (TeaConnectionError, TeaServerError) as exc:
                 logger.warning("Endpoint %s unreachable, trying next: %s", base_url, exc)
-                last_error = exc
+                errors.append((base_url, exc))
                 continue
             return cls(
                 base_url=base_url,
@@ -156,8 +155,11 @@ class TeaClient:
                 backoff_factor=backoff_factor,
             )
 
-        if last_error:
-            raise last_error
+        if errors:
+            summary = "; ".join(f"{url}: {exc}" for url, exc in errors)
+            raise TeaDiscoveryError(
+                f"All {len(errors)} endpoint(s) failed for version {version!r}: {summary}"
+            ) from errors[-1][1]
         raise TeaDiscoveryError(f"No reachable endpoint found for version {version!r}")  # pragma: no cover
 
     # --- Discovery ---
