@@ -55,7 +55,7 @@ with TeaClient.from_well_known("trust.sbomify.com", token="your-bearer-token") a
 
     # Get a product release
     pr = client.get_product_release(results[0].product_release_uuid)
-    print(pr.version, pr.name)
+    print(pr.version, pr.product_name)
 ```
 
 Or connect directly to a known endpoint:
@@ -206,7 +206,7 @@ with TeaClient.from_well_known("trust.sbomify.com") as client:
     # Get lifecycle events for a product release
     cle = client.get_product_release_cle("release-uuid")
     for event in cle.events:
-        print(event.event_type, event.effective_date)
+        print(event.type, event.effective)
 
     # CLE is available for all entity types
     client.get_product_cle("product-uuid")

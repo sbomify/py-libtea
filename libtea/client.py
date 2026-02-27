@@ -15,7 +15,7 @@ from typing import Any, Self, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from libtea._http import MtlsConfig, TeaHttpClient, _validate_download_url, probe_endpoint
+from libtea._http import MtlsConfig, TeaHttpClient, probe_endpoint
 from libtea.discovery import fetch_well_known, select_endpoints
 from libtea.exceptions import (
     TeaChecksumError,
@@ -207,9 +207,8 @@ class TeaClient:
         for endpoint in candidates:
             base_url = f"{endpoint.url.rstrip('/')}/v{version}"
             try:
-                _validate_download_url(base_url)
                 probe_endpoint(base_url, timeout=min(timeout, 5.0), mtls=mtls)
-            except (TeaConnectionError, TeaServerError, TeaValidationError) as exc:
+            except (TeaConnectionError, TeaServerError) as exc:
                 logger.warning("Endpoint %s unreachable, trying next: %s", base_url, exc)
                 last_error = exc
                 continue

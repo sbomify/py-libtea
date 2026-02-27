@@ -480,9 +480,18 @@ class TeaHttpClient:
         if status >= 500:
             raise TeaServerError(f"Server error: HTTP {status}")
         # Remaining 4xx codes (400, 405-499 excluding 401/403/404)
-        body_text = (response.text or "")[:200]
-        if len(response.text or "") > 200:
-            body_text += " (truncated)"
+        # Use bounded read to avoid loading a large error body into memory
+        # (e.g. when called on a streaming response from download_with_hashes).
+        body_text = ""
+        try:
+            raw_bytes = response.raw.read(201) if response.raw else b""
+            if not raw_bytes:
+                raw_bytes = response.content[:201]
+            body_text = raw_bytes.decode("utf-8", errors="replace")[:200]
+            if len(raw_bytes) > 200:
+                body_text += " (truncated)"
+        except Exception:
+            pass
         msg = f"Client error: HTTP {status}"
         if body_text:
             msg = f"{msg} — {body_text}"
