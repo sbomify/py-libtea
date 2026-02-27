@@ -35,11 +35,14 @@ class TestCliEntryPoint:
 
 class TestCLINoServer:
     def test_no_base_url_or_domain_errors(self):
-        result = runner.invoke(app, ["get-product", "some-uuid"])
+        result = runner.invoke(app, ["get-product", "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"])
         assert result.exit_code == 1
 
     def test_both_base_url_and_domain_errors(self):
-        result = runner.invoke(app, ["get-product", "some-uuid", "--base-url", BASE_URL, "--domain", "example.com"])
+        result = runner.invoke(
+            app,
+            ["get-product", "d4d9f54a-abcf-11ee-ac79-1a52914d44b1", "--base-url", BASE_URL, "--domain", "example.com"],
+        )
         assert result.exit_code == 1
 
     def test_version_flag(self):
@@ -74,7 +77,7 @@ class TestCLICommands:
             f"{BASE_URL}/discovery",
             json=[
                 {
-                    "productReleaseUuid": "abc-123",
+                    "productReleaseUuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                     "servers": [{"rootUrl": "https://tea.example.com", "versions": ["1.0.0"]}],
                 }
             ],
@@ -261,8 +264,8 @@ class TestCLICommands:
     @responses.activate
     def test_inspect(self):
         tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
-        uuid = "abc-123"
-        comp_uuid = "comp-456"
+        uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        comp_uuid = "c3d4e5f6-a7b8-9012-cdef-123456789012"
         responses.get(
             f"{BASE_URL}/discovery",
             json=[
@@ -298,7 +301,7 @@ class TestCLICommands:
         assert data[0]["discovery"]["productReleaseUuid"] == uuid
 
     def test_error_output_goes_to_stderr(self):
-        result = runner.invoke(app, ["get-product", "some-uuid"])
+        result = runner.invoke(app, ["get-product", "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"])
         assert result.exit_code == 1
         assert "Error:" in result.output
 
@@ -376,18 +379,36 @@ class TestCLIAuthOptions:
         assert responses.calls[0].request.headers["Authorization"].startswith("Basic ")
 
     def test_invalid_auth_format(self):
-        result = runner.invoke(app, ["get-product", "some-uuid", "--base-url", BASE_URL, "--auth", "nopassword"])
+        result = runner.invoke(
+            app, ["get-product", "d4d9f54a-abcf-11ee-ac79-1a52914d44b1", "--base-url", BASE_URL, "--auth", "nopassword"]
+        )
         assert result.exit_code == 1
 
     def test_client_key_without_cert_errors(self):
         result = runner.invoke(
-            app, ["get-product", "some-uuid", "--base-url", BASE_URL, "--client-key", "/tmp/key.pem"]
+            app,
+            [
+                "get-product",
+                "d4d9f54a-abcf-11ee-ac79-1a52914d44b1",
+                "--base-url",
+                BASE_URL,
+                "--client-key",
+                "/tmp/key.pem",
+            ],
         )
         assert result.exit_code == 1
 
     def test_client_cert_without_key_errors(self):
         result = runner.invoke(
-            app, ["get-product", "some-uuid", "--base-url", BASE_URL, "--client-cert", "/tmp/cert.pem"]
+            app,
+            [
+                "get-product",
+                "d4d9f54a-abcf-11ee-ac79-1a52914d44b1",
+                "--base-url",
+                BASE_URL,
+                "--client-cert",
+                "/tmp/cert.pem",
+            ],
         )
         assert result.exit_code == 1
 
@@ -398,8 +419,14 @@ class TestCLIInspectOptions:
     @responses.activate
     def test_inspect_max_components_truncates(self):
         tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
-        uuid = "abc-123"
-        comp_uuids = [f"comp-{i}" for i in range(5)]
+        uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        comp_uuids = [
+            "c0000000-0000-0000-0000-000000000000",
+            "c0000000-0000-0000-0000-000000000001",
+            "c0000000-0000-0000-0000-000000000002",
+            "c0000000-0000-0000-0000-000000000003",
+            "c0000000-0000-0000-0000-000000000004",
+        ]
         responses.get(
             f"{BASE_URL}/discovery",
             json=[
@@ -501,8 +528,8 @@ class TestCLIInspectGetComponentFallback:
     @responses.activate
     def test_inspect_component_ref_without_release(self):
         tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
-        uuid = "abc-123"
-        comp_uuid = "comp-no-release"
+        uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        comp_uuid = "c3d4e5f6-a7b8-9012-cdef-123456789099"
         responses.get(
             f"{BASE_URL}/discovery",
             json=[
@@ -550,7 +577,7 @@ class TestCLITeiAutoDiscovery:
             "https://api.example.com/v0.3.0-beta.2/discovery",
             json=[
                 {
-                    "productReleaseUuid": "abc-123",
+                    "productReleaseUuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                     "servers": [{"rootUrl": "https://tea.example.com", "versions": ["1.0.0"]}],
                 }
             ],

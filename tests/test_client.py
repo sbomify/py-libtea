@@ -43,7 +43,7 @@ class TestSearchProducts:
                 "totalResults": 1,
                 "results": [
                     {
-                        "uuid": "abc-123",
+                        "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                         "name": "Test Product",
                         "identifiers": [{"idType": "PURL", "idValue": "pkg:pypi/foo"}],
                     },
@@ -105,10 +105,10 @@ class TestSearchProductReleases:
                 "totalResults": 1,
                 "results": [
                     {
-                        "uuid": "rel-1",
+                        "uuid": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
                         "version": "1.0.0",
                         "createdDate": "2024-01-01T00:00:00Z",
-                        "components": [{"uuid": "comp-1"}],
+                        "components": [{"uuid": "c3d4e5f6-a7b8-9012-cdef-123456789012"}],
                     }
                 ],
             },
@@ -125,21 +125,21 @@ class TestProduct:
     @responses.activate
     def test_get_product(self, client, base_url):
         responses.get(
-            f"{base_url}/product/abc-123",
+            f"{base_url}/product/a1b2c3d4-e5f6-7890-abcd-ef1234567890",
             json={
-                "uuid": "abc-123",
+                "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                 "name": "Test Product",
                 "identifiers": [{"idType": "PURL", "idValue": "pkg:npm/test"}],
             },
         )
-        product = client.get_product("abc-123")
+        product = client.get_product("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
         assert isinstance(product, Product)
         assert product.name == "Test Product"
 
     @responses.activate
     def test_get_product_releases(self, client, base_url):
         responses.get(
-            f"{base_url}/product/abc-123/releases",
+            f"{base_url}/product/a1b2c3d4-e5f6-7890-abcd-ef1234567890/releases",
             json={
                 "timestamp": "2024-03-20T15:30:00Z",
                 "pageStartIndex": 0,
@@ -147,15 +147,15 @@ class TestProduct:
                 "totalResults": 1,
                 "results": [
                     {
-                        "uuid": "rel-1",
+                        "uuid": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
                         "version": "1.0.0",
                         "createdDate": "2024-01-01T00:00:00Z",
-                        "components": [{"uuid": "comp-1"}],
+                        "components": [{"uuid": "c3d4e5f6-a7b8-9012-cdef-123456789012"}],
                     }
                 ],
             },
         )
-        resp = client.get_product_releases("abc-123")
+        resp = client.get_product_releases("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
         assert isinstance(resp, PaginatedProductReleaseResponse)
         assert resp.total_results == 1
 
@@ -164,29 +164,29 @@ class TestProductRelease:
     @responses.activate
     def test_get_product_release(self, client, base_url):
         responses.get(
-            f"{base_url}/productRelease/rel-1",
+            f"{base_url}/productRelease/b2c3d4e5-f6a7-8901-bcde-f12345678901",
             json={
-                "uuid": "rel-1",
+                "uuid": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
                 "version": "1.0.0",
                 "createdDate": "2024-01-01T00:00:00Z",
-                "components": [{"uuid": "comp-1"}],
+                "components": [{"uuid": "c3d4e5f6-a7b8-9012-cdef-123456789012"}],
             },
         )
-        release = client.get_product_release("rel-1")
+        release = client.get_product_release("b2c3d4e5-f6a7-8901-bcde-f12345678901")
         assert isinstance(release, ProductRelease)
         assert release.version == "1.0.0"
 
     @responses.activate
     def test_get_product_release_collection_latest(self, client, base_url):
         responses.get(
-            f"{base_url}/productRelease/rel-1/collection/latest",
+            f"{base_url}/productRelease/b2c3d4e5-f6a7-8901-bcde-f12345678901/collection/latest",
             json={
-                "uuid": "rel-1",
+                "uuid": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
                 "version": 1,
                 "artifacts": [],
             },
         )
-        collection = client.get_product_release_collection_latest("rel-1")
+        collection = client.get_product_release_collection_latest("b2c3d4e5-f6a7-8901-bcde-f12345678901")
         assert isinstance(collection, Collection)
 
 
@@ -194,26 +194,30 @@ class TestComponent:
     @responses.activate
     def test_get_component(self, client, base_url):
         responses.get(
-            f"{base_url}/component/comp-1",
+            f"{base_url}/component/c3d4e5f6-a7b8-9012-cdef-123456789012",
             json={
-                "uuid": "comp-1",
+                "uuid": "c3d4e5f6-a7b8-9012-cdef-123456789012",
                 "name": "Test Component",
                 "identifiers": [],
             },
         )
-        component = client.get_component("comp-1")
+        component = client.get_component("c3d4e5f6-a7b8-9012-cdef-123456789012")
         assert isinstance(component, Component)
         assert component.name == "Test Component"
 
     @responses.activate
     def test_get_component_releases(self, client, base_url):
         responses.get(
-            f"{base_url}/component/comp-1/releases",
+            f"{base_url}/component/c3d4e5f6-a7b8-9012-cdef-123456789012/releases",
             json=[
-                {"uuid": "cr-1", "version": "1.0.0", "createdDate": "2024-01-01T00:00:00Z"},
+                {
+                    "uuid": "d4e5f6a7-b8c9-0123-defa-234567890123",
+                    "version": "1.0.0",
+                    "createdDate": "2024-01-01T00:00:00Z",
+                },
             ],
         )
-        releases = client.get_component_releases("comp-1")
+        releases = client.get_component_releases("c3d4e5f6-a7b8-9012-cdef-123456789012")
         assert len(releases) == 1
         assert isinstance(releases[0], Release)
 
@@ -222,13 +226,17 @@ class TestComponentRelease:
     @responses.activate
     def test_get_component_release(self, client, base_url):
         responses.get(
-            f"{base_url}/componentRelease/cr-1",
+            f"{base_url}/componentRelease/d4e5f6a7-b8c9-0123-defa-234567890123",
             json={
-                "release": {"uuid": "cr-1", "version": "1.0.0", "createdDate": "2024-01-01T00:00:00Z"},
-                "latestCollection": {"uuid": "cr-1", "version": 1, "artifacts": []},
+                "release": {
+                    "uuid": "d4e5f6a7-b8c9-0123-defa-234567890123",
+                    "version": "1.0.0",
+                    "createdDate": "2024-01-01T00:00:00Z",
+                },
+                "latestCollection": {"uuid": "d4e5f6a7-b8c9-0123-defa-234567890123", "version": 1, "artifacts": []},
             },
         )
-        result = client.get_component_release("cr-1")
+        result = client.get_component_release("d4e5f6a7-b8c9-0123-defa-234567890123")
         assert isinstance(result, ComponentReleaseWithCollection)
         assert result.release.version == "1.0.0"
         assert result.latest_collection is not None
@@ -237,43 +245,47 @@ class TestComponentRelease:
     def test_get_component_release_missing_collection_raises(self, client, base_url):
         """Per TEA spec, latestCollection is required — missing it should raise."""
         responses.get(
-            f"{base_url}/componentRelease/cr-2",
+            f"{base_url}/componentRelease/d4e5f6a7-b8c9-0123-defa-234567890124",
             json={
-                "release": {"uuid": "cr-2", "version": "2.0.0", "createdDate": "2024-01-01T00:00:00Z"},
+                "release": {
+                    "uuid": "d4e5f6a7-b8c9-0123-defa-234567890124",
+                    "version": "2.0.0",
+                    "createdDate": "2024-01-01T00:00:00Z",
+                },
             },
         )
         with pytest.raises(TeaValidationError, match="Invalid ComponentReleaseWithCollection"):
-            client.get_component_release("cr-2")
+            client.get_component_release("d4e5f6a7-b8c9-0123-defa-234567890124")
 
     @responses.activate
     def test_get_component_release_collection_latest(self, client, base_url):
         responses.get(
-            f"{base_url}/componentRelease/cr-1/collection/latest",
-            json={"uuid": "cr-1", "version": 2, "artifacts": []},
+            f"{base_url}/componentRelease/d4e5f6a7-b8c9-0123-defa-234567890123/collection/latest",
+            json={"uuid": "d4e5f6a7-b8c9-0123-defa-234567890123", "version": 2, "artifacts": []},
         )
-        collection = client.get_component_release_collection_latest("cr-1")
+        collection = client.get_component_release_collection_latest("d4e5f6a7-b8c9-0123-defa-234567890123")
         assert isinstance(collection, Collection)
         assert collection.version == 2
 
     @responses.activate
     def test_get_component_release_collections(self, client, base_url):
         responses.get(
-            f"{base_url}/componentRelease/cr-1/collections",
+            f"{base_url}/componentRelease/d4e5f6a7-b8c9-0123-defa-234567890123/collections",
             json=[
-                {"uuid": "cr-1", "version": 1, "artifacts": []},
-                {"uuid": "cr-1", "version": 2, "artifacts": []},
+                {"uuid": "d4e5f6a7-b8c9-0123-defa-234567890123", "version": 1, "artifacts": []},
+                {"uuid": "d4e5f6a7-b8c9-0123-defa-234567890123", "version": 2, "artifacts": []},
             ],
         )
-        collections = client.get_component_release_collections("cr-1")
+        collections = client.get_component_release_collections("d4e5f6a7-b8c9-0123-defa-234567890123")
         assert len(collections) == 2
 
     @responses.activate
     def test_get_component_release_collection_by_version(self, client, base_url):
         responses.get(
-            f"{base_url}/componentRelease/cr-1/collection/3",
-            json={"uuid": "cr-1", "version": 3, "artifacts": []},
+            f"{base_url}/componentRelease/d4e5f6a7-b8c9-0123-defa-234567890123/collection/3",
+            json={"uuid": "d4e5f6a7-b8c9-0123-defa-234567890123", "version": 3, "artifacts": []},
         )
-        collection = client.get_component_release_collection("cr-1", 3)
+        collection = client.get_component_release_collection("d4e5f6a7-b8c9-0123-defa-234567890123", 3)
         assert collection.version == 3
 
 
@@ -281,9 +293,9 @@ class TestArtifact:
     @responses.activate
     def test_get_artifact(self, client, base_url):
         responses.get(
-            f"{base_url}/artifact/art-1",
+            f"{base_url}/artifact/e5f6a7b8-c9d0-1234-efab-345678901234",
             json={
-                "uuid": "art-1",
+                "uuid": "e5f6a7b8-c9d0-1234-efab-345678901234",
                 "name": "SBOM",
                 "type": "BOM",
                 "formats": [
@@ -295,7 +307,7 @@ class TestArtifact:
                 ],
             },
         )
-        artifact = client.get_artifact("art-1")
+        artifact = client.get_artifact("e5f6a7b8-c9d0-1234-efab-345678901234")
         assert isinstance(artifact, Artifact)
         assert artifact.name == "SBOM"
 
@@ -387,11 +399,11 @@ class TestFromWellKnown:
         )
         responses.head("https://api.example.com/v0.3.0-beta.2", status=200)
         responses.get(
-            "https://api.example.com/v0.3.0-beta.2/product/abc",
-            json={"uuid": "abc", "name": "P", "identifiers": []},
+            "https://api.example.com/v0.3.0-beta.2/product/f6a7b8c9-d0e1-2345-fabc-456789012345",
+            json={"uuid": "f6a7b8c9-d0e1-2345-fabc-456789012345", "name": "P", "identifiers": []},
         )
         client = TeaClient.from_well_known("example.com", token="secret")
-        client.get_product("abc")
+        client.get_product("f6a7b8c9-d0e1-2345-fabc-456789012345")
         assert responses.calls[2].request.headers["authorization"] == "Bearer secret"
         client.close()
 
@@ -503,12 +515,12 @@ class TestEndpointFailover:
         responses.head("https://primary.example.com/v0.3.0-beta.2", status=503)
         responses.head("https://fallback.example.com/v0.3.0-beta.2", status=200)
         responses.get(
-            "https://fallback.example.com/v0.3.0-beta.2/product/abc",
-            json={"uuid": "abc", "name": "P", "identifiers": []},
+            "https://fallback.example.com/v0.3.0-beta.2/product/f6a7b8c9-d0e1-2345-fabc-456789012345",
+            json={"uuid": "f6a7b8c9-d0e1-2345-fabc-456789012345", "name": "P", "identifiers": []},
         )
 
         client = TeaClient.from_well_known("example.com")
-        product = client.get_product("abc")
+        product = client.get_product("f6a7b8c9-d0e1-2345-fabc-456789012345")
         assert product.name == "P"
         client.close()
 
@@ -517,7 +529,7 @@ class TestPagination:
     @responses.activate
     def test_get_product_releases_pagination_params(self, client, base_url):
         responses.get(
-            f"{base_url}/product/abc-123/releases",
+            f"{base_url}/product/a1b2c3d4-e5f6-7890-abcd-ef1234567890/releases",
             json={
                 "timestamp": "2024-03-20T15:30:00Z",
                 "pageStartIndex": 50,
@@ -526,7 +538,7 @@ class TestPagination:
                 "results": [],
             },
         )
-        resp = client.get_product_releases("abc-123", page_offset=50, page_size=25)
+        resp = client.get_product_releases("a1b2c3d4-e5f6-7890-abcd-ef1234567890", page_offset=50, page_size=25)
         request = responses.calls[0].request
         assert "pageOffset=50" in str(request.url)
         assert "pageSize=25" in str(request.url)
@@ -537,23 +549,23 @@ class TestProductReleaseCollections:
     @responses.activate
     def test_get_product_release_collections(self, client, base_url):
         responses.get(
-            f"{base_url}/productRelease/rel-1/collections",
+            f"{base_url}/productRelease/b2c3d4e5-f6a7-8901-bcde-f12345678901/collections",
             json=[
-                {"uuid": "rel-1", "version": 1, "artifacts": []},
-                {"uuid": "rel-1", "version": 2, "artifacts": []},
+                {"uuid": "b2c3d4e5-f6a7-8901-bcde-f12345678901", "version": 1, "artifacts": []},
+                {"uuid": "b2c3d4e5-f6a7-8901-bcde-f12345678901", "version": 2, "artifacts": []},
             ],
         )
-        collections = client.get_product_release_collections("rel-1")
+        collections = client.get_product_release_collections("b2c3d4e5-f6a7-8901-bcde-f12345678901")
         assert len(collections) == 2
         assert collections[0].version == 1
 
     @responses.activate
     def test_get_product_release_collection_by_version(self, client, base_url):
         responses.get(
-            f"{base_url}/productRelease/rel-1/collection/5",
-            json={"uuid": "rel-1", "version": 5, "artifacts": []},
+            f"{base_url}/productRelease/b2c3d4e5-f6a7-8901-bcde-f12345678901/collection/5",
+            json={"uuid": "b2c3d4e5-f6a7-8901-bcde-f12345678901", "version": 5, "artifacts": []},
         )
-        collection = client.get_product_release_collection("rel-1", 5)
+        collection = client.get_product_release_collection("b2c3d4e5-f6a7-8901-bcde-f12345678901", 5)
         assert collection.version == 5
 
 
@@ -561,53 +573,44 @@ class TestValidationErrors:
     @responses.activate
     def test_validate_raises_tea_validation_error(self, client, base_url):
         # Missing required fields triggers Pydantic ValidationError → TeaValidationError
-        responses.get(f"{base_url}/product/abc", json={"bad": "data"})
+        responses.get(f"{base_url}/product/f6a7b8c9-d0e1-2345-fabc-456789012345", json={"bad": "data"})
         with pytest.raises(TeaValidationError, match="Invalid Product response"):
-            client.get_product("abc")
+            client.get_product("f6a7b8c9-d0e1-2345-fabc-456789012345")
 
     @responses.activate
     def test_validate_list_raises_tea_validation_error(self, client, base_url):
         # List with invalid items triggers Pydantic ValidationError → TeaValidationError
         responses.get(
-            f"{base_url}/component/comp-1/releases",
+            f"{base_url}/component/c3d4e5f6-a7b8-9012-cdef-123456789012/releases",
             json=[{"bad": "data"}],
         )
         with pytest.raises(TeaValidationError, match="Invalid Release response"):
-            client.get_component_releases("comp-1")
+            client.get_component_releases("c3d4e5f6-a7b8-9012-cdef-123456789012")
 
     @responses.activate
     def test_validate_list_rejects_non_list_response(self, client, base_url):
-        responses.get(f"{base_url}/component/comp-1/releases", json={"not": "a list"})
+        responses.get(f"{base_url}/component/c3d4e5f6-a7b8-9012-cdef-123456789012/releases", json={"not": "a list"})
         with pytest.raises(TeaValidationError, match="Expected list"):
-            client.get_component_releases("comp-1")
+            client.get_component_releases("c3d4e5f6-a7b8-9012-cdef-123456789012")
 
 
 class TestValidatePathSegment:
     def test_accepts_uuid(self):
         assert _validate_path_segment("d4d9f54a-abcf-11ee-ac79-1a52914d44b1") == "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
 
-    def test_accepts_alphanumeric(self):
-        assert _validate_path_segment("abc123") == "abc123"
+    def test_accepts_uppercase_uuid(self):
+        assert _validate_path_segment("D4D9F54A-ABCF-11EE-AC79-1A52914D44B1") == "D4D9F54A-ABCF-11EE-AC79-1A52914D44B1"
 
-    def test_accepts_nanoid_style_ids(self):
-        assert _validate_path_segment("eP_4dk8ixV") == "eP_4dk8ixV"
-        assert _validate_path_segment("IeIn1dGJXULh") == "IeIn1dGJXULh"
-
-    def test_accepts_periods_and_tildes(self):
-        assert _validate_path_segment("abc.def") == "abc.def"
-        assert _validate_path_segment("abc~def") == "abc~def"
+    def test_accepts_uuid_without_hyphens(self):
+        assert _validate_path_segment("d4d9f54aabcf11eeac791a52914d44b1") == "d4d9f54aabcf11eeac791a52914d44b1"
 
     @pytest.mark.parametrize(
         "value",
         [
             "../../etc/passwd",
-            "abc/def",
-            "abc def",
-            "abc?query=1",
-            "abc#fragment",
-            "abc@host",
+            "abc-123",
+            "not-a-uuid",
             "",
-            "a" * 129,
             "abc\x00def",
         ],
     )
@@ -616,7 +619,7 @@ class TestValidatePathSegment:
             _validate_path_segment(value)
 
     def test_error_message_includes_guidance(self):
-        with pytest.raises(TeaValidationError, match="URL-safe characters"):
+        with pytest.raises(TeaValidationError, match="valid UUID"):
             _validate_path_segment("../traversal")
 
 
@@ -624,11 +627,11 @@ class TestContextManager:
     @responses.activate
     def test_client_as_context_manager(self, base_url):
         responses.get(
-            f"{base_url}/component/c1",
-            json={"uuid": "c1", "name": "C1", "identifiers": []},
+            f"{base_url}/component/a7b8c9d0-e1f2-3456-abcd-567890123456",
+            json={"uuid": "a7b8c9d0-e1f2-3456-abcd-567890123456", "name": "C1", "identifiers": []},
         )
         with TeaClient(base_url=base_url) as client:
-            component = client.get_component("c1")
+            component = client.get_component("a7b8c9d0-e1f2-3456-abcd-567890123456")
             assert component.name == "C1"
 
 
@@ -754,7 +757,7 @@ class TestPageSizeValidation:
 
     def test_get_product_releases_rejects_bad_page_size(self, client):
         with pytest.raises(TeaValidationError, match="page_size"):
-            client.get_product_releases("abc-123", page_size=-1)
+            client.get_product_releases("a1b2c3d4-e5f6-7890-abcd-ef1234567890", page_size=-1)
 
     def test_search_product_releases_rejects_bad_page_size(self, client):
         with pytest.raises(TeaValidationError, match="page_size"):
@@ -780,7 +783,7 @@ class TestPageOffsetValidation:
 
     def test_get_product_releases_rejects_negative_offset(self, client):
         with pytest.raises(TeaValidationError, match="page_offset"):
-            client.get_product_releases("abc-123", page_offset=-1)
+            client.get_product_releases("a1b2c3d4-e5f6-7890-abcd-ef1234567890", page_offset=-1)
 
     def test_search_product_releases_rejects_negative_offset(self, client):
         with pytest.raises(TeaValidationError, match="page_offset"):
@@ -803,11 +806,11 @@ class TestCollectionVersionValidation:
 
     def test_get_product_release_collection_rejects_zero(self, client):
         with pytest.raises(TeaValidationError, match="Collection version"):
-            client.get_product_release_collection("rel-1", 0)
+            client.get_product_release_collection("b2c3d4e5-f6a7-8901-bcde-f12345678901", 0)
 
     def test_get_component_release_collection_rejects_zero(self, client):
         with pytest.raises(TeaValidationError, match="Collection version"):
-            client.get_component_release_collection("cr-1", 0)
+            client.get_component_release_collection("d4e5f6a7-b8c9-0123-defa-234567890123", 0)
 
 
 class TestWeakChecksumWarning:

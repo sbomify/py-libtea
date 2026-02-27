@@ -7,6 +7,7 @@ verification. All HTTP is delegated to :class:`~libtea._http.TeaHttpClient`.
 
 import hmac
 import logging
+import uuid as _uuid
 import warnings
 from pathlib import Path
 from types import TracebackType
@@ -45,10 +46,6 @@ TEA_SPEC_VERSION = "0.3.0-beta.2"
 
 _M = TypeVar("_M", bound=BaseModel)
 
-# Restrict URL path segments to safe characters to prevent path traversal and injection.
-# Allows alphanumeric, hyphens, underscores, periods, and tildes (RFC 3986 unreserved chars).
-_SAFE_PATH_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.~")
-
 
 def _validate(model_cls: type[_M], data: Any) -> _M:
     """Validate a JSON-decoded value against a Pydantic model.
@@ -78,17 +75,21 @@ def _validate_list(model_cls: type[_M], data: Any) -> list[_M]:
 
 
 def _validate_path_segment(value: str, name: str = "uuid") -> str:
-    """Validate that a value is safe to interpolate into a URL path.
+    """Validate that a value is a valid UUID per TEA spec (RFC 4122).
 
-    Rejects empty strings, strings longer than 128 characters, and any
-    character outside the RFC 3986 unreserved set to prevent path
-    traversal and injection attacks.
+    The TEA OpenAPI spec defines all path ``{uuid}`` parameters as
+    ``format: uuid`` with pattern ``^[0-9a-f]{8}-...-[0-9a-f]{12}$``.
+
+    Raises:
+        TeaValidationError: If the value is empty or not a valid UUID.
     """
     if not value:
         raise TeaValidationError(f"Invalid {name}: must not be empty.")
-    if len(value) > 128 or not all(c in _SAFE_PATH_CHARS for c in value):
+    try:
+        _uuid.UUID(value)
+    except ValueError:
         raise TeaValidationError(
-            f"Invalid {name}: {value!r}. Must contain only URL-safe characters (alphanumeric, hyphens, underscores, periods, tildes), max 128 characters."
+            f"Invalid {name}: {value!r}. Must be a valid UUID (e.g. 'd4d9f54a-abcf-11ee-ac79-1a52914d44b1')."
         )
     return value
 
