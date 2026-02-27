@@ -20,7 +20,9 @@ from libtea._http import MtlsConfig
 from libtea.client import TEA_SPEC_VERSION, TeaClient
 from libtea.discovery import parse_tei
 from libtea.exceptions import TeaDiscoveryError, TeaError
-from libtea.models import _CHECKSUM_NAME_TO_VALUE, Checksum, ChecksumAlgorithm
+from libtea.models import Checksum, ChecksumAlgorithm, normalize_algorithm_name
+
+logger = logging.getLogger("libtea")
 
 app = typer.Typer(help="TEA (Transparency Exchange API) CLI client.", no_args_is_help=True)
 
@@ -534,7 +536,7 @@ def download(
                 _error(f"Invalid checksum format: {cs!r}. Expected ALG:VALUE (e.g. SHA-256:abcdef...)")
             alg, value = cs.split(":", 1)
             # Normalize underscore form (SHA_256) to hyphen form (SHA-256)
-            alg = _CHECKSUM_NAME_TO_VALUE.get(alg, alg)
+            alg = normalize_algorithm_name(alg)
             try:
                 alg_enum = ChecksumAlgorithm(alg)
             except ValueError:
@@ -597,8 +599,8 @@ def inspect(
                                 cr = client.get_component_release(latest.uuid)
                                 comp_data["resolvedRelease"] = cr.model_dump(mode="json", by_alias=True)
                                 comp_data["resolvedNote"] = "latest release (not pinned)"
-                        except TeaError:
-                            pass  # Keep basic component data if release resolution fails
+                        except TeaError as exc:
+                            logger.debug("Could not resolve releases for component %s: %s", comp_ref.uuid, exc)
                         components.append(comp_data)
                 truncated = len(pr.components) > max_components
                 entry: dict[str, Any] = {

@@ -65,8 +65,11 @@ def _kv_panel(title: str, fields: list[tuple[str, str]], *, console: Console) ->
 
 def _pagination_header(data: PaginatedProductResponse | PaginatedProductReleaseResponse, *, console: Console) -> None:
     """Render a dim pagination summary line."""
-    end = data.page_start_index + len(data.results)
-    console.print(Text(f"Results {data.page_start_index + 1}-{end} of {data.total_results}", style="dim"))
+    if not data.results:
+        console.print(Text(f"No results (total: {data.total_results})", style="dim"))
+    else:
+        end = data.page_start_index + len(data.results)
+        console.print(Text(f"Results {data.page_start_index + 1}-{end} of {data.total_results}", style="dim"))
 
 
 def _distributions_table(distributions: list[ReleaseDistribution], *, console: Console) -> None:
@@ -401,7 +404,7 @@ def _inspect_component_details(comp: dict, *, console: Console) -> None:
     distributions = release.get("distributions") or []
     if distributions:
         comp_name = comp.get("name") or release.get("componentName", "Component")
-        tbl = Table(title=f"Distributions ({escape(str(comp_name))})")
+        tbl = Table(title=f"Distributions ({_esc(comp_name)})")
         tbl.add_column("Type")
         tbl.add_column("Description")
         tbl.add_column("URL")

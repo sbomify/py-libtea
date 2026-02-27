@@ -58,7 +58,9 @@ from libtea.models import (
     ProductRelease,
     Release,
     ReleaseDistribution,
+    TeaEndpoint,
     TeaServerInfo,
+    TeaWellKnown,
     TeiType,
 )
 
@@ -113,7 +115,9 @@ __all__ = [
     "ProductRelease",
     "Release",
     "ReleaseDistribution",
+    "TeaEndpoint",
     "TeaServerInfo",
+    "TeaWellKnown",
     "TeiType",
     "__version__",
 ]

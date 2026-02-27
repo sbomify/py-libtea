@@ -260,6 +260,28 @@ class TestFetchWellKnown:
         wk = fetch_well_known("example.com", mtls=mtls)
         assert len(wk.endpoints) == 1
 
+    @responses.activate
+    def test_fetch_well_known_with_mtls_ca_bundle(self):
+        """mTLS with ca_bundle should set verify= on the request."""
+        from pathlib import Path
+
+        from libtea._http import MtlsConfig
+
+        responses.get(
+            "https://example.com/.well-known/tea",
+            json={
+                "schemaVersion": 1,
+                "endpoints": [{"url": "https://api.example.com", "versions": ["1.0.0"]}],
+            },
+        )
+        mtls = MtlsConfig(
+            client_cert=Path("/tmp/cert.pem"),
+            client_key=Path("/tmp/key.pem"),
+            ca_bundle=Path("/tmp/ca-bundle.pem"),
+        )
+        wk = fetch_well_known("example.com", mtls=mtls)
+        assert len(wk.endpoints) == 1
+
 
 class TestFetchWellKnownSsrfProtection:
     """P2-2: Post-redirect SSRF validation in fetch_well_known."""

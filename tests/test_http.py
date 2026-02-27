@@ -580,6 +580,30 @@ class TestIsInternalIp:
         assert _is_internal_ip(ipaddress.IPv4Address("224.0.0.1"))
         assert _is_internal_ip(ipaddress.IPv6Address("ff02::1"))
 
+    def test_ipv4_mapped_ipv6_cgnat_is_internal(self):
+        """SEC-01: IPv4-mapped IPv6 CGNAT addresses must be blocked."""
+        import ipaddress
+
+        assert _is_internal_ip(ipaddress.IPv6Address("::ffff:100.64.0.1"))
+        assert _is_internal_ip(ipaddress.IPv6Address("::ffff:100.127.255.254"))
+
+    def test_ipv4_mapped_ipv6_private_is_internal(self):
+        import ipaddress
+
+        assert _is_internal_ip(ipaddress.IPv6Address("::ffff:10.0.0.1"))
+        assert _is_internal_ip(ipaddress.IPv6Address("::ffff:169.254.169.254"))
+
+    def test_ipv4_mapped_ipv6_public_not_internal(self):
+        import ipaddress
+
+        assert not _is_internal_ip(ipaddress.IPv6Address("::ffff:8.8.8.8"))
+
+    def test_skips_unparseable_sockaddr(self):
+        """Non-IP address entries in getaddrinfo results are silently skipped."""
+        fake_addr = [(1, 1, 0, "", ("/var/run/some.sock",))]
+        with patch("libtea._http.socket.getaddrinfo", return_value=fake_addr):
+            _validate_resolved_ips("unix-socket.example.com")  # should not raise
+
 
 class TestDnsRebindingProtection:
     """DNS rebinding protection via hostname resolution check."""
@@ -741,3 +765,41 @@ class TestTruncationIndicator:
         with pytest.raises(TeaRequestError) as exc_info:
             http_client.get_json("/product/abc")
         assert "truncated" not in str(exc_info.value)
+
+
+class TestResponseSizeLimit:
+    """API response body size limit protection (SEC-04)."""
+
+    @responses.activate
+    def test_rejects_oversized_content_length(self):
+        """Content-Length header advertising oversized body triggers rejection."""
+        client = TeaHttpClient("https://api.example.com/v1")
+        client._max_response_bytes = 5  # Very small limit
+        responses.get(
+            "https://api.example.com/v1/product/abc",
+            json={"uuid": "abc"},
+            status=200,
+        )
+        with pytest.raises(TeaValidationError, match="Response too large|exceeds limit"):
+            client.get_json("/product/abc")
+        client.close()
+
+    @responses.activate
+    def test_rejects_oversized_body(self):
+        """Body exceeding limit is rejected even without Content-Length."""
+        client = TeaHttpClient("https://api.example.com/v1")
+        client._max_response_bytes = 100
+        large_body = b'{"data": "' + b"x" * 200 + b'"}'
+        responses.get("https://api.example.com/v1/product/abc", body=large_body, status=200)
+        with pytest.raises(TeaValidationError, match="exceeds limit"):
+            client.get_json("/product/abc")
+        client.close()
+
+    @responses.activate
+    def test_normal_response_passes(self):
+        """Normal-sized responses pass the size check."""
+        client = TeaHttpClient("https://api.example.com/v1")
+        responses.get("https://api.example.com/v1/product/abc", json={"uuid": "abc"}, status=200)
+        result = client.get_json("/product/abc")
+        assert result == {"uuid": "abc"}
+        client.close()

@@ -1167,3 +1167,168 @@ class TestNewCommands:
         assert "get-component-releases" in result.output
         assert "list-collections" in result.output
         assert "get-cle" in result.output
+
+
+class TestMtlsCli:
+    """Coverage for _build_mtls success and error paths."""
+
+    def test_cert_without_key_errors(self):
+        result = runner.invoke(
+            app,
+            [
+                "get-product",
+                "d4d9f54a-abcf-11ee-ac79-1a52914d44b1",
+                "--base-url",
+                BASE_URL,
+                "--client-cert",
+                "/tmp/cert.pem",
+            ],
+        )
+        assert result.exit_code == 1
+        assert "--client-key" in _strip_ansi(result.output)
+
+    def test_key_without_cert_errors(self):
+        result = runner.invoke(
+            app,
+            [
+                "get-product",
+                "d4d9f54a-abcf-11ee-ac79-1a52914d44b1",
+                "--base-url",
+                BASE_URL,
+                "--client-key",
+                "/tmp/key.pem",
+            ],
+        )
+        assert result.exit_code == 1
+        assert "--client-cert" in _strip_ansi(result.output)
+
+    @responses.activate
+    def test_both_cert_and_key_succeeds(self):
+        responses.get(
+            f"{BASE_URL}/product/d4d9f54a-abcf-11ee-ac79-1a52914d44b1",
+            json={"uuid": "d4d9f54a-abcf-11ee-ac79-1a52914d44b1", "name": "Test", "identifiers": []},
+        )
+        result = runner.invoke(
+            app,
+            [
+                "get-product",
+                "d4d9f54a-abcf-11ee-ac79-1a52914d44b1",
+                "--base-url",
+                BASE_URL,
+                "--client-cert",
+                "/tmp/cert.pem",
+                "--client-key",
+                "/tmp/key.pem",
+            ],
+        )
+        assert result.exit_code == 0
+
+
+class TestCLIErrorHandlingCoverage:
+    """Coverage for error paths on commands not yet tested for errors."""
+
+    @responses.activate
+    def test_get_product_releases_error(self):
+        responses.get(
+            f"{BASE_URL}/product/d4d9f54a-abcf-11ee-ac79-1a52914d44b1/releases",
+            status=404,
+            json={"error": "OBJECT_UNKNOWN"},
+        )
+        result = runner.invoke(
+            app, ["get-product-releases", "d4d9f54a-abcf-11ee-ac79-1a52914d44b1", "--base-url", BASE_URL]
+        )
+        assert result.exit_code == 1
+
+    @responses.activate
+    def test_get_component_error(self):
+        responses.get(
+            f"{BASE_URL}/component/d4d9f54a-abcf-11ee-ac79-1a52914d44b1", status=404, json={"error": "OBJECT_UNKNOWN"}
+        )
+        result = runner.invoke(app, ["get-component", "d4d9f54a-abcf-11ee-ac79-1a52914d44b1", "--base-url", BASE_URL])
+        assert result.exit_code == 1
+
+    @responses.activate
+    def test_get_component_releases_error(self):
+        responses.get(
+            f"{BASE_URL}/component/d4d9f54a-abcf-11ee-ac79-1a52914d44b1/releases",
+            status=404,
+            json={"error": "OBJECT_UNKNOWN"},
+        )
+        result = runner.invoke(
+            app, ["get-component-releases", "d4d9f54a-abcf-11ee-ac79-1a52914d44b1", "--base-url", BASE_URL]
+        )
+        assert result.exit_code == 1
+
+    @responses.activate
+    def test_list_collections_error(self):
+        responses.get(
+            f"{BASE_URL}/productRelease/d4d9f54a-abcf-11ee-ac79-1a52914d44b1/collections",
+            status=404,
+            json={"error": "OBJECT_UNKNOWN"},
+        )
+        result = runner.invoke(
+            app, ["list-collections", "d4d9f54a-abcf-11ee-ac79-1a52914d44b1", "--base-url", BASE_URL]
+        )
+        assert result.exit_code == 1
+
+    @responses.activate
+    def test_get_cle_error(self):
+        responses.get(
+            f"{BASE_URL}/productRelease/d4d9f54a-abcf-11ee-ac79-1a52914d44b1/cle",
+            status=404,
+            json={"error": "OBJECT_UNKNOWN"},
+        )
+        result = runner.invoke(app, ["get-cle", "d4d9f54a-abcf-11ee-ac79-1a52914d44b1", "--base-url", BASE_URL])
+        assert result.exit_code == 1
+
+
+class TestDomainFromTeiCoverage:
+    """Coverage for _domain_from_tei exception path."""
+
+    def test_invalid_tei_falls_back_to_error(self):
+        result = runner.invoke(app, ["discover", "not-a-valid-tei"])
+        assert result.exit_code == 1
+
+
+class TestJsonListOutput:
+    """Coverage for _output JSON list branch."""
+
+    @responses.activate
+    def test_component_releases_json_list(self):
+        responses.get(
+            f"{BASE_URL}/component/d4d9f54a-abcf-11ee-ac79-1a52914d44b1/releases",
+            json=[
+                {
+                    "uuid": "e5e0a65b-bcdf-22ff-bd80-2b63a25e55c2",
+                    "version": "1.0.0",
+                    "createdDate": "2024-01-01T00:00:00Z",
+                }
+            ],
+        )
+        result = runner.invoke(
+            app, ["--json", "get-component-releases", "d4d9f54a-abcf-11ee-ac79-1a52914d44b1", "--base-url", BASE_URL]
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert isinstance(data, list)
+        assert data[0]["uuid"] == "e5e0a65b-bcdf-22ff-bd80-2b63a25e55c2"
+
+
+class TestCliEntryImportError:
+    """Coverage for _cli_entry.py ImportError branch."""
+
+    def test_missing_typer_prints_install_hint(self):
+        import subprocess
+        import sys
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.modules['typer'] = None; from libtea._cli_entry import main; main()",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        # The import error handling results in SystemExit(1)
+        assert result.returncode == 1

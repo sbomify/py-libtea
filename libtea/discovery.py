@@ -185,16 +185,14 @@ def select_endpoints(well_known: TeaWellKnown, supported_version: str) -> list[T
 
     candidates: list[tuple[_SemVer, TeaEndpoint]] = []
     for ep in well_known.endpoints:
-        best_match: _SemVer | None = None
         for v_str in ep.versions:
             try:
                 v = _SemVer.parse(v_str)
             except ValueError:
                 continue
-            if v == target and (best_match is None or v > best_match):
-                best_match = v
-        if best_match is not None:
-            candidates.append((best_match, ep))
+            if v == target:
+                candidates.append((v, ep))
+                break
 
     if not candidates:
         available = {v for ep in well_known.endpoints for v in ep.versions}

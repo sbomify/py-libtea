@@ -16,7 +16,7 @@ from typing import Any, Self, TypeVar
 import requests
 from pydantic import BaseModel, ValidationError
 
-from libtea._http import USER_AGENT, MtlsConfig, TeaHttpClient
+from libtea._http import USER_AGENT, MtlsConfig, TeaHttpClient, _validate_download_url
 from libtea.discovery import fetch_well_known, select_endpoints
 from libtea.exceptions import (
     TeaChecksumError,
@@ -87,10 +87,10 @@ def _validate_path_segment(value: str, name: str = "uuid") -> str:
         raise TeaValidationError(f"Invalid {name}: must not be empty.")
     try:
         parsed = _uuid.UUID(value)
-    except ValueError:
+    except ValueError as exc:
         raise TeaValidationError(
             f"Invalid {name}: {value!r}. Must be a valid UUID (e.g. 'd4d9f54a-abcf-11ee-ac79-1a52914d44b1')."
-        )
+        ) from exc
     return str(parsed)
 
 
@@ -241,8 +241,9 @@ class TeaClient:
         for endpoint in candidates:
             base_url = f"{endpoint.url.rstrip('/')}/v{version}"
             try:
+                _validate_download_url(base_url)
                 _probe_endpoint(base_url, timeout=min(timeout, 5.0), mtls=mtls)
-            except (TeaConnectionError, TeaServerError) as exc:
+            except (TeaConnectionError, TeaServerError, TeaValidationError) as exc:
                 logger.warning("Endpoint %s unreachable, trying next: %s", base_url, exc)
                 last_error = exc
                 continue

@@ -88,6 +88,15 @@ _CHECKSUM_VALUES = frozenset(e.value for e in ChecksumAlgorithm)
 _CHECKSUM_NAME_TO_VALUE = {e.name: e.value for e in ChecksumAlgorithm}
 
 
+def normalize_algorithm_name(name: str) -> str:
+    """Normalize a checksum algorithm name from underscore form to hyphen form.
+
+    Maps enum member names (e.g. ``SHA_256``) to their values (``SHA-256``).
+    Returns the input unchanged if it is already a valid value or unknown.
+    """
+    return _CHECKSUM_NAME_TO_VALUE.get(name, name)
+
+
 class ArtifactType(StrEnum):
     """Type of a TEA artifact (e.g. BOM, VEX, attestation)."""
 

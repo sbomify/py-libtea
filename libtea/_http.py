@@ -63,8 +63,6 @@ def _get_package_version() -> str:
 
 USER_AGENT = f"py-libtea/{_get_package_version()} (hello@sbomify.com)"
 
-_BLOCKED_SCHEMES = frozenset({"file", "ftp", "gopher", "data"})
-
 
 @dataclass(frozen=True)
 class MtlsConfig:
@@ -137,7 +135,11 @@ def _is_internal_ip(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool
         return True
     if addr.is_unspecified or addr.is_multicast:
         return True
-    if isinstance(addr, ipaddress.IPv4Address) and addr in _CGNAT_NETWORK:
+    # Extract embedded IPv4 from IPv4-mapped IPv6 (::ffff:x.x.x.x) before CGNAT check
+    check_v4 = addr
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
+        check_v4 = addr.ipv4_mapped
+    if isinstance(check_v4, ipaddress.IPv4Address) and check_v4 in _CGNAT_NETWORK:
         return True
     return False
 
@@ -172,7 +174,7 @@ def _validate_resolved_ips(hostname: str) -> None:
 def _validate_download_url(url: str) -> None:
     """Reject download URLs that use non-HTTP schemes or target internal networks."""
     parsed = urlparse(url)
-    if parsed.scheme in _BLOCKED_SCHEMES or parsed.scheme not in ("http", "https"):
+    if parsed.scheme not in ("http", "https"):
         raise TeaValidationError(f"Artifact download URL must use http or https scheme, got {parsed.scheme!r}")
     if not parsed.hostname:
         raise TeaValidationError(f"Artifact download URL must include a hostname: {url!r}")
@@ -245,6 +247,7 @@ class TeaHttpClient:
             )
         self._base_url = parsed.geturl().rstrip("/")
         self._timeout = timeout
+        self._max_response_bytes = 10 * 1024 * 1024  # 10 MB default cap for API responses
         self._session = requests.Session()
         self._session.headers["user-agent"] = USER_AGENT
 
@@ -302,6 +305,14 @@ class TeaHttpClient:
 
         logger.debug("HTTP %d %s (%.3fs)", response.status_code, response.url, response.elapsed.total_seconds())
         self._raise_for_status(response)
+        content_length = response.headers.get("Content-Length")
+        if content_length and content_length.isdigit() and int(content_length) > self._max_response_bytes:
+            raise TeaValidationError(f"Response too large: {content_length} bytes (limit {self._max_response_bytes})")
+        body = response.content
+        if len(body) > self._max_response_bytes:
+            raise TeaValidationError(
+                f"Response body exceeds limit: {len(body)} bytes (limit {self._max_response_bytes})"
+            )
         try:
             return response.json()
         except ValueError as exc:

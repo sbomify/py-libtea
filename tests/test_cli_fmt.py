@@ -36,6 +36,7 @@ from libtea.models import (  # noqa: E402
     CLEEvent,
     CLEEventType,
     CLESupportDefinition,
+    CLEVersionSpecifier,
     Collection,
     CollectionBelongsTo,
     CollectionUpdateReason,
@@ -139,7 +140,7 @@ class TestFmtSearchProducts:
             results=[],
         )
         output = _capture(fmt_search_products, data)
-        assert "Results 1-0 of 0" in output
+        assert "No results (total: 0)" in output
 
 
 class TestFmtSearchReleases:
@@ -676,10 +677,6 @@ class TestArtifactFormatDetails:
         assert "zip" in output
 
 
-UUID = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
-UUID2 = "e5e0a65b-bddf-22ff-bd8a-2b63a25e55c2"
-
-
 class TestComponentFormatter:
     def test_fmt_component(self):
         comp = Component(
@@ -842,3 +839,107 @@ class TestCLEFormatter:
         )
         output = _capture(format_output, cle)
         assert "Lifecycle Events" in output
+
+
+class TestCollectionUpdateReasonComment:
+    """Cover the update_reason.comment branch at _cli_fmt.py:239."""
+
+    def test_update_reason_without_comment(self):
+        data = Collection(
+            uuid=UUID,
+            version=2,
+            update_reason=CollectionUpdateReason(type=CollectionUpdateReasonType.VEX_UPDATED),
+            artifacts=[],
+        )
+        output = _capture(fmt_collection, data)
+        assert "VEX_UPDATED" in output
+        # No parenthesised comment
+        assert "(" not in output.split("VEX_UPDATED")[1].split("\n")[0]
+
+
+class TestCLEEventIdAndVersions:
+    """Cover event_id (line 345) and versions (lines 349-350) branches."""
+
+    def test_event_id_is_shown(self):
+        cle = CLE(
+            events=[
+                CLEEvent(
+                    id=2,
+                    type=CLEEventType.WITHDRAWN,
+                    effective="2024-06-01T00:00:00Z",
+                    published="2024-06-01T00:00:00Z",
+                    event_id=1,
+                ),
+            ]
+        )
+        output = _capture(fmt_cle, cle)
+        assert "event_id=1" in output
+
+    def test_versions_shown_as_range(self):
+        cle = CLE(
+            events=[
+                CLEEvent(
+                    id=1,
+                    type=CLEEventType.END_OF_SUPPORT,
+                    effective="2024-06-01T00:00:00Z",
+                    published="2024-06-01T00:00:00Z",
+                    versions=[
+                        CLEVersionSpecifier(version="1.0.0"),
+                        CLEVersionSpecifier(range="vers:semver/>=2.0.0|<3.0.0"),
+                    ],
+                ),
+            ]
+        )
+        output = _capture(fmt_cle, cle)
+        assert "1.0.0" in output
+        assert "vers:semver/>=2.0.0|<3.0.0" in output
+
+
+class TestInspectArtifactWithoutFormats:
+    """Cover the else branch at _cli_fmt.py:460 (artifact with no formats)."""
+
+    def test_artifact_no_formats_in_inspect(self):
+        data = [
+            {
+                "discovery": {"productReleaseUuid": UUID},
+                "productRelease": {"uuid": UUID, "version": "1.0.0", "createdDate": "2024-01-01"},
+                "components": [
+                    {
+                        "release": {"uuid": UUID2, "version": "2.0.0", "componentName": "libfoo"},
+                        "latestCollection": {
+                            "uuid": UUID,
+                            "version": 1,
+                            "artifacts": [
+                                {"uuid": UUID2, "name": "VEX", "type": "VULNERABILITIES", "formats": []},
+                            ],
+                        },
+                    }
+                ],
+            }
+        ]
+        output = _capture(fmt_inspect, data)
+        assert "VEX" in output
+
+
+class TestFormatOutputFallbacks:
+    """Cover JSON fallback branches at _cli_fmt.py:517-521."""
+
+    def test_fallback_basemodel_json(self):
+        """BaseModel not in _TYPE_FORMATTERS renders as JSON (line 518)."""
+        from libtea.models import TeaEndpoint
+
+        ep = TeaEndpoint(url="https://tea.example.com", versions=["1.0.0"])
+        output = _capture(format_output, ep)
+        assert "tea.example.com" in output
+
+    def test_fallback_list_json(self):
+        """List of BaseModels with unknown command renders as JSON (lines 519-521)."""
+        from libtea.models import TeaEndpoint
+
+        eps = [
+            TeaEndpoint(url="https://tea1.example.com", versions=["1.0.0"]),
+            TeaEndpoint(url="https://tea2.example.com", versions=["2.0.0"]),
+        ]
+        output = _capture(format_output, eps, command="unknown_command")
+        assert "tea1.example.com" in output
+        assert "tea2.example.com" in output
