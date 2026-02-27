@@ -278,7 +278,7 @@ class TestCLICommands:
                 "uuid": uuid,
                 "version": "1.0.0",
                 "createdDate": "2024-01-01T00:00:00Z",
-                "components": [{"uuid": comp_uuid}],
+                "components": [{"uuid": comp_uuid, "release": comp_uuid}],
             },
         )
         responses.get(
@@ -414,7 +414,7 @@ class TestCLIInspectOptions:
                 "uuid": uuid,
                 "version": "1.0.0",
                 "createdDate": "2024-01-01T00:00:00Z",
-                "components": [{"uuid": c} for c in comp_uuids],
+                "components": [{"uuid": c, "release": c} for c in comp_uuids],
             },
         )
         for c in comp_uuids[:2]:

@@ -578,6 +578,14 @@ class TestValidatePathSegment:
     def test_accepts_alphanumeric(self):
         assert _validate_path_segment("abc123") == "abc123"
 
+    def test_accepts_nanoid_style_ids(self):
+        assert _validate_path_segment("eP_4dk8ixV") == "eP_4dk8ixV"
+        assert _validate_path_segment("IeIn1dGJXULh") == "IeIn1dGJXULh"
+
+    def test_accepts_periods_and_tildes(self):
+        assert _validate_path_segment("abc.def") == "abc.def"
+        assert _validate_path_segment("abc~def") == "abc~def"
+
     @pytest.mark.parametrize(
         "value",
         [
@@ -587,7 +595,6 @@ class TestValidatePathSegment:
             "abc?query=1",
             "abc#fragment",
             "abc@host",
-            "abc.def",
             "",
             "a" * 129,
             "abc\x00def",
@@ -598,7 +605,7 @@ class TestValidatePathSegment:
             _validate_path_segment(value)
 
     def test_error_message_includes_guidance(self):
-        with pytest.raises(TeaValidationError, match="alphanumeric characters and hyphens"):
+        with pytest.raises(TeaValidationError, match="URL-safe characters"):
             _validate_path_segment("../traversal")
 
 

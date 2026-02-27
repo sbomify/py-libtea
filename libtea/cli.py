@@ -379,8 +379,12 @@ def inspect(
                 pr = client.get_product_release(disc.product_release_uuid)
                 components = []
                 for comp_ref in pr.components[:max_components]:
-                    cr = client.get_component_release(comp_ref.uuid)
-                    components.append(cr.model_dump(mode="json", by_alias=True))
+                    if comp_ref.release:
+                        cr = client.get_component_release(comp_ref.release)
+                        components.append(cr.model_dump(mode="json", by_alias=True))
+                    else:
+                        comp = client.get_component(comp_ref.uuid)
+                        components.append(comp.model_dump(mode="json", by_alias=True))
                 truncated = len(pr.components) > max_components
                 entry: dict[str, Any] = {
                     "discovery": disc.model_dump(mode="json", by_alias=True),
