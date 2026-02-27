@@ -1,6 +1,7 @@
 """Tests for the tea-cli CLI."""
 
 import json
+import re
 
 import pytest
 import responses
@@ -15,6 +16,12 @@ from libtea.cli import app  # noqa: E402
 runner = CliRunner()
 
 BASE_URL = "https://api.example.com/tea/v1"
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text)
 
 
 @pytest.fixture(autouse=True)
@@ -780,8 +787,9 @@ class TestCLIDebugFlag:
 
     def test_debug_flag_shown_in_help(self):
         result = runner.invoke(app, ["--help"])
-        assert "--debug" in result.output
-        assert "-d" in result.output
+        plain = _strip_ansi(result.output)
+        assert "--debug" in plain
+        assert "-d" in plain
 
 
 class TestCLIDiscoverQuiet:
@@ -846,8 +854,9 @@ class TestCLIDiscoverQuiet:
 
     def test_quiet_flag_shown_in_help(self):
         result = runner.invoke(app, ["discover", "--help"])
-        assert "--quiet" in result.output
-        assert "-q" in result.output
+        plain = _strip_ansi(result.output)
+        assert "--quiet" in plain
+        assert "-q" in plain
 
 
 class TestNewCommands:
