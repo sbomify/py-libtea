@@ -192,6 +192,39 @@ def _validate_download_url(url: str) -> None:
         _validate_resolved_ips(hostname)
 
 
+def probe_endpoint(url: str, timeout: float = 5.0, mtls: MtlsConfig | None = None) -> None:
+    """Probe a URL to verify the server is reachable.
+
+    Uses a standalone HEAD request with no auth and no retries so that
+    failover between candidates is fast.
+
+    Args:
+        url: Endpoint URL to probe.
+        timeout: Request timeout in seconds.
+        mtls: Optional mutual TLS configuration for mTLS-only deployments.
+
+    Raises:
+        TeaConnectionError: If the endpoint is unreachable.
+        TeaServerError: If the endpoint returns HTTP 5xx.
+    """
+    kwargs: dict[str, Any] = {
+        "timeout": timeout,
+        "allow_redirects": False,
+        "headers": {"user-agent": USER_AGENT},
+    }
+    if mtls:
+        kwargs["cert"] = (str(mtls.client_cert), str(mtls.client_key))
+        if mtls.ca_bundle:
+            kwargs["verify"] = str(mtls.ca_bundle)
+    try:
+        resp = requests.head(url, **kwargs)
+        resp.close()
+    except requests.RequestException as exc:
+        raise TeaConnectionError(str(exc)) from exc
+    if resp.status_code >= 500:
+        raise TeaServerError(f"Server error: HTTP {resp.status_code}")
+
+
 class TeaHttpClient:
     """Low-level HTTP client for TEA API requests.
 

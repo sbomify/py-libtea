@@ -543,3 +543,9 @@ class TestSelectEndpoints:
         ep = select_endpoint(wk, "1.0.0")
         eps = select_endpoints(wk, "1.0.0")
         assert ep.url == eps[0].url
+
+    def test_invalid_version_string_raises_discovery_error(self):
+        """select_endpoints wraps ValueError from invalid version strings in TeaDiscoveryError."""
+        wk = self._make_well_known([{"url": "https://api.example.com", "versions": ["1.0.0"]}])
+        with pytest.raises(TeaDiscoveryError, match="Invalid version string"):
+            select_endpoints(wk, "not-a-version")

@@ -181,7 +181,10 @@ def select_endpoints(well_known: TeaWellKnown, supported_version: str) -> list[T
     Raises:
         TeaDiscoveryError: If no endpoint supports the requested version.
     """
-    target = _SemVer.parse(supported_version)
+    try:
+        target = _SemVer.parse(supported_version)
+    except ValueError as exc:
+        raise TeaDiscoveryError(f"Invalid version string {supported_version!r}: {exc}") from exc
 
     candidates: list[tuple[_SemVer, TeaEndpoint]] = []
     for ep in well_known.endpoints:

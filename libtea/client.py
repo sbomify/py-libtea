@@ -13,10 +13,9 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, Self, TypeVar
 
-import requests
 from pydantic import BaseModel, ValidationError
 
-from libtea._http import USER_AGENT, MtlsConfig, TeaHttpClient, _validate_download_url
+from libtea._http import MtlsConfig, TeaHttpClient, _validate_download_url, probe_endpoint
 from libtea.discovery import fetch_well_known, select_endpoints
 from libtea.exceptions import (
     TeaChecksumError,
@@ -118,39 +117,6 @@ def _validate_collection_version(version: int) -> None:
 _WEAK_HASH_ALGORITHMS = frozenset({"MD5", "SHA-1"})
 
 
-def _probe_endpoint(url: str, timeout: float = 5.0, mtls: MtlsConfig | None = None) -> None:
-    """Probe a URL to verify the server is reachable.
-
-    Uses a standalone HEAD request with no auth and no retries so that
-    failover between candidates is fast.
-
-    Args:
-        url: Endpoint URL to probe.
-        timeout: Request timeout in seconds.
-        mtls: Optional mutual TLS configuration for mTLS-only deployments.
-
-    Raises:
-        TeaConnectionError: If the endpoint is unreachable.
-        TeaServerError: If the endpoint returns HTTP 5xx.
-    """
-    kwargs: dict[str, Any] = {
-        "timeout": timeout,
-        "allow_redirects": False,
-        "headers": {"user-agent": USER_AGENT},
-    }
-    if mtls:
-        kwargs["cert"] = (str(mtls.client_cert), str(mtls.client_key))
-        if mtls.ca_bundle:
-            kwargs["verify"] = str(mtls.ca_bundle)
-    try:
-        resp = requests.head(url, **kwargs)
-        resp.close()
-    except requests.RequestException as exc:
-        raise TeaConnectionError(str(exc)) from exc
-    if resp.status_code >= 500:
-        raise TeaServerError(f"Server error: HTTP {resp.status_code}")
-
-
 class TeaClient:
     """Synchronous client for the Transparency Exchange API (consumer / read-only).
 
@@ -242,7 +208,7 @@ class TeaClient:
             base_url = f"{endpoint.url.rstrip('/')}/v{version}"
             try:
                 _validate_download_url(base_url)
-                _probe_endpoint(base_url, timeout=min(timeout, 5.0), mtls=mtls)
+                probe_endpoint(base_url, timeout=min(timeout, 5.0), mtls=mtls)
             except (TeaConnectionError, TeaServerError, TeaValidationError) as exc:
                 logger.warning("Endpoint %s unreachable, trying next: %s", base_url, exc)
                 last_error = exc

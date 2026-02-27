@@ -4,11 +4,10 @@ import pytest
 import requests
 import responses
 
-from libtea._http import MtlsConfig
+from libtea._http import MtlsConfig, probe_endpoint
 from libtea.client import (
     _MAX_PAGE_SIZE,
     TeaClient,
-    _probe_endpoint,
     _validate_collection_version,
     _validate_page_offset,
     _validate_page_size,
@@ -412,38 +411,38 @@ class TestProbeEndpoint:
     @responses.activate
     def test_probe_success(self):
         responses.head("https://api.example.com/v1", status=200)
-        _probe_endpoint("https://api.example.com/v1")  # should not raise
+        probe_endpoint("https://api.example.com/v1")  # should not raise
 
     @responses.activate
     def test_probe_404_is_ok(self):
         """404 means the server is alive — probe should succeed."""
         responses.head("https://api.example.com/v1", status=404)
-        _probe_endpoint("https://api.example.com/v1")  # should not raise
+        probe_endpoint("https://api.example.com/v1")  # should not raise
 
     @responses.activate
     def test_probe_500_raises_server_error(self):
         responses.head("https://api.example.com/v1", status=500)
         with pytest.raises(TeaServerError):
-            _probe_endpoint("https://api.example.com/v1")
+            probe_endpoint("https://api.example.com/v1")
 
     @responses.activate
     def test_probe_connection_error_raises(self):
         responses.head("https://api.example.com/v1", body=requests.ConnectionError("refused"))
         with pytest.raises(TeaConnectionError):
-            _probe_endpoint("https://api.example.com/v1")
+            probe_endpoint("https://api.example.com/v1")
 
     @responses.activate
     def test_probe_timeout_raises(self):
         responses.head("https://api.example.com/v1", body=requests.Timeout("timed out"))
         with pytest.raises(TeaConnectionError):
-            _probe_endpoint("https://api.example.com/v1")
+            probe_endpoint("https://api.example.com/v1")
 
     @responses.activate
     def test_probe_request_exception_raises(self):
         """Generic RequestException (not ConnectionError/Timeout) also raises TeaConnectionError."""
         responses.head("https://api.example.com/v1", body=requests.exceptions.TooManyRedirects("too many"))
         with pytest.raises(TeaConnectionError):
-            _probe_endpoint("https://api.example.com/v1")
+            probe_endpoint("https://api.example.com/v1")
 
 
 class TestEndpointFailover:
@@ -697,13 +696,13 @@ class TestCLE:
 
 
 class TestProbeEndpointMtls:
-    """_probe_endpoint passes mTLS config to the standalone HEAD request."""
+    """probe_endpoint passes mTLS config to the standalone HEAD request."""
 
     @responses.activate
     def test_probe_with_mtls_config(self):
         responses.head("https://api.example.com/v1", status=200)
         mtls = MtlsConfig(client_cert=Path("/tmp/cert.pem"), client_key=Path("/tmp/key.pem"))
-        _probe_endpoint("https://api.example.com/v1", mtls=mtls)  # should not raise
+        probe_endpoint("https://api.example.com/v1", mtls=mtls)  # should not raise
 
     @responses.activate
     def test_probe_with_mtls_ca_bundle(self):
@@ -711,11 +710,11 @@ class TestProbeEndpointMtls:
         mtls = MtlsConfig(
             client_cert=Path("/tmp/cert.pem"), client_key=Path("/tmp/key.pem"), ca_bundle=Path("/tmp/ca.pem")
         )
-        _probe_endpoint("https://api.example.com/v1", mtls=mtls)  # should not raise
+        probe_endpoint("https://api.example.com/v1", mtls=mtls)  # should not raise
 
     @responses.activate
     def test_from_well_known_passes_mtls_to_probe(self):
-        """from_well_known must propagate mTLS config to _probe_endpoint."""
+        """from_well_known must propagate mTLS config to probe_endpoint."""
         responses.get(
             "https://example.com/.well-known/tea",
             json={
