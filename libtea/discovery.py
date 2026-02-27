@@ -14,8 +14,8 @@ import requests
 from pydantic import ValidationError
 from semver import Version as _SemVer
 
-from libtea._http import USER_AGENT, MtlsConfig
-from libtea.exceptions import TeaDiscoveryError, TeaInsecureTransportWarning
+from libtea._http import USER_AGENT, MtlsConfig, _validate_download_url
+from libtea.exceptions import TeaDiscoveryError, TeaInsecureTransportWarning, TeaValidationError
 from libtea.models import TeaEndpoint, TeaWellKnown, TeiType
 
 logger = logging.getLogger("libtea")
@@ -137,6 +137,13 @@ def fetch_well_known(
                 TeaInsecureTransportWarning,
                 stacklevel=2,
             )
+        # If a redirect occurred, validate the final hostname against internal
+        # networks to prevent SSRF (e.g. redirect to 169.254.169.254).
+        if response.url != url:
+            try:
+                _validate_download_url(response.url)
+            except TeaValidationError as exc:
+                raise TeaDiscoveryError(f"Discovery for {domain} redirected to blocked target: {exc}") from exc
         if response.status_code >= 400:
             body_snippet = (response.text or "")[:200]
             if len(response.text or "") > 200:

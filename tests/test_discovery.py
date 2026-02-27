@@ -329,6 +329,30 @@ class TestFetchWellKnownSsrfProtection:
             with pytest.warns(TeaInsecureTransportWarning, match="downgraded from HTTPS to HTTP"):
                 fetch_well_known("example.com")
 
+    def test_rejects_redirect_to_internal_ip(self):
+        """Redirect to an internal IP (e.g. cloud metadata) should raise."""
+        from unittest.mock import MagicMock, patch
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.url = "http://169.254.169.254/latest/meta-data/"
+
+        with patch("libtea.discovery.requests.get", return_value=mock_response):
+            with pytest.raises(TeaDiscoveryError, match="redirected to blocked target"):
+                fetch_well_known("example.com")
+
+    def test_rejects_redirect_to_localhost(self):
+        """Redirect to localhost should raise."""
+        from unittest.mock import MagicMock, patch
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.url = "http://localhost/admin"
+
+        with patch("libtea.discovery.requests.get", return_value=mock_response):
+            with pytest.raises(TeaDiscoveryError, match="redirected to blocked target"):
+                fetch_well_known("example.com")
+
 
 class TestSelectEndpoint:
     def _make_well_known(self, endpoints: list[dict]) -> TeaWellKnown:
