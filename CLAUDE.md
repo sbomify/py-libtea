@@ -13,6 +13,7 @@ uv sync                                    # Install all dependencies
 uv run pytest                              # Run full test suite with coverage
 uv run pytest tests/client/test_client.py -v      # Run a single test file
 uv run pytest tests/unit/test_security.py::TestSsrfProtection::test_rejects_cgnat_ip -v  # Single test
+uv run mypy                                # Type check (strict mode)
 uv run ruff check .                        # Lint
 uv run ruff format --check .               # Format check
 uv run ruff format .                       # Auto-format

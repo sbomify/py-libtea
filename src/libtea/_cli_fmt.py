@@ -7,6 +7,7 @@ their data is ``list`` which is ambiguous by type alone).
 """
 
 import json
+from typing import Any
 
 from pydantic import BaseModel
 from rich.console import Console
@@ -359,7 +360,7 @@ def fmt_cle(data: CLE, *, console: Console) -> None:
     console.print(tbl)
 
 
-def fmt_inspect(data: list[dict], *, console: Console) -> None:
+def fmt_inspect(data: list[dict[str, Any]], *, console: Console) -> None:
     """Render the full inspect output (discovery + release + components)."""
     for entry in data:
         pr = entry["productRelease"]
@@ -397,7 +398,7 @@ def fmt_inspect(data: list[dict], *, console: Console) -> None:
             console.print(Text(f"Showing {len(components)} of {entry['totalComponents']} components", style="dim"))
 
 
-def _inspect_component_details(comp: dict, *, console: Console) -> None:
+def _inspect_component_details(comp: dict[str, Any], *, console: Console) -> None:
     """Render distributions and artifact details for a component in inspect output."""
     # Distributions come from the release object
     release = comp.get("release") or (comp.get("resolvedRelease") or {}).get("release") or {}
@@ -510,7 +511,7 @@ def format_output(data: object, *, command: str | None = None, console: Console 
 
     for model_type, formatter in _TYPE_FORMATTERS.items():
         if isinstance(data, model_type):
-            formatter(data, console=c)
+            formatter(data, console=c)  # type: ignore[operator]
             return
 
     # Fallback: render as JSON

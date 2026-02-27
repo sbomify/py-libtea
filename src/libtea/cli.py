@@ -20,7 +20,13 @@ from libtea._http import MtlsConfig
 from libtea.client import TEA_SPEC_VERSION, TeaClient
 from libtea.discovery import parse_tei
 from libtea.exceptions import TeaDiscoveryError, TeaError
-from libtea.models import Checksum, ChecksumAlgorithm, normalize_algorithm_name
+from libtea.models import (
+    Checksum,
+    ChecksumAlgorithm,
+    ComponentReleaseWithCollection,
+    ProductRelease,
+    normalize_algorithm_name,
+)
 
 logger = logging.getLogger("libtea")
 
@@ -70,6 +76,8 @@ def _build_mtls(client_cert: str | None, client_key: str | None, ca_bundle: str 
         _error("--client-key is required when --client-cert is specified")
     if client_key and not client_cert:
         _error("--client-cert is required when --client-key is specified")
+    assert client_cert is not None
+    assert client_key is not None
     return MtlsConfig(
         client_cert=Path(client_cert),
         client_key=Path(client_key),
@@ -119,6 +127,7 @@ def _build_client(
     mtls = _build_mtls(client_cert, client_key, ca_bundle)
     if base_url:
         return TeaClient(base_url=base_url, token=token, basic_auth=basic_auth, timeout=timeout, mtls=mtls)
+    assert domain is not None
     scheme = "http" if use_http else "https"
     return TeaClient.from_well_known(
         domain, token=token, basic_auth=basic_auth, timeout=timeout, scheme=scheme, port=port, mtls=mtls
@@ -169,7 +178,7 @@ def discover(
     client_cert: Annotated[str | None, _client_cert_opt] = None,
     client_key: Annotated[str | None, _client_key_opt] = None,
     ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
-):
+) -> None:
     """Resolve a TEI to product release UUID(s)."""
     try:
         with _build_client(
@@ -201,7 +210,7 @@ def search_products(
     client_cert: Annotated[str | None, _client_cert_opt] = None,
     client_key: Annotated[str | None, _client_key_opt] = None,
     ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
-):
+) -> None:
     """Search for products by identifier."""
     try:
         with _build_client(
@@ -229,7 +238,7 @@ def search_releases(
     client_cert: Annotated[str | None, _client_cert_opt] = None,
     client_key: Annotated[str | None, _client_key_opt] = None,
     ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
-):
+) -> None:
     """Search for product releases by identifier."""
     try:
         with _build_client(
@@ -254,7 +263,7 @@ def get_product(
     client_cert: Annotated[str | None, _client_cert_opt] = None,
     client_key: Annotated[str | None, _client_key_opt] = None,
     ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
-):
+) -> None:
     """Get a product by UUID."""
     try:
         with _build_client(
@@ -282,12 +291,13 @@ def get_release(
     client_cert: Annotated[str | None, _client_cert_opt] = None,
     client_key: Annotated[str | None, _client_key_opt] = None,
     ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
-):
+) -> None:
     """Get a product or component release by UUID."""
     try:
         with _build_client(
             base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle
         ) as client:
+            result: ProductRelease | ComponentReleaseWithCollection
             if component:
                 result = client.get_component_release(uuid)
             else:
@@ -314,7 +324,7 @@ def get_collection(
     client_cert: Annotated[str | None, _client_cert_opt] = None,
     client_key: Annotated[str | None, _client_key_opt] = None,
     ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
-):
+) -> None:
     """Get a collection (latest or by version)."""
     try:
         with _build_client(
@@ -350,7 +360,7 @@ def get_product_releases(
     client_cert: Annotated[str | None, _client_cert_opt] = None,
     client_key: Annotated[str | None, _client_key_opt] = None,
     ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
-):
+) -> None:
     """List releases for a product UUID."""
     try:
         with _build_client(
@@ -375,7 +385,7 @@ def get_component(
     client_cert: Annotated[str | None, _client_cert_opt] = None,
     client_key: Annotated[str | None, _client_key_opt] = None,
     ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
-):
+) -> None:
     """Get a component by UUID."""
     try:
         with _build_client(
@@ -400,7 +410,7 @@ def get_component_releases(
     client_cert: Annotated[str | None, _client_cert_opt] = None,
     client_key: Annotated[str | None, _client_key_opt] = None,
     ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
-):
+) -> None:
     """List releases for a component UUID."""
     try:
         with _build_client(
@@ -428,7 +438,7 @@ def list_collections(
     client_cert: Annotated[str | None, _client_cert_opt] = None,
     client_key: Annotated[str | None, _client_key_opt] = None,
     ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
-):
+) -> None:
     """List all collection versions for a release UUID."""
     try:
         with _build_client(
@@ -463,7 +473,7 @@ def get_cle(
     client_cert: Annotated[str | None, _client_cert_opt] = None,
     client_key: Annotated[str | None, _client_key_opt] = None,
     ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
-):
+) -> None:
     """Get Common Lifecycle Enumeration (CLE) for an entity."""
     entity_methods = {
         "product": "get_product_cle",
@@ -496,7 +506,7 @@ def get_artifact(
     client_cert: Annotated[str | None, _client_cert_opt] = None,
     client_key: Annotated[str | None, _client_key_opt] = None,
     ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
-):
+) -> None:
     """Get artifact metadata by UUID."""
     try:
         with _build_client(
@@ -526,7 +536,7 @@ def download(
     client_cert: Annotated[str | None, _client_cert_opt] = None,
     client_key: Annotated[str | None, _client_key_opt] = None,
     ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
-):
+) -> None:
     """Download an artifact file with optional checksum verification."""
     checksums = None
     if checksum:
@@ -573,7 +583,7 @@ def inspect(
     client_cert: Annotated[str | None, _client_cert_opt] = None,
     client_key: Annotated[str | None, _client_key_opt] = None,
     ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
-):
+) -> None:
     """Full flow: TEI -> discovery -> releases -> artifacts."""
     try:
         with _build_client(
@@ -640,7 +650,7 @@ def main(
         bool, typer.Option("--json", help="Output raw JSON instead of rich-formatted tables")
     ] = False,
     debug: Annotated[bool, typer.Option("--debug", "-d", help="Show debug output (HTTP requests, timing)")] = False,
-):
+) -> None:
     """TEA (Transparency Exchange API) CLI client."""
     global _json_output  # noqa: PLW0603
     _json_output = output_json
