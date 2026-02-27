@@ -18,10 +18,14 @@ TEA is an open standard for discovering and retrieving software transparency art
 - Auto-discovery via `.well-known/tea` and TEI URNs
 - Products, components, releases, and versioned collections
 - Search by PURL, CPE, or TEI identifier
+- Common Lifecycle Enumeration (CLE) — ECMA-428 lifecycle events
 - Artifact download with on-the-fly checksum verification (MD5 through BLAKE2b)
+- Endpoint failover with SemVer-compatible version selection
+- Bearer token, HTTP basic auth, and mutual TLS (mTLS) authentication
+- Bearer token isolation — tokens are never sent to artifact download hosts
 - Typed Pydantic v2 models with full camelCase/snake_case conversion
 - Structured exception hierarchy with error context
-- Bearer token isolation — tokens are never sent to artifact download hosts
+- CLI with rich-formatted output and JSON mode
 
 ## Installation
 
@@ -29,28 +33,36 @@ TEA is an open standard for discovering and retrieving software transparency art
 pip install libtea
 ```
 
+To include the CLI (`tea-cli`):
+
+```bash
+pip install libtea[cli]
+```
+
 ## Quick start
 
 ```python
 from libtea import TeaClient
 
-# Auto-discover from a domain's .well-known/tea
-with TeaClient.from_well_known("example.com", token="your-bearer-token") as client:
-    # Browse a product
-    product = client.get_product("product-uuid")
-    print(product.name)
+# Auto-discover the sbomify TEA server from its .well-known/tea
+with TeaClient.from_well_known("trust.sbomify.com", token="your-bearer-token") as client:
+    # Discover a product by TEI
+    results = client.discover(
+        "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify"
+    )
+    for info in results:
+        print(info.product_release_uuid, info.servers)
 
-    # Get a component release with its latest collection
-    cr = client.get_component_release("release-uuid")
-    for artifact in cr.latest_collection.artifacts:
-        print(artifact.name, artifact.type)
+    # Get a product release
+    pr = client.get_product_release(results[0].product_release_uuid)
+    print(pr.version, pr.name)
 ```
 
 Or connect directly to a known endpoint:
 
 ```python
 client = TeaClient(
-    base_url="https://api.example.com/tea/v0.3.0-beta.2",
+    base_url="https://trust.sbomify.com/tea/v0.3.0-beta.2",
     token="your-bearer-token",
     timeout=30.0,
 )
@@ -60,7 +72,7 @@ Using `from_well_known`, you can also override the spec version and timeout:
 
 ```python
 client = TeaClient.from_well_known(
-    "example.com",
+    "trust.sbomify.com",
     token="your-bearer-token",
     timeout=15.0,
     version="0.3.0-beta.2",  # default
@@ -69,18 +81,50 @@ client = TeaClient.from_well_known(
 
 ## Usage
 
+### Discovery
+
+```python
+from libtea import TeaClient
+
+# Discover sbomify products via TEI
+with TeaClient.from_well_known("trust.sbomify.com") as client:
+    results = client.discover(
+        "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify"
+    )
+    for info in results:
+        print(info.product_release_uuid, info.servers)
+```
+
+Low-level discovery functions are also available:
+
+```python
+from libtea.discovery import parse_tei, fetch_well_known, select_endpoint
+
+# Parse a TEI URN
+tei_type, domain, identifier = parse_tei(
+    "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify"
+)
+
+# Fetch and select an endpoint manually
+well_known = fetch_well_known("trust.sbomify.com")
+endpoint = select_endpoint(well_known, "0.3.0-beta.2")
+print(endpoint.url, endpoint.priority)
+```
+
+Supported TEI types: `uuid`, `purl`, `hash`, `swid`, `eanupc`, `gtin`, `asin`, `udi`.
+
 ### Search
 
 ```python
-with TeaClient.from_well_known("example.com") as client:
+with TeaClient.from_well_known("trust.sbomify.com") as client:
     # Search by PURL
-    results = client.search_products("PURL", "pkg:pypi/requests")
+    results = client.search_products("PURL", "pkg:github/sbomify/sbomify")
     for product in results.results:
         print(product.name, product.uuid)
 
     # Search product releases (with pagination)
     releases = client.search_product_releases(
-        "PURL", "pkg:pypi/requests@2.31.0",
+        "PURL", "pkg:github/sbomify/sbomify",
         page_offset=0, page_size=100,
     )
     print(releases.total_results)
@@ -89,7 +133,7 @@ with TeaClient.from_well_known("example.com") as client:
 ### Products and releases
 
 ```python
-with TeaClient.from_well_known("example.com") as client:
+with TeaClient.from_well_known("trust.sbomify.com") as client:
     product = client.get_product("product-uuid")
     print(product.name, product.identifiers)
 
@@ -110,7 +154,7 @@ with TeaClient.from_well_known("example.com") as client:
 ### Components
 
 ```python
-with TeaClient(base_url="https://api.example.com/tea/v0.3.0-beta.2") as client:
+with TeaClient.from_well_known("trust.sbomify.com") as client:
     component = client.get_component("component-uuid")
     releases = client.get_component_releases("component-uuid")
 
@@ -122,7 +166,7 @@ with TeaClient(base_url="https://api.example.com/tea/v0.3.0-beta.2") as client:
 ### Collections and artifacts
 
 ```python
-with TeaClient(base_url="https://api.example.com/tea/v0.3.0-beta.2") as client:
+with TeaClient.from_well_known("trust.sbomify.com") as client:
     collection = client.get_component_release_collection_latest("release-uuid")
     for artifact in collection.artifacts:
         print(artifact.name, artifact.type)
@@ -139,7 +183,7 @@ with TeaClient(base_url="https://api.example.com/tea/v0.3.0-beta.2") as client:
 ```python
 from pathlib import Path
 
-with TeaClient(base_url="https://api.example.com/tea/v0.3.0-beta.2") as client:
+with TeaClient.from_well_known("trust.sbomify.com") as client:
     artifact = client.get_artifact("artifact-uuid")
     fmt = artifact.formats[0]
 
@@ -155,29 +199,170 @@ Supported checksum algorithms: MD5, SHA-1, SHA-256, SHA-384, SHA-512, SHA3-256, 
 
 Artifact downloads use a separate unauthenticated HTTP session so the bearer token is never leaked to third-party hosts (CDNs, Maven Central, etc.). On checksum mismatch, the downloaded file is automatically deleted.
 
-### Discovery
+### Common Lifecycle Enumeration (CLE)
 
 ```python
-from libtea.discovery import parse_tei, fetch_well_known, select_endpoint
+with TeaClient.from_well_known("trust.sbomify.com") as client:
+    # Get lifecycle events for a product release
+    cle = client.get_product_release_cle("release-uuid")
+    for event in cle.events:
+        print(event.event_type, event.effective_date)
 
-# Parse a TEI URN
-tei_type, domain, identifier = parse_tei(
-    "urn:tei:purl:cyclonedx.org:pkg:pypi/cyclonedx-python-lib@8.4.0"
-)
-
-# Low-level: fetch and select an endpoint manually
-well_known = fetch_well_known("example.com")
-endpoint = select_endpoint(well_known, "0.3.0-beta.2")
-print(endpoint.url, endpoint.priority)
-
-# Discover product releases by TEI
-with TeaClient(base_url="https://api.example.com/tea/v0.3.0-beta.2") as client:
-    results = client.discover("urn:tei:uuid:example.com:d4d9f54a-abcf-11ee-ac79-1a52914d44b")
-    for info in results:
-        print(info.product_release_uuid, info.servers)
+    # CLE is available for all entity types
+    client.get_product_cle("product-uuid")
+    client.get_component_cle("component-uuid")
+    client.get_component_release_cle("release-uuid")
 ```
 
-Supported TEI types: `uuid`, `purl`, `hash`, `swid`, `eanupc`, `gtin`, `asin`, `udi`.
+### Authentication
+
+```python
+from libtea import TeaClient, MtlsConfig
+from pathlib import Path
+
+# Bearer token
+client = TeaClient.from_well_known("trust.sbomify.com", token="your-token")
+
+# HTTP basic auth
+client = TeaClient.from_well_known("trust.sbomify.com", basic_auth=("user", "password"))
+
+# Mutual TLS (mTLS)
+client = TeaClient.from_well_known(
+    "trust.sbomify.com",
+    mtls=MtlsConfig(
+        client_cert=Path("client.pem"),
+        client_key=Path("client-key.pem"),
+        ca_bundle=Path("ca-bundle.pem"),  # optional
+    ),
+)
+```
+
+## CLI
+
+The `tea-cli` command provides a terminal interface for all TEA operations. Install with `pip install libtea[cli]`. See the [man page](docs/tea-cli.1) for full reference (`man docs/tea-cli.1`).
+
+### Global options
+
+```
+--json       Output raw JSON instead of rich-formatted tables
+--debug, -d  Show debug output (HTTP requests, timing)
+--version    Show version
+```
+
+All commands accept connection options: `--base-url`, `--domain`, `--token`, `--auth`, `--use-http`, `--port`, `--client-cert`, `--client-key`, `--ca-bundle`.
+
+### Discover
+
+```bash
+# Discover sbomify product releases via TEI
+tea-cli discover "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify"
+
+# UUIDs only (for scripting)
+tea-cli discover -q "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify"
+
+# JSON output
+tea-cli --json discover "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify"
+```
+
+### Inspect (full flow)
+
+```bash
+# TEI -> discovery -> releases -> components -> artifacts in one shot
+tea-cli inspect "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify"
+
+# Limit component resolution
+tea-cli inspect --max-components 10 "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify"
+```
+
+### Search
+
+```bash
+# Search products by PURL
+tea-cli search-products --id-type PURL --id-value "pkg:github/sbomify/sbomify" \
+    --domain trust.sbomify.com
+
+# Search product releases
+tea-cli search-releases --id-type PURL --id-value "pkg:github/sbomify/sbomify" \
+    --domain trust.sbomify.com --page-size 50
+```
+
+### Products and releases
+
+```bash
+# Get product details
+tea-cli get-product <product-uuid> --domain trust.sbomify.com
+
+# List releases for a product
+tea-cli get-product-releases <product-uuid> --domain trust.sbomify.com
+
+# Get a specific release (product or component)
+tea-cli get-release <release-uuid> --domain trust.sbomify.com
+tea-cli get-release <release-uuid> --component --domain trust.sbomify.com
+```
+
+### Components
+
+```bash
+# Get component details
+tea-cli get-component <component-uuid> --domain trust.sbomify.com
+
+# List component releases
+tea-cli get-component-releases <component-uuid> --domain trust.sbomify.com
+```
+
+### Collections and artifacts
+
+```bash
+# Get latest collection (default) or specific version
+tea-cli get-collection <release-uuid> --domain trust.sbomify.com
+tea-cli get-collection <release-uuid> --version 3 --domain trust.sbomify.com
+
+# List all collection versions
+tea-cli list-collections <release-uuid> --domain trust.sbomify.com
+
+# Get artifact metadata
+tea-cli get-artifact <artifact-uuid> --domain trust.sbomify.com
+```
+
+### Download
+
+```bash
+# Download an artifact with checksum verification
+tea-cli download "https://cdn.example.com/sbom.json" ./sbom.json \
+    --checksum "SHA-256:abc123..." \
+    --domain trust.sbomify.com
+```
+
+### Lifecycle (CLE)
+
+```bash
+# Get lifecycle events for different entity types
+tea-cli get-cle <uuid> --entity product-release --domain trust.sbomify.com
+tea-cli get-cle <uuid> --entity product --domain trust.sbomify.com
+tea-cli get-cle <uuid> --entity component --domain trust.sbomify.com
+tea-cli get-cle <uuid> --entity component-release --domain trust.sbomify.com
+```
+
+### Environment variables
+
+| Variable | Description |
+|----------|-------------|
+| `TEA_BASE_URL` | TEA server base URL (alternative to `--base-url`) |
+| `TEA_TOKEN` | Bearer token (alternative to `--token`) |
+| `TEA_AUTH` | Basic auth as `USER:PASSWORD` (alternative to `--auth`) |
+
+### Shell completion
+
+```bash
+# Bash
+tea-cli --install-completion bash
+
+# Zsh
+tea-cli --install-completion zsh
+
+# Fish
+tea-cli --install-completion fish
+```
 
 ## Error handling
 
@@ -213,16 +398,16 @@ Using a bearer token over plaintext HTTP raises `ValueError` immediately — HTT
 ## Requirements
 
 - Python >= 3.11
-- [requests](https://requests.readthedocs.io/) >= 2.31.0 for HTTP
+- [requests](https://requests.readthedocs.io/) >= 2.32.4 for HTTP
 - [Pydantic](https://docs.pydantic.dev/) >= 2.1.0 for data models
+- [semver](https://python-semver.readthedocs.io/) >= 3.0.4 for version selection
+
+Optional (for CLI): [typer](https://typer.tiangolo.com/) >= 0.12.0, [rich](https://rich.readthedocs.io/) >= 13.0.0
 
 ## Not yet supported
 
 - Publisher API (spec is consumer-only in beta.2)
-- Async client
-- CLE (Common Lifecycle Enumeration) endpoints
-- Mutual TLS (mTLS) authentication
-- Endpoint failover with retry
+- Async client (httpx migration)
 
 ## Development
 
