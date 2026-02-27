@@ -10,7 +10,8 @@ from pydantic import BaseModel
 
 from libtea._http import MtlsConfig
 from libtea.client import TEA_SPEC_VERSION, TeaClient
-from libtea.exceptions import TeaError
+from libtea.discovery import parse_tei
+from libtea.exceptions import TeaDiscoveryError, TeaError
 from libtea.models import Checksum, ChecksumAlgorithm
 
 app = typer.Typer(help="TEA (Transparency Exchange API) CLI client.", no_args_is_help=True)
@@ -56,6 +57,17 @@ def _build_mtls(client_cert: str | None, client_key: str | None, ca_bundle: str 
     )
 
 
+def _domain_from_tei(tei: str | None) -> str | None:
+    """Extract domain from a TEI URN, or return None if not a valid TEI."""
+    if not tei:
+        return None
+    try:
+        _, domain, _ = parse_tei(tei)
+        return domain
+    except TeaDiscoveryError:
+        return None
+
+
 def _build_client(
     base_url: str | None,
     token: str | None,
@@ -67,12 +79,19 @@ def _build_client(
     client_cert: str | None = None,
     client_key: str | None = None,
     ca_bundle: str | None = None,
+    tei: str | None = None,
 ) -> TeaClient:
-    """Build a TeaClient from CLI options."""
+    """Build a TeaClient from CLI options.
+
+    When neither --base-url nor --domain is provided, the domain is extracted
+    from the TEI URN (if given) and used for .well-known/tea discovery.
+    """
     if base_url and domain:
         _error("Cannot use both --base-url and --domain")
     if not base_url and not domain:
-        _error("Must specify either --base-url or --domain")
+        domain = _domain_from_tei(tei)
+    if not base_url and not domain:
+        _error("Must specify either --base-url or --domain (or provide a TEI to auto-discover)")
     basic_auth = _parse_basic_auth(auth)
     mtls = _build_mtls(client_cert, client_key, ca_bundle)
     if base_url:
@@ -119,7 +138,7 @@ def discover(
     """Resolve a TEI to product release UUID(s)."""
     try:
         with _build_client(
-            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle
+            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle, tei=tei
         ) as client:
             result = client.discover(tei)
         _output(result)
@@ -371,7 +390,7 @@ def inspect(
     """Full flow: TEI -> discovery -> releases -> artifacts."""
     try:
         with _build_client(
-            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle
+            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle, tei=tei
         ) as client:
             discoveries = client.discover(tei)
             result = []
