@@ -269,33 +269,38 @@ class TeaHttpClient:
                 # Follow redirects manually with SSRF validation at each hop
                 current_url = url
                 response = None
-                for _ in range(_MAX_DOWNLOAD_REDIRECTS):
-                    response = download_session.get(
-                        current_url, stream=True, timeout=self._timeout, allow_redirects=False
-                    )
-                    if 300 <= response.status_code < 400:
-                        location = response.headers.get("Location")
-                        if not location:
-                            raise TeaRequestError(f"Redirect without Location header: HTTP {response.status_code}")
-                        current_url = urljoin(current_url, location)
-                        _validate_download_url(current_url)
+                try:
+                    for _ in range(_MAX_DOWNLOAD_REDIRECTS):
+                        response = download_session.get(
+                            current_url, stream=True, timeout=self._timeout, allow_redirects=False
+                        )
+                        if 300 <= response.status_code < 400:
+                            location = response.headers.get("Location")
+                            if not location:
+                                raise TeaRequestError(f"Redirect without Location header: HTTP {response.status_code}")
+                            current_url = urljoin(current_url, location)
+                            _validate_download_url(current_url)
+                            response.close()
+                            response = None
+                            continue
+                        break
+                    else:
+                        raise TeaConnectionError(f"Too many redirects (max {_MAX_DOWNLOAD_REDIRECTS})")
+
+                    self._raise_for_status(response)
+
+                    downloaded = 0
+                    with open(dest, "wb") as f:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            downloaded += len(chunk)
+                            if max_download_bytes is not None and downloaded > max_download_bytes:
+                                raise TeaValidationError(f"Download exceeds size limit of {max_download_bytes} bytes")
+                            f.write(chunk)
+                            for h in hashers.values():
+                                h.update(chunk)
+                finally:
+                    if response is not None:
                         response.close()
-                        continue
-                    break
-                else:
-                    raise TeaConnectionError(f"Too many redirects (max {_MAX_DOWNLOAD_REDIRECTS})")
-
-                self._raise_for_status(response)
-
-                downloaded = 0
-                with open(dest, "wb") as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        downloaded += len(chunk)
-                        if max_download_bytes is not None and downloaded > max_download_bytes:
-                            raise TeaValidationError(f"Download exceeds size limit of {max_download_bytes} bytes")
-                        f.write(chunk)
-                        for h in hashers.values():
-                            h.update(chunk)
         except (requests.ConnectionError, requests.Timeout) as exc:
             dest.unlink(missing_ok=True)
             raise TeaConnectionError(str(exc)) from exc

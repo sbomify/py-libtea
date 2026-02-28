@@ -82,7 +82,7 @@ class TestSearchProducts:
         )
         resp = client.search_products("PURL", "pkg:pypi/nonexistent")
         assert resp.total_results == 0
-        assert resp.results == []
+        assert resp.results == ()
 
 
 class TestSearchProductReleases:

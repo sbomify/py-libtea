@@ -185,10 +185,10 @@ class ReleaseDistribution(_TeaModel):
 
     distribution_type: str
     description: str | None = None
-    identifiers: list[Identifier] = []
+    identifiers: tuple[Identifier, ...] = ()
     url: str | None = None
     signature_url: str | None = None
-    checksums: list[Checksum] = []
+    checksums: tuple[Checksum, ...] = ()
 
 
 class ArtifactFormat(_TeaModel):
@@ -198,7 +198,7 @@ class ArtifactFormat(_TeaModel):
     description: str | None = None
     url: str
     signature_url: str | None = None
-    checksums: list[Checksum] = []
+    checksums: tuple[Checksum, ...] = ()
 
 
 class Artifact(_TeaModel):
@@ -207,8 +207,8 @@ class Artifact(_TeaModel):
     uuid: str
     name: str
     type: ArtifactType
-    distribution_types: list[str] | None = None
-    formats: list[ArtifactFormat] = []
+    distribution_types: tuple[str, ...] | None = None
+    formats: tuple[ArtifactFormat, ...] = ()
 
 
 class CollectionUpdateReason(_TeaModel):
@@ -239,7 +239,7 @@ class Collection(_TeaModel):
     date: datetime | None = None
     belongs_to: CollectionBelongsTo | None = None
     update_reason: CollectionUpdateReason | None = None
-    artifacts: list[Artifact] = []
+    artifacts: tuple[Artifact, ...] = ()
 
 
 class ComponentRef(_TeaModel):
@@ -254,7 +254,7 @@ class Component(_TeaModel):
 
     uuid: str
     name: str
-    identifiers: list[Identifier]
+    identifiers: tuple[Identifier, ...]
 
 
 class Release(_TeaModel):
@@ -279,8 +279,8 @@ class Release(_TeaModel):
     created_date: datetime
     release_date: datetime | None = None
     pre_release: bool | None = None
-    identifiers: list[Identifier] = []
-    distributions: list[ReleaseDistribution] = []
+    identifiers: tuple[Identifier, ...] = ()
+    distributions: tuple[ReleaseDistribution, ...] = ()
 
 
 class ComponentReleaseWithCollection(_TeaModel):
@@ -298,7 +298,7 @@ class Product(_TeaModel):
 
     uuid: str
     name: str
-    identifiers: list[Identifier]
+    identifiers: tuple[Identifier, ...]
 
 
 class ProductRelease(_TeaModel):
@@ -326,8 +326,8 @@ class ProductRelease(_TeaModel):
     created_date: datetime
     release_date: datetime | None = None
     pre_release: bool | None = None
-    identifiers: list[Identifier] = []
-    components: list[ComponentRef]
+    identifiers: tuple[Identifier, ...] = ()
+    components: tuple[ComponentRef, ...]
 
 
 # --- CLE (Common Lifecycle Enumeration) ---
@@ -374,7 +374,7 @@ class CLESupportDefinition(_TeaModel):
 class CLEDefinitions(_TeaModel):
     """Container for reusable CLE policy definitions."""
 
-    support: list[CLESupportDefinition] | None = None
+    support: tuple[CLESupportDefinition, ...] | None = None
 
 
 class CLEEvent(_TeaModel):
@@ -405,15 +405,15 @@ class CLEEvent(_TeaModel):
     effective: datetime
     published: datetime
     version: str | None = None
-    versions: list[CLEVersionSpecifier] | None = None
+    versions: tuple[CLEVersionSpecifier, ...] | None = None
     support_id: str | None = None
     license: str | None = None
     superseded_by_version: str | None = None
-    identifiers: list[Identifier] | None = None
+    identifiers: tuple[Identifier, ...] | None = None
     event_id: int | None = None
     reason: str | None = None
     description: str | None = None
-    references: list[str] | None = None
+    references: tuple[str, ...] | None = None
 
 
 class CLE(_TeaModel):
@@ -422,7 +422,7 @@ class CLE(_TeaModel):
     Contains lifecycle events and optional definitions. Event ordering is determined by the producer.
     """
 
-    events: list[CLEEvent]
+    events: tuple[CLEEvent, ...]
     definitions: CLEDefinitions | None = None
 
 
@@ -436,7 +436,7 @@ class PaginatedProductResponse(_TeaModel):
     page_start_index: int
     page_size: int
     total_results: int
-    results: list[Product] = []
+    results: tuple[Product, ...] = ()
 
 
 class PaginatedProductReleaseResponse(_TeaModel):
@@ -446,7 +446,7 @@ class PaginatedProductReleaseResponse(_TeaModel):
     page_start_index: int
     page_size: int
     total_results: int
-    results: list[ProductRelease] = []
+    results: tuple[ProductRelease, ...] = ()
 
 
 # --- Discovery types ---
@@ -463,7 +463,7 @@ class TeaEndpoint(_TeaModel):
     """
 
     url: str
-    versions: list[str] = Field(min_length=1)
+    versions: tuple[str, ...] = Field(min_length=1)
     priority: float | None = Field(default=None, ge=0, le=1)
 
 
@@ -471,14 +471,14 @@ class TeaWellKnown(_TeaModel):
     """The .well-known/tea discovery document listing available TEA endpoints."""
 
     schema_version: Literal[1]
-    endpoints: list[TeaEndpoint] = Field(min_length=1)
+    endpoints: tuple[TeaEndpoint, ...] = Field(min_length=1)
 
 
 class TeaServerInfo(_TeaModel):
     """TEA server info returned from the discovery API endpoint."""
 
     root_url: str
-    versions: list[str] = Field(min_length=1)
+    versions: tuple[str, ...] = Field(min_length=1)
     priority: float | None = Field(default=None, ge=0, le=1)
 
 
@@ -490,7 +490,7 @@ class DiscoveryInfo(_TeaModel):
     """
 
     product_release_uuid: str
-    servers: list[TeaServerInfo] = Field(min_length=1)
+    servers: tuple[TeaServerInfo, ...] = Field(min_length=1)
 
 
 __all__ = [

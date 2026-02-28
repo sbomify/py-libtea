@@ -309,8 +309,8 @@ class TestOptionalFields:
         assert release.release_date is None
         assert release.pre_release is None
         assert release.component is None
-        assert release.distributions == []
-        assert release.identifiers == []
+        assert release.distributions == ()
+        assert release.identifiers == ()
 
     def test_collection_minimal_fields(self):
         data = {"uuid": "c-1", "version": 1}
@@ -318,14 +318,14 @@ class TestOptionalFields:
         assert collection.date is None
         assert collection.belongs_to is None
         assert collection.update_reason is None
-        assert collection.artifacts == []
+        assert collection.artifacts == ()
 
     def test_collection_all_fields_optional(self):
         """Per TEA spec, all Collection fields are optional."""
         collection = Collection.model_validate({})
         assert collection.uuid is None
         assert collection.version is None
-        assert collection.artifacts == []
+        assert collection.artifacts == ()
 
     def test_collection_version_rejects_zero(self):
         """TEA spec says versions start with 1."""
@@ -344,7 +344,7 @@ class TestOptionalFields:
         fmt = ArtifactFormat.model_validate(data)
         assert fmt.description is None
         assert fmt.signature_url is None
-        assert fmt.checksums == []
+        assert fmt.checksums == ()
 
     def test_paginated_product_response_empty_results(self):
         data = {
@@ -356,7 +356,7 @@ class TestOptionalFields:
         }
         resp = PaginatedProductResponse.model_validate(data)
         assert resp.total_results == 0
-        assert resp.results == []
+        assert resp.results == ()
 
 
 class TestPaginatedResponse:

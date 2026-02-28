@@ -7,6 +7,7 @@ their data is ``list`` which is ambiguous by type alone).
 """
 
 import json
+from collections.abc import Sequence
 from typing import Any
 
 from pydantic import BaseModel
@@ -49,7 +50,7 @@ def _esc(value: object) -> str:
     return escape(_opt(value))
 
 
-def _fmt_identifiers(identifiers: list[Identifier]) -> str:
+def _fmt_identifiers(identifiers: Sequence[Identifier]) -> str:
     """Format a list of :class:`Identifier` objects as comma-joined ``type:value``."""
     if not identifiers:
         return "-"
@@ -73,7 +74,7 @@ def _pagination_header(data: PaginatedProductResponse | PaginatedProductReleaseR
         console.print(Text(f"Results {data.page_start_index + 1}-{end} of {data.total_results}", style="dim"))
 
 
-def _distributions_table(distributions: list[ReleaseDistribution], *, console: Console) -> None:
+def _distributions_table(distributions: Sequence[ReleaseDistribution], *, console: Console) -> None:
     """Render a table of :class:`ReleaseDistribution` objects."""
     if not distributions:
         return
@@ -91,7 +92,7 @@ def _distributions_table(distributions: list[ReleaseDistribution], *, console: C
     console.print(tbl)
 
 
-def _artifacts_table(artifacts: list[Artifact], *, console: Console) -> None:
+def _artifacts_table(artifacts: Sequence[Artifact], *, console: Console) -> None:
     """Render a table of :class:`Artifact` model objects."""
     if not artifacts:
         return
@@ -108,7 +109,7 @@ def _artifacts_table(artifacts: list[Artifact], *, console: Console) -> None:
     console.print(tbl)
 
 
-def _formats_table(formats: list[ArtifactFormat], *, console: Console) -> None:
+def _formats_table(formats: Sequence[ArtifactFormat], *, console: Console) -> None:
     """Render a table of artifact formats with checksums."""
     if not formats:
         return
