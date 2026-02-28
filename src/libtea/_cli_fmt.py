@@ -364,6 +364,23 @@ def fmt_cle(data: CLE, *, console: Console) -> None:
 def fmt_inspect(data: list[dict[str, Any]], *, console: Console) -> None:
     """Render the full inspect output (discovery + release + components)."""
     for entry in data:
+        # Discovery servers
+        disc = entry.get("discovery")
+        if disc:
+            servers = disc.get("servers", [])
+            if servers:
+                tbl = Table(title="Discovery Servers")
+                tbl.add_column("Server URL")
+                tbl.add_column("API Versions")
+                tbl.add_column("Priority", justify="right")
+                for s in servers:
+                    tbl.add_row(
+                        escape(s.get("rootUrl", "-")),
+                        escape(", ".join(s.get("versions", []))),
+                        _esc(s.get("priority")),
+                    )
+                console.print(tbl)
+
         pr = entry["productRelease"]
         fields = [
             ("UUID", pr["uuid"]),

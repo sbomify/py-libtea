@@ -571,7 +571,7 @@ def download(
 def inspect(
     tei: str,
     max_components: Annotated[
-        int, typer.Option("--max-components", help="Maximum number of components to fetch per release")
+        int, typer.Option("--max-components", min=1, help="Maximum number of components to fetch per release")
     ] = 50,
     base_url: Annotated[str | None, _base_url_opt] = None,
     token: Annotated[str | None, _token_opt] = None,
