@@ -126,60 +126,69 @@ def fetch_well_known(
 
     logger.debug("Fetching well-known discovery document: %s", url)
     _max_discovery_redirects = 5
+    current_url = url
     try:
         # Follow redirects manually with SSRF validation at each hop
         # (automatic redirects would allow intermediate hops to internal IPs).
-        current_url = url
+        response = None
         redirects = 0
-        while True:
-            response = requests.get(current_url, **kwargs)
-            if 300 <= response.status_code < 400:
-                redirects += 1
-                if redirects > _max_discovery_redirects:
-                    raise TeaDiscoveryError(f"Too many discovery redirects (max {_max_discovery_redirects})")
-                location = response.headers.get("Location")
-                if not location:
-                    raise TeaDiscoveryError(f"Discovery redirect without Location header: HTTP {response.status_code}")
-                current_url = urljoin(current_url, location)
-                # Validate scheme and SSRF at each hop
-                hop_parsed = urlparse(current_url)
-                if hop_parsed.scheme not in ("http", "https"):
-                    raise TeaDiscoveryError(f"Discovery redirected to unsupported scheme: {hop_parsed.scheme!r}")
-                if scheme == "https" and hop_parsed.scheme == "http":
-                    warnings.warn(
-                        f"Discovery for {domain} was downgraded from HTTPS to HTTP via redirect. "
-                        "This may indicate a misconfigured server.",
-                        TeaInsecureTransportWarning,
-                        stacklevel=2,
-                    )
-                try:
-                    _validate_download_url(current_url)
-                except TeaValidationError as exc:
-                    raise TeaDiscoveryError(f"Discovery for {domain} redirected to blocked target: {exc}") from exc
-                response.close()
-                continue
-            break
-        if response.status_code >= 400:
-            body_snippet = (response.text or "")[:200]
-            if len(response.text or "") > 200:
-                body_snippet += " (truncated)"
-            msg = f"Failed to fetch {url}: HTTP {response.status_code}"
-            if body_snippet:
-                msg = f"{msg} — {body_snippet}"
-            raise TeaDiscoveryError(msg)
-    except requests.ConnectionError as exc:
-        logger.warning("Discovery connection error for %s: %s", url, exc)
-        raise TeaDiscoveryError(f"Failed to connect to {url}: {exc}") from exc
-    except requests.Timeout as exc:
-        logger.warning("Discovery timeout for %s: %s", url, exc)
-        raise TeaDiscoveryError(f"Failed to connect to {url}: {exc}") from exc
-    except requests.RequestException as exc:
-        raise TeaDiscoveryError(f"HTTP error fetching {url}: {exc}") from exc
+        try:
+            while True:
+                response = requests.get(current_url, **kwargs)
+                if 300 <= response.status_code < 400:
+                    redirects += 1
+                    if redirects > _max_discovery_redirects:
+                        raise TeaDiscoveryError(f"Too many discovery redirects (max {_max_discovery_redirects})")
+                    location = response.headers.get("Location")
+                    if not location:
+                        raise TeaDiscoveryError(
+                            f"Discovery redirect without Location header: HTTP {response.status_code}"
+                        )
+                    current_url = urljoin(current_url, location)
+                    # Validate scheme and SSRF at each hop
+                    hop_parsed = urlparse(current_url)
+                    if hop_parsed.scheme not in ("http", "https"):
+                        raise TeaDiscoveryError(f"Discovery redirected to unsupported scheme: {hop_parsed.scheme!r}")
+                    if scheme == "https" and hop_parsed.scheme == "http":
+                        warnings.warn(
+                            f"Discovery for {domain} was downgraded from HTTPS to HTTP via redirect. "
+                            "This may indicate a misconfigured server.",
+                            TeaInsecureTransportWarning,
+                            stacklevel=2,
+                        )
+                    try:
+                        _validate_download_url(current_url)
+                    except TeaValidationError as exc:
+                        raise TeaDiscoveryError(f"Discovery for {domain} redirected to blocked target: {exc}") from exc
+                    response.close()
+                    response = None
+                    continue
+                break
 
-    try:
-        data = response.json()
-    except ValueError as exc:
-        raise TeaDiscoveryError(f"Invalid JSON in .well-known/tea response from {domain}") from exc
+            if response.status_code >= 400:
+                body_snippet = (response.text or "")[:200]
+                if len(response.text or "") > 200:
+                    body_snippet += " (truncated)"
+                msg = f"Failed to fetch {current_url}: HTTP {response.status_code}"
+                if body_snippet:
+                    msg = f"{msg} — {body_snippet}"
+                raise TeaDiscoveryError(msg)
+
+            try:
+                data = response.json()
+            except ValueError as exc:
+                raise TeaDiscoveryError(f"Invalid JSON in .well-known/tea response from {domain}") from exc
+        finally:
+            if response is not None:
+                response.close()
+    except requests.ConnectionError as exc:
+        logger.warning("Discovery connection error for %s: %s", current_url, exc)
+        raise TeaDiscoveryError(f"Failed to connect to {current_url}: {exc}") from exc
+    except requests.Timeout as exc:
+        logger.warning("Discovery timeout for %s: %s", current_url, exc)
+        raise TeaDiscoveryError(f"Failed to connect to {current_url}: {exc}") from exc
+    except requests.RequestException as exc:
+        raise TeaDiscoveryError(f"HTTP error fetching {current_url}: {exc}") from exc
 
     try:
         return TeaWellKnown.model_validate(data)
