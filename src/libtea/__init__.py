@@ -1,8 +1,22 @@
-"""libtea - Python client library for the Transparency Exchange API (TEA)."""
+"""libtea — Python client library for the Transparency Exchange API (TEA).
+
+Quick start::
+
+    from libtea import TeaClient
+
+    with TeaClient("https://tea.example.com/v1", token="...") as client:
+        results = client.discover("urn:tei:purl:example.com:pkg:pypi/lib@1.0")
+
+Or auto-discover the server from a domain's ``.well-known/tea``::
+
+    client = TeaClient.from_well_known("tea.example.com", token="...")
+"""
 
 from importlib.metadata import version
 
+from libtea._http import MtlsConfig
 from libtea.client import TEA_SPEC_VERSION, TeaClient
+from libtea.discovery import fetch_well_known, parse_tei, select_endpoint, select_endpoints
 from libtea.exceptions import (
     TeaAuthenticationError,
     TeaChecksumError,
@@ -16,11 +30,17 @@ from libtea.exceptions import (
     TeaValidationError,
 )
 from libtea.models import (
+    CLE,
     Artifact,
     ArtifactFormat,
     ArtifactType,
     Checksum,
     ChecksumAlgorithm,
+    CLEDefinitions,
+    CLEEvent,
+    CLEEventType,
+    CLESupportDefinition,
+    CLEVersionSpecifier,
     Collection,
     CollectionBelongsTo,
     CollectionUpdateReason,
@@ -38,14 +58,24 @@ from libtea.models import (
     ProductRelease,
     Release,
     ReleaseDistribution,
+    TeaEndpoint,
     TeaServerInfo,
+    TeaWellKnown,
     TeiType,
 )
 
 __version__ = version("libtea")
 __all__ = [
+    # Client
+    "MtlsConfig",
     "TEA_SPEC_VERSION",
     "TeaClient",
+    # Discovery
+    "fetch_well_known",
+    "parse_tei",
+    "select_endpoint",
+    "select_endpoints",
+    # Exceptions
     "TeaError",
     "TeaAuthenticationError",
     "TeaChecksumError",
@@ -56,9 +86,16 @@ __all__ = [
     "TeaRequestError",
     "TeaServerError",
     "TeaValidationError",
+    # Models
     "Artifact",
     "ArtifactFormat",
     "ArtifactType",
+    "CLE",
+    "CLEDefinitions",
+    "CLEEvent",
+    "CLEEventType",
+    "CLESupportDefinition",
+    "CLEVersionSpecifier",
     "Checksum",
     "ChecksumAlgorithm",
     "Collection",
@@ -78,7 +115,9 @@ __all__ = [
     "ProductRelease",
     "Release",
     "ReleaseDistribution",
+    "TeaEndpoint",
     "TeaServerInfo",
+    "TeaWellKnown",
     "TeiType",
     "__version__",
 ]

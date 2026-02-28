@@ -1,18 +1,35 @@
-"""TeaClient - main entry point for the TEA consumer API."""
+"""TeaClient — main entry point for the TEA consumer (read-only) API.
+
+Provides high-level methods for discovery, product/component lookup,
+collection retrieval, CLE queries, and artifact download with checksum
+verification. All HTTP is delegated to :class:`~libtea._http.TeaHttpClient`.
+"""
 
 import hmac
 import logging
-import re
+import warnings
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Self, TypeVar
+from typing import Self
 
-from pydantic import BaseModel, ValidationError
-
-from libtea._http import TeaHttpClient
-from libtea.discovery import fetch_well_known, select_endpoint
-from libtea.exceptions import TeaChecksumError, TeaValidationError
+from libtea._http import MtlsConfig, TeaHttpClient, probe_endpoint
+from libtea._validation import (
+    _validate,
+    _validate_collection_version,
+    _validate_list,
+    _validate_page_offset,
+    _validate_page_size,
+    _validate_path_segment,
+)
+from libtea.discovery import fetch_well_known, select_endpoints
+from libtea.exceptions import (
+    TeaChecksumError,
+    TeaConnectionError,
+    TeaDiscoveryError,
+    TeaServerError,
+)
 from libtea.models import (
+    CLE,
     Artifact,
     Checksum,
     Collection,
@@ -30,46 +47,28 @@ logger = logging.getLogger("libtea")
 
 TEA_SPEC_VERSION = "0.3.0-beta.2"
 
-_M = TypeVar("_M", bound=BaseModel)
 
-# Restrict URL path segments to safe characters to prevent path traversal and injection.
-_SAFE_PATH_SEGMENT_RE = re.compile(r"^[a-zA-Z0-9\-]{1,128}$")
-
-
-def _validate(model_cls: type[_M], data: Any) -> _M:
-    """Validate data against a Pydantic model, wrapping errors in TeaValidationError."""
-    try:
-        return model_cls.model_validate(data)
-    except ValidationError as exc:
-        raise TeaValidationError(f"Invalid {model_cls.__name__} response: {exc}") from exc
-
-
-def _validate_list(model_cls: type[_M], data: Any) -> list[_M]:
-    """Validate a list of items against a Pydantic model."""
-    if not isinstance(data, list):
-        raise TeaValidationError(f"Expected list for {model_cls.__name__}, got {type(data).__name__}")
-    try:
-        return [model_cls.model_validate(item) for item in data]
-    except ValidationError as exc:
-        raise TeaValidationError(f"Invalid {model_cls.__name__} response: {exc}") from exc
-
-
-def _validate_path_segment(value: str, name: str = "uuid") -> str:
-    """Validate that a value is safe to interpolate into a URL path."""
-    if not _SAFE_PATH_SEGMENT_RE.match(value):
-        raise TeaValidationError(
-            f"Invalid {name}: {value!r}. Must contain only alphanumeric characters and hyphens, max 128 characters."
-        )
-    return value
+_WEAK_HASH_ALGORITHMS = frozenset({"MD5", "SHA-1"})
 
 
 class TeaClient:
-    """Synchronous client for the Transparency Exchange API.
+    """Synchronous client for the Transparency Exchange API (consumer / read-only).
+
+    Supports context-manager usage for automatic resource cleanup::
+
+        with TeaClient("https://tea.example.com/v1", token="...") as client:
+            product = client.get_product(uuid)
 
     Args:
         base_url: TEA server base URL (e.g. ``https://tea.example.com/v1``).
-        token: Optional bearer token for authentication.
-        timeout: Request timeout in seconds.
+        token: Optional bearer token for authentication. Mutually exclusive
+            with ``basic_auth``. Rejected with plaintext HTTP.
+        basic_auth: Optional ``(username, password)`` tuple for HTTP Basic auth.
+            Mutually exclusive with ``token``. Rejected with plaintext HTTP.
+        timeout: Request timeout in seconds (default 30).
+        mtls: Optional :class:`~libtea.MtlsConfig` for mutual TLS authentication.
+        max_retries: Number of automatic retries on 5xx responses (default 3).
+        backoff_factor: Exponential backoff multiplier between retries (default 0.5).
     """
 
     def __init__(
@@ -77,9 +76,21 @@ class TeaClient:
         base_url: str,
         *,
         token: str | None = None,
+        basic_auth: tuple[str, str] | None = None,
         timeout: float = 30.0,
+        mtls: MtlsConfig | None = None,
+        max_retries: int = 3,
+        backoff_factor: float = 0.5,
     ):
-        self._http = TeaHttpClient(base_url=base_url, token=token, timeout=timeout)
+        self._http = TeaHttpClient(
+            base_url=base_url,
+            token=token,
+            basic_auth=basic_auth,
+            timeout=timeout,
+            mtls=mtls,
+            max_retries=max_retries,
+            backoff_factor=backoff_factor,
+        )
 
     @classmethod
     def from_well_known(
@@ -87,14 +98,69 @@ class TeaClient:
         domain: str,
         *,
         token: str | None = None,
+        basic_auth: tuple[str, str] | None = None,
         timeout: float = 30.0,
         version: str = TEA_SPEC_VERSION,
+        scheme: str = "https",
+        port: int | None = None,
+        mtls: MtlsConfig | None = None,
+        max_retries: int = 3,
+        backoff_factor: float = 0.5,
     ) -> Self:
-        """Create a client by discovering the TEA endpoint from a domain's .well-known/tea."""
-        well_known = fetch_well_known(domain, timeout=timeout)
-        endpoint = select_endpoint(well_known, version)
-        base_url = f"{endpoint.url.rstrip('/')}/v{version}"
-        return cls(base_url=base_url, token=token, timeout=timeout)
+        """Create a client by discovering the TEA endpoint from a domain's .well-known/tea.
+
+        Fetches the ``.well-known/tea`` document, selects all endpoints compatible
+        with the requested ``version`` (SemVer match), and probes each in priority
+        order. If an endpoint is unreachable or returns a server error, the next
+        candidate is tried (per TEA spec: "MUST retry ... with the next endpoint").
+
+        Args:
+            domain: Domain name to resolve (e.g. ``tea.example.com``).
+            token: Optional bearer token.
+            basic_auth: Optional ``(username, password)`` tuple.
+            timeout: Request timeout in seconds (default 30).
+            version: TEA spec SemVer to match against (default: library's built-in version).
+            scheme: URL scheme for discovery — ``"https"`` (default) or ``"http"``.
+            port: Optional port for ``.well-known`` resolution.
+            mtls: Optional :class:`~libtea.MtlsConfig`.
+            max_retries: Retry count on 5xx (default 3).
+            backoff_factor: Backoff multiplier (default 0.5).
+
+        Returns:
+            A connected :class:`TeaClient` pointing at the best reachable endpoint.
+
+        Raises:
+            TeaDiscoveryError: If no compatible or reachable endpoint is found
+                (wraps the last probe failure as ``__cause__``).
+        """
+        well_known = fetch_well_known(domain, timeout=timeout, scheme=scheme, port=port, mtls=mtls)
+        candidates = select_endpoints(well_known, version)
+
+        errors: list[tuple[str, Exception]] = []
+        for endpoint in candidates:
+            base_url = f"{endpoint.url.rstrip('/')}/v{version}"
+            try:
+                probe_endpoint(base_url, timeout=min(timeout, 5.0), mtls=mtls)
+            except (TeaConnectionError, TeaServerError) as exc:
+                logger.warning("Endpoint %s unreachable, trying next: %s", base_url, exc)
+                errors.append((base_url, exc))
+                continue
+            return cls(
+                base_url=base_url,
+                token=token,
+                basic_auth=basic_auth,
+                timeout=timeout,
+                mtls=mtls,
+                max_retries=max_retries,
+                backoff_factor=backoff_factor,
+            )
+
+        if errors:
+            summary = "; ".join(f"{url}: {exc}" for url, exc in errors)
+            raise TeaDiscoveryError(
+                f"All {len(errors)} endpoint(s) failed for version {version!r}: {summary}"
+            ) from errors[-1][1]
+        raise TeaDiscoveryError(f"No reachable endpoint found for version {version!r}")  # pragma: no cover
 
     # --- Discovery ---
 
@@ -120,7 +186,19 @@ class TeaClient:
     def search_products(
         self, id_type: str, id_value: str, *, page_offset: int = 0, page_size: int = 100
     ) -> PaginatedProductResponse:
-        """Search for products by identifier (e.g. PURL, CPE, TEI)."""
+        """Search for products by identifier (e.g. PURL, CPE, TEI).
+
+        Args:
+            id_type: Identifier type (e.g. ``"PURL"``, ``"CPE"``, ``"TEI"``).
+            id_value: Identifier value to search for.
+            page_offset: Zero-based page offset (default 0).
+            page_size: Number of results per page (default 100, max 10000).
+
+        Returns:
+            Paginated response containing matching products.
+        """
+        _validate_page_size(page_size)
+        _validate_page_offset(page_offset)
         data = self._http.get_json(
             "/products",
             params={"idType": id_type, "idValue": id_value, "pageOffset": page_offset, "pageSize": page_size},
@@ -152,6 +230,8 @@ class TeaClient:
         Returns:
             Paginated response containing product releases.
         """
+        _validate_page_size(page_size)
+        _validate_page_offset(page_offset)
         data = self._http.get_json(
             f"/product/{_validate_path_segment(uuid)}/releases",
             params={"pageOffset": page_offset, "pageSize": page_size},
@@ -163,7 +243,19 @@ class TeaClient:
     def search_product_releases(
         self, id_type: str, id_value: str, *, page_offset: int = 0, page_size: int = 100
     ) -> PaginatedProductReleaseResponse:
-        """Search for product releases by identifier (e.g. PURL, CPE, TEI)."""
+        """Search for product releases by identifier (e.g. PURL, CPE, TEI).
+
+        Args:
+            id_type: Identifier type (e.g. ``"PURL"``, ``"CPE"``, ``"TEI"``).
+            id_value: Identifier value to search for.
+            page_offset: Zero-based page offset (default 0).
+            page_size: Number of results per page (default 100, max 10000).
+
+        Returns:
+            Paginated response containing matching product releases.
+        """
+        _validate_page_size(page_size)
+        _validate_page_offset(page_offset)
         data = self._http.get_json(
             "/productReleases",
             params={"idType": id_type, "idValue": id_value, "pageOffset": page_offset, "pageSize": page_size},
@@ -216,6 +308,7 @@ class TeaClient:
         Returns:
             The requested collection version.
         """
+        _validate_collection_version(version)
         data = self._http.get_json(f"/productRelease/{_validate_path_segment(uuid)}/collection/{version}")
         return _validate(Collection, data)
 
@@ -295,8 +388,59 @@ class TeaClient:
         Returns:
             The requested collection version.
         """
+        _validate_collection_version(version)
         data = self._http.get_json(f"/componentRelease/{_validate_path_segment(uuid)}/collection/{version}")
         return _validate(Collection, data)
+
+    # --- CLE ---
+
+    def get_product_cle(self, uuid: str) -> CLE:
+        """Get CLE (Common Lifecycle Enumeration) data for a product.
+
+        Args:
+            uuid: Product UUID.
+
+        Returns:
+            The CLE document with lifecycle events and optional definitions.
+        """
+        data = self._http.get_json(f"/product/{_validate_path_segment(uuid)}/cle")
+        return _validate(CLE, data)
+
+    def get_product_release_cle(self, uuid: str) -> CLE:
+        """Get CLE data for a product release.
+
+        Args:
+            uuid: Product release UUID.
+
+        Returns:
+            The CLE document with lifecycle events and optional definitions.
+        """
+        data = self._http.get_json(f"/productRelease/{_validate_path_segment(uuid)}/cle")
+        return _validate(CLE, data)
+
+    def get_component_cle(self, uuid: str) -> CLE:
+        """Get CLE data for a component.
+
+        Args:
+            uuid: Component UUID.
+
+        Returns:
+            The CLE document with lifecycle events and optional definitions.
+        """
+        data = self._http.get_json(f"/component/{_validate_path_segment(uuid)}/cle")
+        return _validate(CLE, data)
+
+    def get_component_release_cle(self, uuid: str) -> CLE:
+        """Get CLE data for a component release.
+
+        Args:
+            uuid: Component release UUID.
+
+        Returns:
+            The CLE document with lifecycle events and optional definitions.
+        """
+        data = self._http.get_json(f"/componentRelease/{_validate_path_segment(uuid)}/cle")
+        return _validate(CLE, data)
 
     # --- Artifacts ---
 
@@ -318,6 +462,7 @@ class TeaClient:
         dest: Path,
         *,
         verify_checksums: list[Checksum] | None = None,
+        max_download_bytes: int | None = None,
     ) -> Path:
         """Download an artifact file, optionally verifying checksums.
 
@@ -329,6 +474,7 @@ class TeaClient:
             dest: Local file path to write to.
             verify_checksums: Optional list of checksums to verify after download.
                 On mismatch the downloaded file is deleted.
+            max_download_bytes: Optional maximum download size in bytes.
 
         Returns:
             The destination path.
@@ -336,9 +482,19 @@ class TeaClient:
         Raises:
             TeaChecksumError: If checksum verification fails.
             TeaConnectionError: On network failure.
+            TeaValidationError: If download exceeds max_download_bytes.
         """
+        if verify_checksums:
+            weak = {cs.algorithm_type.value for cs in verify_checksums} & _WEAK_HASH_ALGORITHMS
+            if weak:
+                warnings.warn(
+                    f"Verifying with weak hash algorithm(s): {', '.join(sorted(weak))}. Prefer SHA-256 or stronger.",
+                    stacklevel=2,
+                )
         algorithms = [cs.algorithm_type.value for cs in verify_checksums] if verify_checksums else None
-        computed = self._http.download_with_hashes(url, dest, algorithms=algorithms)
+        computed = self._http.download_with_hashes(
+            url, dest, algorithms=algorithms, max_download_bytes=max_download_bytes
+        )
 
         if verify_checksums:
             self._verify_checksums(verify_checksums, computed, url, dest)
@@ -347,7 +503,14 @@ class TeaClient:
 
     @staticmethod
     def _verify_checksums(checksums: list[Checksum], computed: dict[str, str], url: str, dest: Path) -> None:
-        """Verify computed checksums against expected values, cleaning up on failure."""
+        """Verify computed checksums against expected values, cleaning up on failure.
+
+        Uses :func:`hmac.compare_digest` for constant-time comparison.
+        Deletes the downloaded file at ``dest`` on the first mismatch.
+
+        Raises:
+            TeaChecksumError: If any checksum does not match.
+        """
         for cs in checksums:
             alg_name = cs.algorithm_type.value
             expected = cs.algorithm_value.lower()
@@ -379,6 +542,7 @@ class TeaClient:
     # --- Lifecycle ---
 
     def close(self) -> None:
+        """Close the underlying HTTP session and clear credentials."""
         self._http.close()
 
     def __enter__(self) -> Self:

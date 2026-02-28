@@ -104,3 +104,17 @@ class TestDownloadArtifact:
         result = client.download_artifact(ARTIFACT_URL, dest, verify_checksums=checksums)
         assert result == dest
         assert dest.read_bytes() == content
+
+    @responses.activate
+    def test_multi_checksum_partial_failure(self, client, tmp_path):
+        """First checksum passes but second fails — file should be deleted."""
+        responses.get(ARTIFACT_URL, body=ARTIFACT_CONTENT)
+        sha1 = hashlib.sha1(ARTIFACT_CONTENT).hexdigest()
+        checksums = [
+            Checksum(algorithm_type=ChecksumAlgorithm.SHA_1, algorithm_value=sha1),
+            Checksum(algorithm_type=ChecksumAlgorithm.SHA_256, algorithm_value="0000deadbeef"),
+        ]
+        dest = tmp_path / "partial.json"
+        with pytest.raises(TeaChecksumError, match="SHA-256"):
+            client.download_artifact(ARTIFACT_URL, dest, verify_checksums=checksums)
+        assert not dest.exists()
