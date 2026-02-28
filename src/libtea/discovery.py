@@ -8,7 +8,7 @@ SemVer 2.0.0 comparison and priority-based ordering.
 import logging
 import warnings
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 from pydantic import ValidationError
@@ -118,33 +118,47 @@ def fetch_well_known(
     else:
         url = f"{scheme}://{domain}:{resolved_port}/.well-known/tea"
 
-    kwargs: dict[str, Any] = {"timeout": timeout, "allow_redirects": True, "headers": {"user-agent": USER_AGENT}}
+    kwargs: dict[str, Any] = {"timeout": timeout, "allow_redirects": False, "headers": {"user-agent": USER_AGENT}}
     if mtls:
         kwargs["cert"] = (str(mtls.client_cert), str(mtls.client_key))
         if mtls.ca_bundle:
             kwargs["verify"] = str(mtls.ca_bundle)
 
     logger.debug("Fetching well-known discovery document: %s", url)
+    _max_discovery_redirects = 5
     try:
-        response = requests.get(url, **kwargs)
-        # Validate the final URL scheme after any redirects
-        final_parsed = urlparse(response.url)
-        if final_parsed.scheme not in ("http", "https"):
-            raise TeaDiscoveryError(f"Discovery redirected to unsupported scheme: {final_parsed.scheme!r}")
-        if scheme == "https" and final_parsed.scheme == "http":
-            warnings.warn(
-                f"Discovery for {domain} was downgraded from HTTPS to HTTP via redirect. "
-                "This may indicate a misconfigured server.",
-                TeaInsecureTransportWarning,
-                stacklevel=2,
-            )
-        # If a redirect occurred, validate the final hostname against internal
-        # networks to prevent SSRF (e.g. redirect to 169.254.169.254).
-        if response.url != url:
-            try:
-                _validate_download_url(response.url)
-            except TeaValidationError as exc:
-                raise TeaDiscoveryError(f"Discovery for {domain} redirected to blocked target: {exc}") from exc
+        # Follow redirects manually with SSRF validation at each hop
+        # (automatic redirects would allow intermediate hops to internal IPs).
+        current_url = url
+        redirects = 0
+        while True:
+            response = requests.get(current_url, **kwargs)
+            if 300 <= response.status_code < 400:
+                redirects += 1
+                if redirects > _max_discovery_redirects:
+                    raise TeaDiscoveryError(f"Too many discovery redirects (max {_max_discovery_redirects})")
+                location = response.headers.get("Location")
+                if not location:
+                    raise TeaDiscoveryError(f"Discovery redirect without Location header: HTTP {response.status_code}")
+                current_url = urljoin(current_url, location)
+                # Validate scheme and SSRF at each hop
+                hop_parsed = urlparse(current_url)
+                if hop_parsed.scheme not in ("http", "https"):
+                    raise TeaDiscoveryError(f"Discovery redirected to unsupported scheme: {hop_parsed.scheme!r}")
+                if scheme == "https" and hop_parsed.scheme == "http":
+                    warnings.warn(
+                        f"Discovery for {domain} was downgraded from HTTPS to HTTP via redirect. "
+                        "This may indicate a misconfigured server.",
+                        TeaInsecureTransportWarning,
+                        stacklevel=2,
+                    )
+                try:
+                    _validate_download_url(current_url)
+                except TeaValidationError as exc:
+                    raise TeaDiscoveryError(f"Discovery for {domain} redirected to blocked target: {exc}") from exc
+                response.close()
+                continue
+            break
         if response.status_code >= 400:
             body_snippet = (response.text or "")[:200]
             if len(response.text or "") > 200:

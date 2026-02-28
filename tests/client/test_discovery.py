@@ -289,15 +289,13 @@ class TestFetchWellKnownSsrfProtection:
     @responses.activate
     def test_rejects_redirect_to_unsupported_scheme(self):
         """If the server redirects to a non-http(s) scheme, raise."""
-        from unittest.mock import MagicMock, patch
-
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.url = "ftp://evil.example.com/.well-known/tea"
-
-        with patch("libtea.discovery.requests.get", return_value=mock_response):
-            with pytest.raises(TeaDiscoveryError, match="unsupported scheme.*ftp"):
-                fetch_well_known("example.com")
+        responses.get(
+            "https://example.com/.well-known/tea",
+            status=301,
+            headers={"Location": "ftp://evil.example.com/.well-known/tea"},
+        )
+        with pytest.raises(TeaDiscoveryError, match="unsupported scheme.*ftp"):
+            fetch_well_known("example.com")
 
     @responses.activate
     def test_allows_https_redirect(self):
@@ -312,46 +310,45 @@ class TestFetchWellKnownSsrfProtection:
         wk = fetch_well_known("example.com")
         assert wk.schema_version == 1
 
+    @responses.activate
     def test_warns_on_https_to_http_downgrade(self):
         """HTTPS→HTTP redirect should emit a warning."""
-        from unittest.mock import MagicMock, patch
+        responses.get(
+            "https://example.com/.well-known/tea",
+            status=301,
+            headers={"Location": "http://other.example.com/.well-known/tea"},
+        )
+        responses.get(
+            "http://other.example.com/.well-known/tea",
+            json={
+                "schemaVersion": 1,
+                "endpoints": [{"url": "https://api.example.com", "versions": ["1.0.0"]}],
+            },
+        )
+        with pytest.warns(TeaInsecureTransportWarning, match="downgraded from HTTPS to HTTP"):
+            fetch_well_known("example.com")
 
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.url = "http://example.com/.well-known/tea"
-        mock_response.json.return_value = {
-            "schemaVersion": 1,
-            "endpoints": [{"url": "https://api.example.com", "versions": ["1.0.0"]}],
-        }
-        mock_response.text = ""
-
-        with patch("libtea.discovery.requests.get", return_value=mock_response):
-            with pytest.warns(TeaInsecureTransportWarning, match="downgraded from HTTPS to HTTP"):
-                fetch_well_known("example.com")
-
+    @responses.activate
     def test_rejects_redirect_to_internal_ip(self):
         """Redirect to an internal IP (e.g. cloud metadata) should raise."""
-        from unittest.mock import MagicMock, patch
+        responses.get(
+            "https://example.com/.well-known/tea",
+            status=302,
+            headers={"Location": "http://169.254.169.254/latest/meta-data/"},
+        )
+        with pytest.raises(TeaDiscoveryError, match="redirected to blocked target"):
+            fetch_well_known("example.com")
 
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.url = "http://169.254.169.254/latest/meta-data/"
-
-        with patch("libtea.discovery.requests.get", return_value=mock_response):
-            with pytest.raises(TeaDiscoveryError, match="redirected to blocked target"):
-                fetch_well_known("example.com")
-
+    @responses.activate
     def test_rejects_redirect_to_localhost(self):
         """Redirect to localhost should raise."""
-        from unittest.mock import MagicMock, patch
-
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.url = "http://localhost/admin"
-
-        with patch("libtea.discovery.requests.get", return_value=mock_response):
-            with pytest.raises(TeaDiscoveryError, match="redirected to blocked target"):
-                fetch_well_known("example.com")
+        responses.get(
+            "https://example.com/.well-known/tea",
+            status=302,
+            headers={"Location": "http://localhost/admin"},
+        )
+        with pytest.raises(TeaDiscoveryError, match="redirected to blocked target"):
+            fetch_well_known("example.com")
 
 
 class TestSelectEndpoint:
