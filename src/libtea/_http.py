@@ -270,11 +270,15 @@ class TeaHttpClient:
                 current_url = url
                 response = None
                 try:
-                    for _ in range(_MAX_DOWNLOAD_REDIRECTS):
+                    redirects = 0
+                    while True:
                         response = download_session.get(
                             current_url, stream=True, timeout=self._timeout, allow_redirects=False
                         )
                         if 300 <= response.status_code < 400:
+                            redirects += 1
+                            if redirects > _MAX_DOWNLOAD_REDIRECTS:
+                                raise TeaConnectionError(f"Too many redirects (max {_MAX_DOWNLOAD_REDIRECTS})")
                             location = response.headers.get("Location")
                             if not location:
                                 raise TeaRequestError(f"Redirect without Location header: HTTP {response.status_code}")
@@ -284,8 +288,6 @@ class TeaHttpClient:
                             response = None
                             continue
                         break
-                    else:
-                        raise TeaConnectionError(f"Too many redirects (max {_MAX_DOWNLOAD_REDIRECTS})")
 
                     self._raise_for_status(response)
 
