@@ -37,7 +37,11 @@ _json_output: bool = False
 
 
 def shared_options(fn):  # type: ignore[no-untyped-def]
-    """Apply the 7 common CLI options to a command function."""
+    """Apply connection options and global flags to a command function.
+
+    Global flags (``--json``, ``--debug``) are applied per-command so they
+    work in any position (before or after the subcommand name).
+    """
 
     @click.option("--port", type=int, default=None, help="Port for well-known resolution")
     @click.option("--use-http", is_flag=True, help="Use HTTP instead of HTTPS for discovery")
@@ -53,8 +57,16 @@ def shared_options(fn):  # type: ignore[no-untyped-def]
         help="Bearer token (prefer TEA_TOKEN env var to avoid shell history exposure)",
     )
     @click.option("--base-url", envvar="TEA_BASE_URL", default=None, help="TEA server base URL")
+    @click.option("--json", "output_json", is_flag=True, help="Output raw JSON instead of rich-formatted tables")
+    @click.option("-d", "--debug", is_flag=True, help="Show debug output (HTTP requests, timing)")
     @functools.wraps(fn)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
+    def wrapper(*args: Any, output_json: bool = False, debug: bool = False, **kwargs: Any) -> Any:
+        global _json_output  # noqa: PLW0603
+        if output_json:
+            _json_output = True
+        if debug:
+            logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(message)s", stream=sys.stderr)
+            logging.getLogger("libtea").setLevel(logging.DEBUG)
         return fn(*args, **kwargs)
 
     return wrapper
@@ -170,12 +182,13 @@ def _error(message: str) -> NoReturn:
     prog_name="tea-cli",
     message=f"%(prog)s %(version)s (TEA spec {TEA_SPEC_VERSION})",
 )
-@click.option("--json", "output_json", is_flag=True, help="Output raw JSON instead of rich-formatted tables")
-@click.option("--debug", "-d", is_flag=True, help="Show debug output (HTTP requests, timing)")
+@click.option("--json", "output_json", is_flag=True, hidden=True)
+@click.option("-d", "--debug", is_flag=True, hidden=True)
 def app(output_json: bool, debug: bool) -> None:
     """TEA (Transparency Exchange API) CLI client."""
     global _json_output  # noqa: PLW0603
-    _json_output = output_json
+    if output_json:
+        _json_output = True
     if debug:
         logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(message)s", stream=sys.stderr)
         logging.getLogger("libtea").setLevel(logging.DEBUG)

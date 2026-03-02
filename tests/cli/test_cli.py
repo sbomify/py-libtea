@@ -796,7 +796,7 @@ class TestCLIDebugFlag:
         assert result.exit_code == 0
 
     def test_debug_flag_shown_in_help(self):
-        result = runner.invoke(app, ["--help"])
+        result = runner.invoke(app, ["get-product", "--help"])
         plain = _strip_ansi(result.output)
         assert "--debug" in plain
         assert "-d" in plain
