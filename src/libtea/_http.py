@@ -4,6 +4,7 @@ This module is an implementation detail. Public consumers should use
 :class:`~libtea.client.TeaClient` instead.
 """
 
+import json
 import logging
 import warnings
 from pathlib import Path
@@ -71,7 +72,11 @@ def probe_endpoint(url: str, timeout: float = 5.0) -> None:
     except requests.RequestException as exc:
         raise TeaConnectionError(str(exc)) from exc
     if 300 <= resp.status_code < 400:
-        location = resp.headers.get("Location", "")
+        location = resp.headers.get("Location")
+        if not location:
+            raise TeaConnectionError(
+                f"Endpoint probe returned redirect without Location header: HTTP {resp.status_code}"
+            )
         resolved = urljoin(url, location)
         # Allow trailing-slash redirects (e.g. /path -> /path/) which are
         # normal server behaviour (Django APPEND_SLASH, Caddy, nginx).
@@ -174,7 +179,7 @@ class TeaHttpClient:
         url = f"{self._base_url}{path}"
         logger.debug("GET %s params=%s", url, params)
         try:
-            response = self._session.get(url, params=params, timeout=self._timeout, allow_redirects=False)
+            response = self._session.get(url, params=params, timeout=self._timeout, allow_redirects=False, stream=True)
         except requests.ConnectionError as exc:
             logger.warning("Connection error for %s: %s", url, exc)
             raise TeaConnectionError(str(exc)) from exc
@@ -193,14 +198,15 @@ class TeaHttpClient:
                 raise TeaValidationError(
                     f"Response too large: {content_length} bytes (limit {self._max_response_bytes})"
                 )
-            body = response.content
-            if len(body) > self._max_response_bytes:
-                raise TeaValidationError(
-                    f"Response body exceeds limit: {len(body)} bytes (limit {self._max_response_bytes})"
-                )
+            # Read at most limit+1 bytes to detect oversized responses without
+            # loading an unbounded body into memory (stream=True defers the read).
+            limit = self._max_response_bytes
+            body = response.raw.read(limit + 1)
+            if len(body) > limit:
+                raise TeaValidationError(f"Response body exceeds limit: >{limit} bytes (limit {limit})")
             try:
-                return response.json()
-            except ValueError as exc:
+                return json.loads(body)
+            except (ValueError, UnicodeDecodeError) as exc:
                 raise TeaValidationError(f"Invalid JSON in response: {exc}") from exc
         finally:
             response.close()

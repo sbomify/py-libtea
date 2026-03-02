@@ -175,7 +175,7 @@ def app(output_json: bool, debug: bool) -> None:
     global _json_output  # noqa: PLW0603
     _json_output = output_json
     if debug:
-        logging.basicConfig(format="%(levelname)s %(name)s: %(message)s", stream=sys.stderr)
+        logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(message)s", stream=sys.stderr)
         logging.getLogger("libtea").setLevel(logging.DEBUG)
 
 
