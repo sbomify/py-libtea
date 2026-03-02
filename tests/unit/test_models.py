@@ -2,10 +2,14 @@ import pytest
 from pydantic import ValidationError
 
 from libtea.models import (
+    CLE,
     ArtifactFormat,
     ArtifactType,
     Checksum,
     ChecksumAlgorithm,
+    CLEEvent,
+    CLEEventType,
+    CLEVersionSpecifier,
     Collection,
     CollectionBelongsTo,
     CollectionUpdateReasonType,
@@ -24,7 +28,6 @@ class TestEnums:
         assert IdentifierType.CPE == "CPE"
         assert IdentifierType.TEI == "TEI"
         assert IdentifierType.PURL == "PURL"
-        assert IdentifierType.UDI == "UDI"
 
     def test_checksum_algorithm_values(self):
         assert ChecksumAlgorithm.SHA_256 == "SHA-256"
@@ -139,9 +142,10 @@ class TestValidationErrors:
         with pytest.raises(ValidationError):
             Checksum.model_validate({"algType": "CRC32", "algValue": "aabbcc"})
 
-    def test_identifier_rejects_unknown_type(self):
-        with pytest.raises(ValidationError):
-            Identifier.model_validate({"idType": "SPDXID", "idValue": "some-value"})
+    def test_identifier_accepts_unknown_type(self):
+        """Forward-compatible: unknown identifier types pass through as strings."""
+        ident = Identifier.model_validate({"idType": "SPDXID", "idValue": "some-value"})
+        assert ident.id_type == "SPDXID"
 
     def test_checksum_rejects_missing_algorithm_type(self):
         with pytest.raises(ValidationError):
@@ -222,14 +226,15 @@ class TestProduct:
         assert len(product.identifiers) == 2
         assert product.identifiers[0].id_type == IdentifierType.CPE
 
-    def test_product_with_udi_identifier(self):
+    def test_product_with_unknown_identifier_type(self):
+        """Forward-compatible: unknown identifier types pass through as plain strings."""
         data = {
             "uuid": "abc-123",
             "name": "Medical Device",
             "identifiers": [{"idType": "UDI", "idValue": "00123456789012"}],
         }
         product = Product.model_validate(data)
-        assert product.identifiers[0].id_type == IdentifierType.UDI
+        assert product.identifiers[0].id_type == "UDI"
         assert product.identifiers[0].id_value == "00123456789012"
 
 
@@ -304,8 +309,8 @@ class TestOptionalFields:
         assert release.release_date is None
         assert release.pre_release is None
         assert release.component is None
-        assert release.distributions == []
-        assert release.identifiers == []
+        assert release.distributions == ()
+        assert release.identifiers == ()
 
     def test_collection_minimal_fields(self):
         data = {"uuid": "c-1", "version": 1}
@@ -313,7 +318,23 @@ class TestOptionalFields:
         assert collection.date is None
         assert collection.belongs_to is None
         assert collection.update_reason is None
-        assert collection.artifacts == []
+        assert collection.artifacts == ()
+
+    def test_collection_all_fields_optional(self):
+        """Per TEA spec, all Collection fields are optional."""
+        collection = Collection.model_validate({})
+        assert collection.uuid is None
+        assert collection.version is None
+        assert collection.artifacts == ()
+
+    def test_collection_version_rejects_zero(self):
+        """TEA spec says versions start with 1."""
+        with pytest.raises(ValidationError):
+            Collection.model_validate({"version": 0})
+
+    def test_collection_version_rejects_negative(self):
+        with pytest.raises(ValidationError):
+            Collection.model_validate({"version": -1})
 
     def test_artifact_format_minimal_fields(self):
         data = {
@@ -323,7 +344,7 @@ class TestOptionalFields:
         fmt = ArtifactFormat.model_validate(data)
         assert fmt.description is None
         assert fmt.signature_url is None
-        assert fmt.checksums == []
+        assert fmt.checksums == ()
 
     def test_paginated_product_response_empty_results(self):
         data = {
@@ -335,7 +356,7 @@ class TestOptionalFields:
         }
         resp = PaginatedProductResponse.model_validate(data)
         assert resp.total_results == 0
-        assert resp.results == []
+        assert resp.results == ()
 
 
 class TestPaginatedResponse:
@@ -356,3 +377,205 @@ class TestPaginatedResponse:
         resp = PaginatedProductResponse.model_validate(data)
         assert resp.total_results == 1
         assert resp.results[0].name == "Apache Log4j 2"
+
+
+class TestCLEEventType:
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "released",
+            "endOfDevelopment",
+            "endOfSupport",
+            "endOfLife",
+            "endOfDistribution",
+            "endOfMarketing",
+            "supersededBy",
+            "componentRenamed",
+            "withdrawn",
+        ],
+    )
+    def test_all_event_types(self, value):
+        assert CLEEventType(value) == value
+
+
+class TestCLEModels:
+    def test_released_event(self):
+        event = CLEEvent.model_validate(
+            {
+                "id": 1,
+                "type": "released",
+                "effective": "2024-01-01T00:00:00Z",
+                "published": "2024-01-01T00:00:00Z",
+                "version": "1.0.0",
+                "license": "Apache-2.0",
+            }
+        )
+        assert event.id == 1
+        assert event.type == CLEEventType.RELEASED
+        assert event.version == "1.0.0"
+        assert event.license == "Apache-2.0"
+
+    def test_end_of_support_event(self):
+        event = CLEEvent.model_validate(
+            {
+                "id": 3,
+                "type": "endOfSupport",
+                "effective": "2025-06-01T00:00:00Z",
+                "published": "2025-01-01T00:00:00Z",
+                "versions": [{"range": "vers:npm/>=1.0.0|<2.0.0"}],
+                "supportId": "standard",
+            }
+        )
+        assert event.type == CLEEventType.END_OF_SUPPORT
+        assert event.support_id == "standard"
+        assert len(event.versions) == 1
+        assert event.versions[0].range == "vers:npm/>=1.0.0|<2.0.0"
+
+    def test_withdrawn_event(self):
+        event = CLEEvent.model_validate(
+            {
+                "id": 5,
+                "type": "withdrawn",
+                "effective": "2025-03-01T00:00:00Z",
+                "published": "2025-03-01T00:00:00Z",
+                "eventId": 1,
+                "reason": "Incorrect release date",
+            }
+        )
+        assert event.type == CLEEventType.WITHDRAWN
+        assert event.event_id == 1
+        assert event.reason == "Incorrect release date"
+
+    def test_component_renamed_event(self):
+        event = CLEEvent.model_validate(
+            {
+                "id": 4,
+                "type": "componentRenamed",
+                "effective": "2025-01-01T00:00:00Z",
+                "published": "2025-01-01T00:00:00Z",
+                "identifiers": [{"idType": "PURL", "idValue": "pkg:pypi/new-name@1.0.0"}],
+            }
+        )
+        assert event.type == CLEEventType.COMPONENT_RENAMED
+        assert len(event.identifiers) == 1
+
+    def test_full_cle_document(self):
+        cle = CLE.model_validate(
+            {
+                "events": [
+                    {
+                        "id": 2,
+                        "type": "endOfDevelopment",
+                        "effective": "2025-01-01T00:00:00Z",
+                        "published": "2024-06-01T00:00:00Z",
+                        "versions": [{"version": "1.0.0"}],
+                        "supportId": "standard",
+                    },
+                    {
+                        "id": 1,
+                        "type": "released",
+                        "effective": "2024-01-01T00:00:00Z",
+                        "published": "2024-01-01T00:00:00Z",
+                        "version": "1.0.0",
+                        "license": "Apache-2.0",
+                    },
+                ],
+                "definitions": {
+                    "support": [
+                        {"id": "standard", "description": "Standard support", "url": "https://example.com/support"}
+                    ]
+                },
+            }
+        )
+        assert len(cle.events) == 2
+        assert cle.definitions is not None
+        assert len(cle.definitions.support) == 1
+
+    def test_cle_without_definitions(self):
+        cle = CLE.model_validate(
+            {
+                "events": [
+                    {
+                        "id": 1,
+                        "type": "released",
+                        "effective": "2024-01-01T00:00:00Z",
+                        "published": "2024-01-01T00:00:00Z",
+                    }
+                ]
+            }
+        )
+        assert cle.definitions is None
+
+    def test_cle_event_missing_required_fields(self):
+        with pytest.raises(ValidationError):
+            CLEEvent.model_validate({"id": 1})
+
+    def test_superseded_by_event(self):
+        event = CLEEvent.model_validate(
+            {
+                "id": 6,
+                "type": "supersededBy",
+                "effective": "2025-06-01T00:00:00Z",
+                "published": "2025-05-01T00:00:00Z",
+                "versions": [{"range": "vers:npm/>=1.0.0|<2.0.0"}],
+                "supersededByVersion": "2.0.0",
+            }
+        )
+        assert event.type == CLEEventType.SUPERSEDED_BY
+        assert event.superseded_by_version == "2.0.0"
+        assert len(event.versions) == 1
+
+    def test_end_of_life_event(self):
+        event = CLEEvent.model_validate(
+            {
+                "id": 7,
+                "type": "endOfLife",
+                "effective": "2026-01-01T00:00:00Z",
+                "published": "2025-06-01T00:00:00Z",
+                "versions": [{"version": "1.0.0"}],
+                "supportId": "standard",
+            }
+        )
+        assert event.type == CLEEventType.END_OF_LIFE
+        assert event.support_id == "standard"
+
+    def test_end_of_distribution_event(self):
+        event = CLEEvent.model_validate(
+            {
+                "id": 8,
+                "type": "endOfDistribution",
+                "effective": "2026-03-01T00:00:00Z",
+                "published": "2025-12-01T00:00:00Z",
+                "versions": [{"version": "1.0.0"}, {"range": "vers:npm/>=0.9.0|<1.0.0"}],
+            }
+        )
+        assert event.type == CLEEventType.END_OF_DISTRIBUTION
+        assert len(event.versions) == 2
+
+    def test_end_of_marketing_event(self):
+        event = CLEEvent.model_validate(
+            {
+                "id": 9,
+                "type": "endOfMarketing",
+                "effective": "2026-06-01T00:00:00Z",
+                "published": "2026-01-01T00:00:00Z",
+                "versions": [{"version": "1.0.0"}],
+                "description": "No longer marketed",
+            }
+        )
+        assert event.type == CLEEventType.END_OF_MARKETING
+        assert event.description == "No longer marketed"
+
+    def test_version_specifier_with_version(self):
+        vs = CLEVersionSpecifier.model_validate({"version": "1.0.0"})
+        assert vs.version == "1.0.0"
+        assert vs.range is None
+
+    def test_version_specifier_with_range(self):
+        vs = CLEVersionSpecifier.model_validate({"range": "vers:npm/>=1.0.0|<2.0.0"})
+        assert vs.version is None
+        assert vs.range == "vers:npm/>=1.0.0|<2.0.0"
+
+    def test_version_specifier_empty_rejected(self):
+        with pytest.raises(ValidationError, match="at least one"):
+            CLEVersionSpecifier.model_validate({})

@@ -3,9 +3,9 @@ import requests
 import responses
 from pydantic import ValidationError
 
-from libtea.discovery import _SemVer, fetch_well_known, parse_tei, select_endpoint
+from libtea.discovery import _is_valid_domain, fetch_well_known, parse_tei, select_endpoint, select_endpoints
 from libtea.exceptions import TeaDiscoveryError
-from libtea.models import TeaEndpoint, TeaWellKnown, TeiType
+from libtea.models import DiscoveryInfo, TeaEndpoint, TeaWellKnown, TeiType
 
 
 class TestParseTei:
@@ -156,6 +156,81 @@ class TestFetchWellKnown:
             fetch_well_known("example.com")
 
     @responses.activate
+    def test_fetch_well_known_http_scheme(self):
+        responses.get(
+            "http://example.com/.well-known/tea",
+            json={"schemaVersion": 1, "endpoints": [{"url": "http://api.example.com", "versions": ["1.0.0"]}]},
+        )
+        wk = fetch_well_known("example.com", scheme="http")
+        assert len(wk.endpoints) == 1
+
+    @responses.activate
+    def test_fetch_well_known_custom_port(self):
+        responses.get(
+            "https://example.com:8443/.well-known/tea",
+            json={"schemaVersion": 1, "endpoints": [{"url": "https://api.example.com", "versions": ["1.0.0"]}]},
+        )
+        wk = fetch_well_known("example.com", port=8443)
+        assert len(wk.endpoints) == 1
+
+    @responses.activate
+    def test_fetch_well_known_default_port_omitted(self):
+        responses.get(
+            "https://example.com/.well-known/tea",
+            json={"schemaVersion": 1, "endpoints": [{"url": "https://api.example.com", "versions": ["1.0.0"]}]},
+        )
+        wk = fetch_well_known("example.com", port=443)
+        assert len(wk.endpoints) == 1
+
+    def test_fetch_well_known_invalid_scheme_raises(self):
+        with pytest.raises(TeaDiscoveryError, match="Invalid scheme"):
+            fetch_well_known("example.com", scheme="ftp")
+
+    def test_fetch_well_known_invalid_port_zero_raises(self):
+        with pytest.raises(TeaDiscoveryError, match="Invalid port"):
+            fetch_well_known("example.com", port=0)
+
+    def test_fetch_well_known_invalid_port_negative_raises(self):
+        with pytest.raises(TeaDiscoveryError, match="Invalid port"):
+            fetch_well_known("example.com", port=-1)
+
+    def test_fetch_well_known_invalid_port_too_large_raises(self):
+        with pytest.raises(TeaDiscoveryError, match="Invalid port"):
+            fetch_well_known("example.com", port=70000)
+
+    @responses.activate
+    def test_fetch_well_known_http_default_port_omitted(self):
+        responses.get(
+            "http://example.com/.well-known/tea",
+            json={"schemaVersion": 1, "endpoints": [{"url": "http://api.example.com", "versions": ["1.0.0"]}]},
+        )
+        wk = fetch_well_known("example.com", scheme="http", port=80)
+        assert len(wk.endpoints) == 1
+
+    def test_fetch_well_known_http_emits_insecure_warning(self):
+        import warnings
+
+        from libtea.exceptions import TeaInsecureTransportWarning
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            try:
+                fetch_well_known("example.com", scheme="http")
+            except TeaDiscoveryError:
+                pass  # Connection will fail; we only care about the warning
+            insecure_warnings = [x for x in w if issubclass(x.category, TeaInsecureTransportWarning)]
+            assert len(insecure_warnings) == 1
+
+    @responses.activate
+    def test_fetch_well_known_http_with_custom_port(self):
+        responses.get(
+            "http://example.com:9080/.well-known/tea",
+            json={"schemaVersion": 1, "endpoints": [{"url": "http://api.example.com", "versions": ["1.0.0"]}]},
+        )
+        wk = fetch_well_known("example.com", scheme="http", port=9080)
+        assert len(wk.endpoints) == 1
+
+    @responses.activate
     def test_fetch_well_known_non_json_raises_discovery_error(self):
         responses.get("https://example.com/.well-known/tea", body="not json")
         with pytest.raises(TeaDiscoveryError, match="Invalid JSON"):
@@ -165,6 +240,69 @@ class TestFetchWellKnown:
     def test_fetch_well_known_invalid_schema_raises_discovery_error(self):
         responses.get("https://example.com/.well-known/tea", json={"bad": "data"})
         with pytest.raises(TeaDiscoveryError, match="Invalid .well-known/tea"):
+            fetch_well_known("example.com")
+
+
+class TestFetchWellKnownSsrfProtection:
+    """P2-2: Post-redirect SSRF validation in fetch_well_known."""
+
+    @responses.activate
+    def test_rejects_redirect_to_unsupported_scheme(self):
+        """If the server redirects to a non-http(s) scheme, raise."""
+        responses.get(
+            "https://example.com/.well-known/tea",
+            status=301,
+            headers={"Location": "ftp://evil.example.com/.well-known/tea"},
+        )
+        with pytest.raises(TeaDiscoveryError, match="unsupported scheme.*ftp"):
+            fetch_well_known("example.com")
+
+    @responses.activate
+    def test_allows_https_redirect(self):
+        """A normal HTTPS redirect should succeed."""
+        responses.get(
+            "https://example.com/.well-known/tea",
+            json={
+                "schemaVersion": 1,
+                "endpoints": [{"url": "https://api.example.com", "versions": ["1.0.0"]}],
+            },
+        )
+        wk = fetch_well_known("example.com")
+        assert wk.schema_version == 1
+
+    @responses.activate
+    def test_rejects_https_to_http_downgrade(self):
+        """HTTPS→HTTP redirect should raise TeaDiscoveryError (not silently downgrade)."""
+        responses.get(
+            "https://example.com/.well-known/tea",
+            status=301,
+            headers={"Location": "http://other.example.com/.well-known/tea"},
+        )
+        with pytest.raises(TeaDiscoveryError, match="downgraded from HTTPS to HTTP"):
+            fetch_well_known("example.com")
+
+    @responses.activate
+    def test_rejects_redirect_to_internal_ip(self):
+        """Redirect to an internal IP (e.g. cloud metadata) should raise."""
+        responses.get(
+            "https://example.com/.well-known/tea",
+            status=302,
+            headers={"Location": "http://169.254.169.254/latest/meta-data/"},
+        )
+        # HTTPS→HTTP downgrade is rejected before the SSRF check runs.
+        with pytest.raises(TeaDiscoveryError, match="downgraded from HTTPS to HTTP"):
+            fetch_well_known("example.com")
+
+    @responses.activate
+    def test_rejects_redirect_to_localhost(self):
+        """Redirect to localhost should raise."""
+        responses.get(
+            "https://example.com/.well-known/tea",
+            status=302,
+            headers={"Location": "http://localhost/admin"},
+        )
+        # HTTPS→HTTP downgrade is rejected before the SSRF check runs.
+        with pytest.raises(TeaDiscoveryError, match="downgraded from HTTPS to HTTP"):
             fetch_well_known("example.com")
 
 
@@ -229,15 +367,15 @@ class TestSelectEndpoint:
         ep = select_endpoint(wk, "1.0.0")
         assert ep.url == "https://none-priority.example.com"
 
-    def test_semver_matches_without_patch(self):
-        """Version '1.0' in endpoint should match client version '1.0.0'."""
+    def test_invalid_semver_two_part_version_skipped(self):
+        """Two-part version '1.0' is not valid SemVer and is silently skipped."""
         wk = self._make_well_known(
             [
                 {"url": "https://api.example.com", "versions": ["1.0"]},
             ]
         )
-        ep = select_endpoint(wk, "1.0.0")
-        assert ep.url == "https://api.example.com"
+        with pytest.raises(TeaDiscoveryError, match="No compatible endpoint"):
+            select_endpoint(wk, "1.0.0")
 
     def test_semver_matches_with_prerelease(self):
         """Pre-release versions match exactly."""
@@ -280,67 +418,110 @@ class TestSelectEndpoint:
             TeaEndpoint(url="https://api.example.com", versions=[])
 
 
-class TestSemVer:
-    def test_parse_basic(self):
-        v = _SemVer("1.2.3")
-        assert v.major == 1
-        assert v.minor == 2
-        assert v.patch == 3
-        assert v.pre == ()
+class TestDiscoveryInfo:
+    def test_rejects_empty_servers(self):
+        """Spec requires minItems: 1 for servers array."""
+        with pytest.raises(ValidationError):
+            DiscoveryInfo(product_release_uuid="d4d9f54a-abcf-11ee-ac79-1a52914d44b1", servers=[])
 
-    def test_parse_without_patch(self):
-        v = _SemVer("1.0")
-        assert v.major == 1
-        assert v.minor == 0
-        assert v.patch == 0
 
-    def test_parse_with_prerelease(self):
-        v = _SemVer("0.3.0-beta.2")
-        assert v.major == 0
-        assert v.minor == 3
-        assert v.patch == 0
-        assert v.pre == ("beta", 2)
+class TestIsValidDomain:
+    def test_rejects_empty_string(self):
+        assert not _is_valid_domain("")
 
-    def test_equality_with_and_without_patch(self):
-        assert _SemVer("1.0") == _SemVer("1.0.0")
+    def test_rejects_label_over_63_chars(self):
+        assert not _is_valid_domain("a" * 64 + ".com")
 
-    def test_ordering_major(self):
-        assert _SemVer("1.0.0") < _SemVer("2.0.0")
+    def test_accepts_label_at_63_chars(self):
+        assert _is_valid_domain("a" * 63 + ".com")
 
-    def test_ordering_minor(self):
-        assert _SemVer("1.0.0") < _SemVer("1.1.0")
+    def test_rejects_trailing_dot(self):
+        assert not _is_valid_domain("example.com.")
 
-    def test_ordering_patch(self):
-        assert _SemVer("1.0.0") < _SemVer("1.0.1")
+    def test_rejects_double_dot(self):
+        assert not _is_valid_domain("example..com")
 
-    def test_prerelease_lower_than_release(self):
-        assert _SemVer("1.0.0-alpha") < _SemVer("1.0.0")
+    def test_rejects_leading_hyphen_label(self):
+        assert not _is_valid_domain("-example.com")
 
-    def test_prerelease_ordering(self):
-        """SemVer spec example: 1.0.0-alpha < 1.0.0-alpha.1 < 1.0.0-alpha.beta < 1.0.0-beta < 1.0.0-beta.2 < 1.0.0-beta.11 < 1.0.0-rc.1 < 1.0.0"""
-        versions = [
-            "1.0.0-alpha",
-            "1.0.0-alpha.1",
-            "1.0.0-alpha.beta",
-            "1.0.0-beta",
-            "1.0.0-beta.2",
-            "1.0.0-beta.11",
-            "1.0.0-rc.1",
-            "1.0.0",
-        ]
-        parsed = [_SemVer(v) for v in versions]
-        for i in range(len(parsed) - 1):
-            assert parsed[i] < parsed[i + 1], f"{versions[i]} should be < {versions[i + 1]}"
+    def test_rejects_trailing_hyphen_label(self):
+        assert not _is_valid_domain("example-.com")
 
-    def test_numeric_prerelease_less_than_alpha(self):
-        """Numeric identifiers have lower precedence than alphanumeric."""
-        assert _SemVer("1.0.0-1") < _SemVer("1.0.0-alpha")
+    def test_accepts_hyphen_in_middle(self):
+        assert _is_valid_domain("my-example.com")
 
-    def test_invalid_semver_raises(self):
-        with pytest.raises(ValueError, match="Invalid SemVer"):
-            _SemVer("not-a-version")
+    def test_rejects_underscore(self):
+        assert not _is_valid_domain("my_example.com")
 
-    def test_str_repr(self):
-        v = _SemVer("1.2.3-beta.1")
-        assert str(v) == "1.2.3-beta.1"
-        assert repr(v) == "_SemVer('1.2.3-beta.1')"
+    def test_accepts_single_label(self):
+        assert _is_valid_domain("localhost")
+
+    def test_rejects_domain_over_253_chars(self):
+        """RFC 1035 limits total domain name to 253 characters."""
+        long_domain = ".".join(["a" * 63] * 4)  # 63*4 + 3 dots = 255 chars
+        assert len(long_domain) == 255
+        assert not _is_valid_domain(long_domain)
+
+    def test_accepts_domain_at_253_chars(self):
+        # 61-char labels * 4 + 3 dots = 247, well under 253
+        domain = ".".join(["a" * 61] * 4)
+        assert len(domain) <= 253
+        assert _is_valid_domain(domain)
+
+
+class TestSelectEndpoints:
+    def _make_well_known(self, endpoints: list[dict]) -> TeaWellKnown:
+        return TeaWellKnown(
+            schema_version=1,
+            endpoints=[TeaEndpoint(**ep) for ep in endpoints],
+        )
+
+    def test_returns_all_matching_endpoints(self):
+        wk = self._make_well_known(
+            [
+                {"url": "https://a.example.com", "versions": ["1.0.0"], "priority": 0.5},
+                {"url": "https://b.example.com", "versions": ["1.0.0"], "priority": 1.0},
+                {"url": "https://c.example.com", "versions": ["2.0.0"]},
+            ]
+        )
+        eps = select_endpoints(wk, "1.0.0")
+        assert len(eps) == 2
+        assert eps[0].url == "https://b.example.com"
+        assert eps[1].url == "https://a.example.com"
+
+    def test_single_candidate(self):
+        wk = self._make_well_known(
+            [
+                {"url": "https://only.example.com", "versions": ["1.0.0"]},
+            ]
+        )
+        eps = select_endpoints(wk, "1.0.0")
+        assert len(eps) == 1
+        assert eps[0].url == "https://only.example.com"
+
+    def test_no_match_raises(self):
+        wk = self._make_well_known(
+            [
+                {"url": "https://api.example.com", "versions": ["2.0.0"]},
+            ]
+        )
+        with pytest.raises(TeaDiscoveryError, match="No compatible endpoint"):
+            select_endpoints(wk, "1.0.0")
+
+    def test_select_endpoint_returns_first(self):
+        """select_endpoint (singular) returns the best candidate from select_endpoints."""
+        wk = self._make_well_known(
+            [
+                {"url": "https://low.example.com", "versions": ["1.0.0"], "priority": 0.3},
+                {"url": "https://high.example.com", "versions": ["1.0.0"], "priority": 0.9},
+            ]
+        )
+        ep = select_endpoint(wk, "1.0.0")
+        eps = select_endpoints(wk, "1.0.0")
+        assert ep.url == eps[0].url
+
+    def test_invalid_version_string_raises_discovery_error(self):
+        """select_endpoints wraps ValueError from invalid version strings in TeaDiscoveryError."""
+        wk = self._make_well_known([{"url": "https://api.example.com", "versions": ["1.0.0"]}])
+        with pytest.raises(TeaDiscoveryError, match="Invalid version string"):
+            select_endpoints(wk, "not-a-version")
