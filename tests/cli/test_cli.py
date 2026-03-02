@@ -6,9 +6,9 @@ import re
 import pytest
 import responses
 
-typer = pytest.importorskip("typer", reason="typer not installed (install libtea[cli])")
+click = pytest.importorskip("click", reason="click not installed (install libtea[cli])")
 
-from typer.testing import CliRunner  # noqa: E402
+from click.testing import CliRunner  # noqa: E402
 
 import libtea.cli  # noqa: E402
 from libtea.cli import app  # noqa: E402
@@ -33,7 +33,7 @@ def _reset_cli_flags():
 
 
 class TestCliEntryPoint:
-    """P0-1: Entry point wrapper handles missing typer gracefully."""
+    """P0-1: Entry point wrapper handles missing click gracefully."""
 
     def test_entry_point_importable(self):
         from libtea._cli_entry import main
@@ -672,10 +672,11 @@ class TestCLIInspectGetComponentFallback:
         responses.get(f"{BASE_URL}/component/{comp_uuid}/releases", status=500)
         result = runner.invoke(app, ["--json", "inspect", tei, "--base-url", BASE_URL])
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        data = json.loads(result.stdout)
         comp = data[0]["components"][0]
         assert comp["name"] == "Broken Component"
         assert "resolvedRelease" not in comp
+        assert "Warning: could not resolve releases for component" in result.stderr
 
 
 class TestCLITeiAutoDiscovery:
@@ -711,13 +712,13 @@ class TestCLIEntryPointErrors:
     """Test _cli_entry.py error handling."""
 
     def test_cli_entry_import_error(self):
-        """Test that _cli_entry handles missing typer gracefully."""
+        """Test that _cli_entry handles missing click gracefully."""
         from libtea._cli_entry import main
 
         assert callable(main)
 
     def test_cli_entry_main_invokes_app(self):
-        """Test that main() calls app() when typer is available."""
+        """Test that main() calls app() when click is available."""
         from unittest.mock import patch
 
         with patch("libtea.cli.app") as mock_app:
@@ -772,7 +773,7 @@ class TestCLIDebugFlag:
         )
         result = runner.invoke(app, ["--debug", "--json", "get-product", uuid, "--base-url", BASE_URL])
         assert result.exit_code == 0
-        # Debug output goes to stderr; typer CliRunner captures both in output
+        # Debug output goes to stderr; click CliRunner captures both in output
         combined = result.output + (result.stderr if hasattr(result, "stderr") else "")
         # Should still produce valid JSON on stdout
         assert "Test Product" in combined
@@ -1249,7 +1250,7 @@ class TestJsonListOutput:
 class TestCliEntryImportError:
     """Coverage for _cli_entry.py ImportError branch."""
 
-    def test_missing_typer_prints_install_hint(self):
+    def test_missing_click_prints_install_hint(self):
         import subprocess
         import sys
 
@@ -1257,7 +1258,7 @@ class TestCliEntryImportError:
             [
                 sys.executable,
                 "-c",
-                "import sys; sys.modules['typer'] = None; from libtea._cli_entry import main; main()",
+                "import sys; sys.modules['click'] = None; from libtea._cli_entry import main; main()",
             ],
             capture_output=True,
             text=True,

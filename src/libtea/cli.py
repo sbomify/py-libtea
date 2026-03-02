@@ -1,19 +1,20 @@
 """CLI for the Transparency Exchange API.
 
-Provides the ``tea-cli`` command backed by typer. Each subcommand maps
+Provides the ``tea-cli`` command backed by click. Each subcommand maps
 to a :class:`~libtea.client.TeaClient` method and outputs rich-formatted
 tables and panels by default (or JSON when ``--json`` is specified).
 All commands accept ``--base-url`` / ``--domain`` for server selection,
 and ``--token`` / ``--auth`` for authentication.
 """
 
+import functools
 import json
 import logging
 import sys
 from pathlib import Path
-from typing import Annotated, Any, NoReturn
+from typing import Any, NoReturn
 
-import typer
+import click
 from pydantic import BaseModel
 
 from libtea.client import TEA_SPEC_VERSION, TeaClient
@@ -29,21 +30,37 @@ from libtea.models import (
 
 logger = logging.getLogger("libtea")
 
-app = typer.Typer(help="TEA (Transparency Exchange API) CLI client.", no_args_is_help=True)
-
 _json_output: bool = False
 
-# --- Shared options ---
 
-_base_url_opt = typer.Option(envvar="TEA_BASE_URL", help="TEA server base URL")
-_token_opt = typer.Option(
-    envvar="TEA_TOKEN", help="Bearer token (prefer TEA_TOKEN env var to avoid shell history exposure)"
-)
-_auth_opt = typer.Option(envvar="TEA_AUTH", help="Basic auth as USER:PASSWORD (prefer TEA_AUTH env var)")
-_domain_opt = typer.Option(help="Discover server from domain's .well-known/tea")
-_timeout_opt = typer.Option(help="Request timeout in seconds")
-_use_http_opt = typer.Option(help="Use HTTP instead of HTTPS for discovery")
-_port_opt = typer.Option(help="Port for well-known resolution")
+# --- Shared options decorator ---
+
+
+def shared_options(fn):  # type: ignore[no-untyped-def]
+    """Apply the 7 common CLI options to a command function."""
+
+    @click.option("--port", type=int, default=None, help="Port for well-known resolution")
+    @click.option("--use-http", is_flag=True, help="Use HTTP instead of HTTPS for discovery")
+    @click.option("--timeout", type=click.FloatRange(min=0.1), default=30.0, help="Request timeout in seconds")
+    @click.option("--domain", default=None, help="Discover server from domain's .well-known/tea")
+    @click.option(
+        "--auth", envvar="TEA_AUTH", default=None, help="Basic auth as USER:PASSWORD (prefer TEA_AUTH env var)"
+    )
+    @click.option(
+        "--token",
+        envvar="TEA_TOKEN",
+        default=None,
+        help="Bearer token (prefer TEA_TOKEN env var to avoid shell history exposure)",
+    )
+    @click.option("--base-url", envvar="TEA_BASE_URL", default=None, help="TEA server base URL")
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+# --- Helper functions ---
 
 
 def _parse_basic_auth(auth: str | None) -> tuple[str, str] | None:
@@ -70,7 +87,8 @@ def _domain_from_tei(tei: str | None) -> str | None:
     try:
         _, domain, _ = parse_tei(tei)
         return domain
-    except TeaDiscoveryError:
+    except TeaDiscoveryError as exc:
+        logger.debug("Could not extract domain from TEI %r: %s", tei, exc)
         return None
 
 
@@ -99,7 +117,8 @@ def _build_client(
     try:
         if base_url:
             return TeaClient(base_url=base_url, token=token, basic_auth=basic_auth, timeout=timeout)
-        assert domain is not None
+        if domain is None:  # pragma: no cover — unreachable; _error() above guarantees non-None
+            _error("Internal error: domain is unexpectedly None")
         scheme = "http" if use_http else "https"
         return TeaClient.from_well_known(
             domain, token=token, basic_auth=basic_auth, timeout=timeout, scheme=scheme, port=port
@@ -131,24 +150,50 @@ def _output(data: Any, *, command: str | None = None) -> None:
 
 def _error(message: str) -> NoReturn:
     """Print an error message to stderr and exit with code 1."""
-    print(f"Error: {message}", file=sys.stderr)
-    raise typer.Exit(1)
+    try:
+        print(f"Error: {message}", file=sys.stderr)
+    except OSError:
+        pass
+    raise SystemExit(1)
+
+
+# --- Main group ---
+
+
+@click.group(help="TEA (Transparency Exchange API) CLI client.")
+@click.version_option(
+    package_name="libtea",
+    prog_name="tea-cli",
+    message=f"%(prog)s %(version)s (TEA spec {TEA_SPEC_VERSION})",
+)
+@click.option("--json", "output_json", is_flag=True, help="Output raw JSON instead of rich-formatted tables")
+@click.option("--debug", "-d", is_flag=True, help="Show debug output (HTTP requests, timing)")
+def app(output_json: bool, debug: bool) -> None:
+    """TEA (Transparency Exchange API) CLI client."""
+    global _json_output  # noqa: PLW0603
+    _json_output = output_json
+    if debug:
+        logging.basicConfig(format="%(levelname)s %(name)s: %(message)s", stream=sys.stderr)
+        logging.getLogger("libtea").setLevel(logging.DEBUG)
 
 
 # --- Commands ---
 
 
 @app.command()
+@click.argument("tei")
+@click.option("--quiet", "-q", is_flag=True, help="Output only UUIDs, one per line")
+@shared_options
 def discover(
     tei: str,
-    quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Output only UUIDs, one per line")] = False,
-    base_url: Annotated[str | None, _base_url_opt] = None,
-    token: Annotated[str | None, _token_opt] = None,
-    auth: Annotated[str | None, _auth_opt] = None,
-    domain: Annotated[str | None, _domain_opt] = None,
-    timeout: Annotated[float, _timeout_opt] = 30.0,
-    use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[int | None, _port_opt] = None,
+    quiet: bool,
+    base_url: str | None,
+    token: str | None,
+    auth: str | None,
+    domain: str | None,
+    timeout: float,
+    use_http: bool,
+    port: int | None,
 ) -> None:
     """Resolve a TEI to product release UUID(s)."""
     try:
@@ -164,18 +209,23 @@ def discover(
 
 
 @app.command("search-products")
+@click.option("--id-type", required=True, help="Identifier type (CPE, TEI, PURL)")
+@click.option("--id-value", required=True, help="Identifier value")
+@click.option("--page-offset", type=int, default=0, help="Page offset")
+@click.option("--page-size", type=int, default=100, help="Page size")
+@shared_options
 def search_products(
-    id_type: Annotated[str, typer.Option("--id-type", help="Identifier type (CPE, TEI, PURL)")],
-    id_value: Annotated[str, typer.Option("--id-value", help="Identifier value")],
-    page_offset: Annotated[int, typer.Option("--page-offset", help="Page offset")] = 0,
-    page_size: Annotated[int, typer.Option("--page-size", help="Page size")] = 100,
-    base_url: Annotated[str | None, _base_url_opt] = None,
-    token: Annotated[str | None, _token_opt] = None,
-    auth: Annotated[str | None, _auth_opt] = None,
-    domain: Annotated[str | None, _domain_opt] = None,
-    timeout: Annotated[float, _timeout_opt] = 30.0,
-    use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[int | None, _port_opt] = None,
+    id_type: str,
+    id_value: str,
+    page_offset: int,
+    page_size: int,
+    base_url: str | None,
+    token: str | None,
+    auth: str | None,
+    domain: str | None,
+    timeout: float,
+    use_http: bool,
+    port: int | None,
 ) -> None:
     """Search for products by identifier."""
     try:
@@ -187,18 +237,23 @@ def search_products(
 
 
 @app.command("search-releases")
+@click.option("--id-type", required=True, help="Identifier type (CPE, TEI, PURL)")
+@click.option("--id-value", required=True, help="Identifier value")
+@click.option("--page-offset", type=int, default=0, help="Page offset")
+@click.option("--page-size", type=int, default=100, help="Page size")
+@shared_options
 def search_releases(
-    id_type: Annotated[str, typer.Option("--id-type", help="Identifier type (CPE, TEI, PURL)")],
-    id_value: Annotated[str, typer.Option("--id-value", help="Identifier value")],
-    page_offset: Annotated[int, typer.Option("--page-offset", help="Page offset")] = 0,
-    page_size: Annotated[int, typer.Option("--page-size", help="Page size")] = 100,
-    base_url: Annotated[str | None, _base_url_opt] = None,
-    token: Annotated[str | None, _token_opt] = None,
-    auth: Annotated[str | None, _auth_opt] = None,
-    domain: Annotated[str | None, _domain_opt] = None,
-    timeout: Annotated[float, _timeout_opt] = 30.0,
-    use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[int | None, _port_opt] = None,
+    id_type: str,
+    id_value: str,
+    page_offset: int,
+    page_size: int,
+    base_url: str | None,
+    token: str | None,
+    auth: str | None,
+    domain: str | None,
+    timeout: float,
+    use_http: bool,
+    port: int | None,
 ) -> None:
     """Search for product releases by identifier."""
     try:
@@ -210,15 +265,17 @@ def search_releases(
 
 
 @app.command("get-product")
+@click.argument("uuid")
+@shared_options
 def get_product(
     uuid: str,
-    base_url: Annotated[str | None, _base_url_opt] = None,
-    token: Annotated[str | None, _token_opt] = None,
-    auth: Annotated[str | None, _auth_opt] = None,
-    domain: Annotated[str | None, _domain_opt] = None,
-    timeout: Annotated[float, _timeout_opt] = 30.0,
-    use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[int | None, _port_opt] = None,
+    base_url: str | None,
+    token: str | None,
+    auth: str | None,
+    domain: str | None,
+    timeout: float,
+    use_http: bool,
+    port: int | None,
 ) -> None:
     """Get a product by UUID."""
     try:
@@ -230,18 +287,19 @@ def get_product(
 
 
 @app.command("get-release")
+@click.argument("uuid")
+@click.option("--component", is_flag=True, help="Get a component release instead of product release")
+@shared_options
 def get_release(
     uuid: str,
-    component: Annotated[
-        bool, typer.Option("--component", help="Get a component release instead of product release")
-    ] = False,
-    base_url: Annotated[str | None, _base_url_opt] = None,
-    token: Annotated[str | None, _token_opt] = None,
-    auth: Annotated[str | None, _auth_opt] = None,
-    domain: Annotated[str | None, _domain_opt] = None,
-    timeout: Annotated[float, _timeout_opt] = 30.0,
-    use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[int | None, _port_opt] = None,
+    component: bool,
+    base_url: str | None,
+    token: str | None,
+    auth: str | None,
+    domain: str | None,
+    timeout: float,
+    use_http: bool,
+    port: int | None,
 ) -> None:
     """Get a product or component release by UUID."""
     try:
@@ -257,19 +315,21 @@ def get_release(
 
 
 @app.command("get-collection")
+@click.argument("uuid")
+@click.option("--version", type=int, default=None, help="Collection version (default: latest)")
+@click.option("--component", is_flag=True, help="Get from component release instead of product release")
+@shared_options
 def get_collection(
     uuid: str,
-    version: Annotated[int | None, typer.Option("--version", help="Collection version (default: latest)")] = None,
-    component: Annotated[
-        bool, typer.Option("--component", help="Get from component release instead of product release")
-    ] = False,
-    base_url: Annotated[str | None, _base_url_opt] = None,
-    token: Annotated[str | None, _token_opt] = None,
-    auth: Annotated[str | None, _auth_opt] = None,
-    domain: Annotated[str | None, _domain_opt] = None,
-    timeout: Annotated[float, _timeout_opt] = 30.0,
-    use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[int | None, _port_opt] = None,
+    version: int | None,
+    component: bool,
+    base_url: str | None,
+    token: str | None,
+    auth: str | None,
+    domain: str | None,
+    timeout: float,
+    use_http: bool,
+    port: int | None,
 ) -> None:
     """Get a collection (latest or by version)."""
     try:
@@ -290,17 +350,21 @@ def get_collection(
 
 
 @app.command("get-product-releases")
+@click.argument("uuid")
+@click.option("--page-offset", type=int, default=0, help="Page offset")
+@click.option("--page-size", type=int, default=100, help="Page size")
+@shared_options
 def get_product_releases(
     uuid: str,
-    page_offset: Annotated[int, typer.Option("--page-offset", help="Page offset")] = 0,
-    page_size: Annotated[int, typer.Option("--page-size", help="Page size")] = 100,
-    base_url: Annotated[str | None, _base_url_opt] = None,
-    token: Annotated[str | None, _token_opt] = None,
-    auth: Annotated[str | None, _auth_opt] = None,
-    domain: Annotated[str | None, _domain_opt] = None,
-    timeout: Annotated[float, _timeout_opt] = 30.0,
-    use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[int | None, _port_opt] = None,
+    page_offset: int,
+    page_size: int,
+    base_url: str | None,
+    token: str | None,
+    auth: str | None,
+    domain: str | None,
+    timeout: float,
+    use_http: bool,
+    port: int | None,
 ) -> None:
     """List releases for a product UUID."""
     try:
@@ -312,15 +376,17 @@ def get_product_releases(
 
 
 @app.command("get-component")
+@click.argument("uuid")
+@shared_options
 def get_component(
     uuid: str,
-    base_url: Annotated[str | None, _base_url_opt] = None,
-    token: Annotated[str | None, _token_opt] = None,
-    auth: Annotated[str | None, _auth_opt] = None,
-    domain: Annotated[str | None, _domain_opt] = None,
-    timeout: Annotated[float, _timeout_opt] = 30.0,
-    use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[int | None, _port_opt] = None,
+    base_url: str | None,
+    token: str | None,
+    auth: str | None,
+    domain: str | None,
+    timeout: float,
+    use_http: bool,
+    port: int | None,
 ) -> None:
     """Get a component by UUID."""
     try:
@@ -332,15 +398,17 @@ def get_component(
 
 
 @app.command("get-component-releases")
+@click.argument("uuid")
+@shared_options
 def get_component_releases(
     uuid: str,
-    base_url: Annotated[str | None, _base_url_opt] = None,
-    token: Annotated[str | None, _token_opt] = None,
-    auth: Annotated[str | None, _auth_opt] = None,
-    domain: Annotated[str | None, _domain_opt] = None,
-    timeout: Annotated[float, _timeout_opt] = 30.0,
-    use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[int | None, _port_opt] = None,
+    base_url: str | None,
+    token: str | None,
+    auth: str | None,
+    domain: str | None,
+    timeout: float,
+    use_http: bool,
+    port: int | None,
 ) -> None:
     """List releases for a component UUID."""
     try:
@@ -352,18 +420,19 @@ def get_component_releases(
 
 
 @app.command("list-collections")
+@click.argument("uuid")
+@click.option("--component", is_flag=True, help="List collections for a component release instead of product release")
+@shared_options
 def list_collections(
     uuid: str,
-    component: Annotated[
-        bool, typer.Option("--component", help="List collections for a component release instead of product release")
-    ] = False,
-    base_url: Annotated[str | None, _base_url_opt] = None,
-    token: Annotated[str | None, _token_opt] = None,
-    auth: Annotated[str | None, _auth_opt] = None,
-    domain: Annotated[str | None, _domain_opt] = None,
-    timeout: Annotated[float, _timeout_opt] = 30.0,
-    use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[int | None, _port_opt] = None,
+    component: bool,
+    base_url: str | None,
+    token: str | None,
+    auth: str | None,
+    domain: str | None,
+    timeout: float,
+    use_http: bool,
+    port: int | None,
 ) -> None:
     """List all collection versions for a release UUID."""
     try:
@@ -378,22 +447,23 @@ def list_collections(
 
 
 @app.command("get-cle")
+@click.argument("uuid")
+@click.option(
+    "--entity",
+    default="product-release",
+    help="Entity type: product, product-release, component, or component-release",
+)
+@shared_options
 def get_cle(
     uuid: str,
-    entity: Annotated[
-        str,
-        typer.Option(
-            "--entity",
-            help="Entity type: product, product-release, component, or component-release",
-        ),
-    ] = "product-release",
-    base_url: Annotated[str | None, _base_url_opt] = None,
-    token: Annotated[str | None, _token_opt] = None,
-    auth: Annotated[str | None, _auth_opt] = None,
-    domain: Annotated[str | None, _domain_opt] = None,
-    timeout: Annotated[float, _timeout_opt] = 30.0,
-    use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[int | None, _port_opt] = None,
+    entity: str,
+    base_url: str | None,
+    token: str | None,
+    auth: str | None,
+    domain: str | None,
+    timeout: float,
+    use_http: bool,
+    port: int | None,
 ) -> None:
     """Get Common Lifecycle Enumeration (CLE) for an entity."""
     entity_methods = {
@@ -413,15 +483,17 @@ def get_cle(
 
 
 @app.command("get-artifact")
+@click.argument("uuid")
+@shared_options
 def get_artifact(
     uuid: str,
-    base_url: Annotated[str | None, _base_url_opt] = None,
-    token: Annotated[str | None, _token_opt] = None,
-    auth: Annotated[str | None, _auth_opt] = None,
-    domain: Annotated[str | None, _domain_opt] = None,
-    timeout: Annotated[float, _timeout_opt] = 30.0,
-    use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[int | None, _port_opt] = None,
+    base_url: str | None,
+    token: str | None,
+    auth: str | None,
+    domain: str | None,
+    timeout: float,
+    use_http: bool,
+    port: int | None,
 ) -> None:
     """Get artifact metadata by UUID."""
     try:
@@ -433,20 +505,23 @@ def get_artifact(
 
 
 @app.command()
+@click.argument("url")
+@click.argument("dest", type=click.Path())
+@click.option("--checksum", multiple=True, help="Checksum as ALG:VALUE (repeatable)")
+@click.option("--max-download-bytes", type=click.IntRange(min=1), default=None, help="Maximum download size in bytes")
+@shared_options
 def download(
     url: str,
-    dest: Path,
-    checksum: Annotated[list[str] | None, typer.Option("--checksum", help="Checksum as ALG:VALUE (repeatable)")] = None,
-    max_download_bytes: Annotated[
-        int | None, typer.Option("--max-download-bytes", help="Maximum download size in bytes")
-    ] = None,
-    base_url: Annotated[str | None, _base_url_opt] = None,
-    token: Annotated[str | None, _token_opt] = None,
-    auth: Annotated[str | None, _auth_opt] = None,
-    domain: Annotated[str | None, _domain_opt] = None,
-    timeout: Annotated[float, _timeout_opt] = 30.0,
-    use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[int | None, _port_opt] = None,
+    dest: str,
+    checksum: tuple[str, ...],
+    max_download_bytes: int | None,
+    base_url: str | None,
+    token: str | None,
+    auth: str | None,
+    domain: str | None,
+    timeout: float,
+    use_http: bool,
+    port: int | None,
 ) -> None:
     """Download an artifact file with optional checksum verification."""
     checksums = None
@@ -469,26 +544,31 @@ def download(
     try:
         with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
             result = client.download_artifact(
-                url, dest, verify_checksums=checksums, max_download_bytes=max_download_bytes
+                url, Path(dest), verify_checksums=checksums, max_download_bytes=max_download_bytes
             )
         print(f"Downloaded to {result}", file=sys.stderr)
     except TeaError as exc:
         _error(str(exc))
+    except OSError as exc:
+        _error(f"I/O error: {exc}")
 
 
 @app.command()
+@click.argument("tei")
+@click.option(
+    "--max-components", type=click.IntRange(min=1), default=50, help="Maximum number of components to fetch per release"
+)
+@shared_options
 def inspect(
     tei: str,
-    max_components: Annotated[
-        int, typer.Option("--max-components", min=1, help="Maximum number of components to fetch per release")
-    ] = 50,
-    base_url: Annotated[str | None, _base_url_opt] = None,
-    token: Annotated[str | None, _token_opt] = None,
-    auth: Annotated[str | None, _auth_opt] = None,
-    domain: Annotated[str | None, _domain_opt] = None,
-    timeout: Annotated[float, _timeout_opt] = 30.0,
-    use_http: Annotated[bool, _use_http_opt] = False,
-    port: Annotated[int | None, _port_opt] = None,
+    max_components: int,
+    base_url: str | None,
+    token: str | None,
+    auth: str | None,
+    domain: str | None,
+    timeout: float,
+    use_http: bool,
+    port: int | None,
 ) -> None:
     """Full flow: TEI -> discovery -> releases -> artifacts."""
     try:
@@ -515,6 +595,10 @@ def inspect(
                                 comp_data["resolvedNote"] = "latest release (not pinned)"
                         except TeaError as exc:
                             logger.debug("Could not resolve releases for component %s: %s", comp_ref.uuid, exc)
+                            print(
+                                f"Warning: could not resolve releases for component {comp_ref.uuid}: {exc}",
+                                file=sys.stderr,
+                            )
                         components.append(comp_data)
                 truncated = len(pr.components) > max_components
                 entry: dict[str, Any] = {
@@ -534,30 +618,3 @@ def inspect(
             _output(result, command="inspect")
     except TeaError as exc:
         _error(str(exc))
-
-
-def _version_callback(value: bool) -> None:
-    """Eager callback for ``--version`` that prints version info and exits."""
-    if value:
-        from libtea import __version__
-
-        print(f"tea-cli {__version__} (TEA spec {TEA_SPEC_VERSION})")
-        raise typer.Exit()
-
-
-@app.callback()
-def main(
-    version: Annotated[
-        bool | None, typer.Option("--version", callback=_version_callback, is_eager=True, help="Show version")
-    ] = None,
-    output_json: Annotated[
-        bool, typer.Option("--json", help="Output raw JSON instead of rich-formatted tables")
-    ] = False,
-    debug: Annotated[bool, typer.Option("--debug", "-d", help="Show debug output (HTTP requests, timing)")] = False,
-) -> None:
-    """TEA (Transparency Exchange API) CLI client."""
-    global _json_output  # noqa: PLW0603
-    _json_output = output_json
-    if debug:
-        logging.basicConfig(format="%(levelname)s %(name)s: %(message)s", stream=sys.stderr)
-        logging.getLogger("libtea").setLevel(logging.DEBUG)

@@ -343,14 +343,14 @@ tea-cli get-cle <uuid> --entity component-release --domain trust.sbomify.com
 ### Shell completion
 
 ```bash
-# Bash
-tea-cli --install-completion bash
+# Bash (add to ~/.bashrc)
+eval "$(_TEA_CLI_COMPLETE=bash_source tea-cli)"
 
-# Zsh
-tea-cli --install-completion zsh
+# Zsh (add to ~/.zshrc)
+eval "$(_TEA_CLI_COMPLETE=zsh_source tea-cli)"
 
-# Fish
-tea-cli --install-completion fish
+# Fish (add to ~/.config/fish/completions/tea-cli.fish)
+_TEA_CLI_COMPLETE=fish_source tea-cli | source
 ```
 
 ## Error handling
@@ -391,7 +391,7 @@ Using a bearer token over plaintext HTTP raises `ValueError` immediately — HTT
 - [Pydantic](https://docs.pydantic.dev/) >= 2.1.0 for data models
 - [semver](https://python-semver.readthedocs.io/) >= 3.0.4 for version selection
 
-Optional (for CLI): [typer](https://typer.tiangolo.com/) >= 0.12.0, [rich](https://rich.readthedocs.io/) >= 13.0.0
+Optional (for CLI): [click](https://click.palletsprojects.com/) >= 8.0, [rich](https://rich.readthedocs.io/) >= 13.0.0
 
 ## Not yet supported
 

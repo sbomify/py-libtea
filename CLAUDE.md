@@ -45,9 +45,9 @@ _hashing.py          Checksum hash builders (SHA-*, BLAKE2b-*, MD5)
 discovery.py         TEI parsing, .well-known/tea fetching, SemVer endpoint selection, redirect SSRF protection
 models.py            Pydantic v2 models for all TEA domain objects (frozen, camelCase aliases)
 exceptions.py        Exception hierarchy (all inherit from TeaError)
-cli.py               typer CLI (optional dependency, thin wrapper over TeaClient)
+cli.py               click CLI (optional dependency, thin wrapper over TeaClient)
 _cli_fmt.py          Rich output formatters for all CLI commands (tables, panels, escape helpers)
-_cli_entry.py        Entry point wrapper that handles missing typer gracefully
+_cli_entry.py        Entry point wrapper that handles missing click gracefully
 ```
 
 **Key design patterns:**

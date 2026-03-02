@@ -4,7 +4,7 @@ from io import StringIO
 
 import pytest
 
-typer = pytest.importorskip("typer", reason="typer not installed (install libtea[cli])")
+click = pytest.importorskip("click", reason="click not installed (install libtea[cli])")
 
 from rich.console import Console  # noqa: E402
 

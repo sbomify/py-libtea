@@ -1,4 +1,4 @@
-"""Tests for libtea._cli_entry — does NOT require typer to be installed."""
+"""Tests for libtea._cli_entry — does NOT require click to be installed."""
 
 import sys
 from unittest.mock import patch
@@ -8,7 +8,7 @@ import pytest
 from libtea._cli_entry import main
 
 
-class TestCliEntryMissingTyper:
+class TestCliEntryMissingClick:
     """Exercise the ImportError branch (lines 10-12) in-process."""
 
     def test_prints_install_hint_and_exits(self, capsys):
