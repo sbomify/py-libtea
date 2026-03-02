@@ -63,9 +63,7 @@ def _validate_resolved_ips(hostname: str) -> None:
         try:
             addr = ipaddress.ip_address(resolved_ip)
             if _is_internal_ip(addr):
-                raise TeaValidationError(
-                    f"Artifact download URL hostname {hostname!r} resolves to private/internal IP: {resolved_ip}"
-                )
+                raise TeaValidationError(f"URL hostname {hostname!r} resolves to private/internal IP: {resolved_ip}")
         except ValueError:
             pass
 
@@ -74,18 +72,18 @@ def _validate_download_url(url: str) -> None:
     """Reject download URLs that use non-HTTP schemes or target internal networks."""
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
-        raise TeaValidationError(f"Artifact download URL must use http or https scheme, got {parsed.scheme!r}")
+        raise TeaValidationError(f"URL must use http or https scheme, got {parsed.scheme!r}")
     if not parsed.hostname:
-        raise TeaValidationError(f"Artifact download URL must include a hostname: {url!r}")
+        raise TeaValidationError(f"URL must include a hostname: {url!r}")
 
     hostname = parsed.hostname.lower()
     if hostname in _BLOCKED_HOSTNAMES:
-        raise TeaValidationError(f"Artifact download URL must not target internal hosts: {hostname!r}")
+        raise TeaValidationError(f"URL must not target internal hosts: {hostname!r}")
 
     try:
         addr = ipaddress.ip_address(hostname)
         if _is_internal_ip(addr):
-            raise TeaValidationError(f"Artifact download URL must not target private/internal IP: {hostname!r}")
+            raise TeaValidationError(f"URL must not target private/internal IP: {hostname!r}")
     except ValueError:
         # Not an IP literal — resolve hostname and check resolved IPs (DNS rebinding protection)
         _validate_resolved_ips(hostname)

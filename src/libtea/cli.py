@@ -143,8 +143,10 @@ def _output(data: Any, *, command: str | None = None) -> None:
         json.dump(data, sys.stdout, indent=2, default=str)
         print()
     else:
-        from libtea._cli_fmt import format_output
-
+        try:
+            from libtea._cli_fmt import format_output
+        except ImportError:
+            _error("Rich output requires the 'rich' package. Install with: pip install 'libtea[cli]'")
         format_output(data, command=command)
 
 
