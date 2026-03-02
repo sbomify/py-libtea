@@ -450,8 +450,9 @@ def list_collections(
 @click.argument("uuid")
 @click.option(
     "--entity",
+    type=click.Choice(["product", "product-release", "component", "component-release"]),
     default="product-release",
-    help="Entity type: product, product-release, component, or component-release",
+    help="Entity type",
 )
 @shared_options
 def get_cle(
@@ -472,8 +473,6 @@ def get_cle(
         "component": "get_component_cle",
         "component-release": "get_component_release_cle",
     }
-    if entity not in entity_methods:
-        _error(f"Invalid --entity: {entity!r}. Must be one of: {', '.join(entity_methods)}")
     try:
         with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
             result = getattr(client, entity_methods[entity])(uuid)

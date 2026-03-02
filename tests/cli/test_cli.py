@@ -1101,8 +1101,8 @@ class TestNewCommands:
     def test_get_cle_invalid_entity(self):
         uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
         result = runner.invoke(app, ["get-cle", uuid, "--entity", "invalid", "--base-url", BASE_URL])
-        assert result.exit_code == 1
-        assert "Invalid --entity" in result.output
+        assert result.exit_code == 2
+        assert "Invalid value for '--entity'" in result.output
 
     @responses.activate
     def test_get_cle_default_entity_is_product_release(self):
