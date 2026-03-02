@@ -33,7 +33,7 @@ def _reset_cli_flags():
 
 
 class TestCliEntryPoint:
-    """P0-1: Entry point wrapper handles missing click gracefully."""
+    """P0-1: Entry point wrapper handles missing CLI extras gracefully."""
 
     def test_entry_point_importable(self):
         from libtea._cli_entry import main
@@ -712,7 +712,7 @@ class TestCLIEntryPointErrors:
     """Test _cli_entry.py error handling."""
 
     def test_cli_entry_import_error(self):
-        """Test that _cli_entry handles missing click gracefully."""
+        """Test that _cli_entry handles missing CLI extras gracefully."""
         from libtea._cli_entry import main
 
         assert callable(main)

@@ -1,4 +1,4 @@
-"""Tests for libtea._cli_entry — does NOT require click to be installed."""
+"""Tests for libtea._cli_entry — does NOT require CLI extras to be installed."""
 
 import sys
 from unittest.mock import patch
@@ -8,8 +8,8 @@ import pytest
 from libtea._cli_entry import main
 
 
-class TestCliEntryMissingClick:
-    """Exercise the ImportError branch (lines 10-12) in-process."""
+class TestCliEntryMissingDeps:
+    """Exercise the ImportError branch when CLI extras are not installed."""
 
     def test_prints_install_hint_and_exits(self, capsys):
         """When libtea.cli cannot be imported, main() prints a help message and exits 1."""

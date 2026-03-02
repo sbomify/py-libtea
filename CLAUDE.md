@@ -47,7 +47,7 @@ models.py            Pydantic v2 models for all TEA domain objects (frozen, came
 exceptions.py        Exception hierarchy (all inherit from TeaError)
 cli.py               click CLI (optional dependency, thin wrapper over TeaClient)
 _cli_fmt.py          Rich output formatters for all CLI commands (tables, panels, escape helpers)
-_cli_entry.py        Entry point wrapper that handles missing click gracefully
+_cli_entry.py        Entry point wrapper that handles missing CLI extras gracefully
 ```
 
 **Key design patterns:**

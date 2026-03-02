@@ -1,11 +1,11 @@
-"""Entry point wrapper for tea-cli that handles missing click gracefully."""
+"""Entry point wrapper for tea-cli that handles missing CLI extras gracefully."""
 
 import signal
 import sys
 
 
 def main() -> None:
-    """Launch the tea-cli app, or print a helpful error if click is not installed."""
+    """Launch the tea-cli app, or print a helpful error if CLI extras are not installed."""
     # Reset SIGPIPE so piping to head/grep exits silently instead of BrokenPipeError.
     if hasattr(signal, "SIGPIPE"):
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)
