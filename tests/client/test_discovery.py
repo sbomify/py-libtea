@@ -4,7 +4,7 @@ import responses
 from pydantic import ValidationError
 
 from libtea.discovery import _is_valid_domain, fetch_well_known, parse_tei, select_endpoint, select_endpoints
-from libtea.exceptions import TeaDiscoveryError, TeaInsecureTransportWarning
+from libtea.exceptions import TeaDiscoveryError
 from libtea.models import DiscoveryInfo, TeaEndpoint, TeaWellKnown, TeiType
 
 
@@ -271,21 +271,14 @@ class TestFetchWellKnownSsrfProtection:
         assert wk.schema_version == 1
 
     @responses.activate
-    def test_warns_on_https_to_http_downgrade(self):
-        """HTTPS→HTTP redirect should emit a warning."""
+    def test_rejects_https_to_http_downgrade(self):
+        """HTTPS→HTTP redirect should raise TeaDiscoveryError (not silently downgrade)."""
         responses.get(
             "https://example.com/.well-known/tea",
             status=301,
             headers={"Location": "http://other.example.com/.well-known/tea"},
         )
-        responses.get(
-            "http://other.example.com/.well-known/tea",
-            json={
-                "schemaVersion": 1,
-                "endpoints": [{"url": "https://api.example.com", "versions": ["1.0.0"]}],
-            },
-        )
-        with pytest.warns(TeaInsecureTransportWarning, match="downgraded from HTTPS to HTTP"):
+        with pytest.raises(TeaDiscoveryError, match="downgraded from HTTPS to HTTP"):
             fetch_well_known("example.com")
 
     @responses.activate
@@ -296,7 +289,8 @@ class TestFetchWellKnownSsrfProtection:
             status=302,
             headers={"Location": "http://169.254.169.254/latest/meta-data/"},
         )
-        with pytest.raises(TeaDiscoveryError, match="redirected to a blocked or disallowed URL"):
+        # HTTPS→HTTP downgrade is rejected before the SSRF check runs.
+        with pytest.raises(TeaDiscoveryError, match="downgraded from HTTPS to HTTP"):
             fetch_well_known("example.com")
 
     @responses.activate
@@ -307,7 +301,8 @@ class TestFetchWellKnownSsrfProtection:
             status=302,
             headers={"Location": "http://localhost/admin"},
         )
-        with pytest.raises(TeaDiscoveryError, match="redirected to a blocked or disallowed URL"):
+        # HTTPS→HTTP downgrade is rejected before the SSRF check runs.
+        with pytest.raises(TeaDiscoveryError, match="downgraded from HTTPS to HTTP"):
             fetch_well_known("example.com")
 
 

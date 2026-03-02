@@ -144,11 +144,10 @@ def fetch_well_known(
                     if hop_parsed.scheme not in ("http", "https"):
                         raise TeaDiscoveryError(f"Discovery redirected to unsupported scheme: {hop_parsed.scheme!r}")
                     if scheme == "https" and hop_parsed.scheme == "http":
-                        warnings.warn(
+                        raise TeaDiscoveryError(
                             f"Discovery for {domain} was downgraded from HTTPS to HTTP via redirect. "
-                            "This may indicate a misconfigured server.",
-                            TeaInsecureTransportWarning,
-                            stacklevel=2,
+                            "This may indicate a misconfigured server or a downgrade attack. "
+                            "Use scheme='http' explicitly if plaintext is intended."
                         )
                     try:
                         _validate_download_url(current_url)
