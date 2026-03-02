@@ -6,7 +6,6 @@ This module is an implementation detail. Public consumers should use
 
 import logging
 import warnings
-from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Self
@@ -44,26 +43,10 @@ def _get_package_version() -> str:
 USER_AGENT = f"py-libtea/{_get_package_version()} (hello@sbomify.com)"
 
 
-@dataclass(frozen=True)
-class MtlsConfig:
-    """Client certificate configuration for mutual TLS (mTLS).
-
-    Attributes:
-        client_cert: Path to the PEM-encoded client certificate.
-        client_key: Path to the PEM-encoded client private key.
-        ca_bundle: Optional path to a CA bundle for server certificate
-            verification. When ``None``, the system default CA store is used.
-    """
-
-    client_cert: Path
-    client_key: Path
-    ca_bundle: Path | None = None
-
-
 _MAX_DOWNLOAD_REDIRECTS = 10
 
 
-def probe_endpoint(url: str, timeout: float = 5.0, mtls: MtlsConfig | None = None) -> None:
+def probe_endpoint(url: str, timeout: float = 5.0) -> None:
     """Probe a URL to verify the server is reachable.
 
     Uses a standalone HEAD request with no auth and no retries so that
@@ -72,7 +55,6 @@ def probe_endpoint(url: str, timeout: float = 5.0, mtls: MtlsConfig | None = Non
     Args:
         url: Endpoint URL to probe.
         timeout: Request timeout in seconds.
-        mtls: Optional mutual TLS configuration for mTLS-only deployments.
 
     Raises:
         TeaConnectionError: If the endpoint is unreachable.
@@ -83,10 +65,6 @@ def probe_endpoint(url: str, timeout: float = 5.0, mtls: MtlsConfig | None = Non
         "allow_redirects": False,
         "headers": {"user-agent": USER_AGENT},
     }
-    if mtls:
-        kwargs["cert"] = (str(mtls.client_cert), str(mtls.client_key))
-        if mtls.ca_bundle:
-            kwargs["verify"] = str(mtls.ca_bundle)
     try:
         resp = requests.head(url, **kwargs)
         resp.close()
@@ -112,7 +90,6 @@ class TeaHttpClient:
         basic_auth: Optional ``(username, password)`` tuple for HTTP Basic auth.
             Mutually exclusive with ``token``. Rejected with plaintext HTTP.
         timeout: Request timeout in seconds (default 30).
-        mtls: Optional :class:`MtlsConfig` for mutual TLS authentication.
         max_retries: Number of retries on 5xx responses (default 3). Set to 0 to disable.
         backoff_factor: Exponential backoff factor between retries (default 0.5).
 
@@ -128,7 +105,6 @@ class TeaHttpClient:
         token: str | None = None,
         basic_auth: tuple[str, str] | None = None,
         timeout: float = 30.0,
-        mtls: MtlsConfig | None = None,
         max_retries: int = 3,
         backoff_factor: float = 0.5,
     ):
@@ -161,11 +137,6 @@ class TeaHttpClient:
             self._session.headers["authorization"] = f"Bearer {token}"
         elif basic_auth:
             self._session.auth = basic_auth
-
-        if mtls:
-            self._session.cert = (str(mtls.client_cert), str(mtls.client_key))
-            if mtls.ca_bundle:
-                self._session.verify = str(mtls.ca_bundle)
 
         retry = Retry(
             total=max_retries,

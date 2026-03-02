@@ -14,7 +14,7 @@ import requests
 from pydantic import ValidationError
 from semver import Version as _SemVer
 
-from libtea._http import USER_AGENT, MtlsConfig
+from libtea._http import USER_AGENT
 from libtea._security import _validate_download_url
 from libtea.exceptions import TeaDiscoveryError, TeaInsecureTransportWarning, TeaValidationError
 from libtea.models import TeaEndpoint, TeaWellKnown, TeiType
@@ -79,7 +79,6 @@ def fetch_well_known(
     timeout: float = 10.0,
     scheme: str = "https",
     port: int | None = None,
-    mtls: MtlsConfig | None = None,
 ) -> TeaWellKnown:
     """Fetch and parse the .well-known/tea discovery document from a domain.
 
@@ -89,7 +88,6 @@ def fetch_well_known(
         scheme: URL scheme, ``"https"`` (default) or ``"http"``.
         port: Optional port number. Default ports (443 for https, 80 for http)
             are omitted from the URL.
-        mtls: Optional mutual TLS configuration.
 
     Returns:
         Parsed well-known document with endpoint list.
@@ -119,10 +117,6 @@ def fetch_well_known(
         url = f"{scheme}://{domain}:{resolved_port}/.well-known/tea"
 
     kwargs: dict[str, Any] = {"timeout": timeout, "allow_redirects": False, "headers": {"user-agent": USER_AGENT}}
-    if mtls:
-        kwargs["cert"] = (str(mtls.client_cert), str(mtls.client_key))
-        if mtls.ca_bundle:
-            kwargs["verify"] = str(mtls.ca_bundle)
 
     logger.debug("Fetching well-known discovery document: %s", url)
     _max_discovery_redirects = 5

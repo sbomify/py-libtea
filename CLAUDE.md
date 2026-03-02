@@ -62,7 +62,7 @@ _cli_entry.py        Entry point wrapper that handles missing typer gracefully
 - `_raise_for_status()` uses bounded reads (201 bytes) for error body snippets to avoid memory issues on streaming responses
 - CLI formatters in `_cli_fmt.py` escape all server-controlled strings with `rich.markup.escape()` to prevent Rich markup injection
 
-**Auth**: Bearer token, basic auth, and mTLS (via `MtlsConfig` dataclass) are mutually configurable. Token and basic_auth are mutually exclusive. HTTP (non-TLS) with credentials is rejected.
+**Auth**: Bearer token and basic auth are supported. Token and basic_auth are mutually exclusive. HTTP (non-TLS) with credentials is rejected.
 
 ## Critical Implementation Rules
 
@@ -88,6 +88,6 @@ Key spec files: `spec/openapi.yaml`, `discovery/readme.md`, `auth/readme.md`
 ## Design Docs
 
 - `docs/plans/2025-02-25-tea-client-design.md` — v0.1.0 original design
-- `docs/plans/2026-02-25-v0.2.0-design.md` — v0.2.0 (CLE, SemVer, failover, mTLS, CLI)
+- `docs/plans/2026-02-25-v0.2.0-design.md` — v0.2.0 (CLE, SemVer, failover, CLI)
 - `docs/plans/2026-02-26-v0.3.0-design.md` — v0.3.0 (httpx migration, async client)
 - `docs/FUTURE.md` — Items blocked on external factors (Publisher API)

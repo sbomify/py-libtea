@@ -398,7 +398,7 @@ class TestCLIDiscoveryPath:
 
 
 class TestCLIAuthOptions:
-    """P1-4: Tests for --auth and mTLS CLI options."""
+    """P1-4: Tests for --auth CLI options."""
 
     @responses.activate
     def test_basic_auth_option(self):
@@ -414,34 +414,6 @@ class TestCLIAuthOptions:
     def test_invalid_auth_format(self):
         result = runner.invoke(
             app, ["get-product", "d4d9f54a-abcf-11ee-ac79-1a52914d44b1", "--base-url", BASE_URL, "--auth", "nopassword"]
-        )
-        assert result.exit_code == 1
-
-    def test_client_key_without_cert_errors(self):
-        result = runner.invoke(
-            app,
-            [
-                "get-product",
-                "d4d9f54a-abcf-11ee-ac79-1a52914d44b1",
-                "--base-url",
-                BASE_URL,
-                "--client-key",
-                "/tmp/key.pem",
-            ],
-        )
-        assert result.exit_code == 1
-
-    def test_client_cert_without_key_errors(self):
-        result = runner.invoke(
-            app,
-            [
-                "get-product",
-                "d4d9f54a-abcf-11ee-ac79-1a52914d44b1",
-                "--base-url",
-                BASE_URL,
-                "--client-cert",
-                "/tmp/cert.pem",
-            ],
         )
         assert result.exit_code == 1
 
@@ -1167,61 +1139,6 @@ class TestNewCommands:
         assert "get-component-releases" in result.output
         assert "list-collections" in result.output
         assert "get-cle" in result.output
-
-
-class TestMtlsCli:
-    """Coverage for _build_mtls success and error paths."""
-
-    def test_cert_without_key_errors(self):
-        result = runner.invoke(
-            app,
-            [
-                "get-product",
-                "d4d9f54a-abcf-11ee-ac79-1a52914d44b1",
-                "--base-url",
-                BASE_URL,
-                "--client-cert",
-                "/tmp/cert.pem",
-            ],
-        )
-        assert result.exit_code == 1
-        assert "--client-key" in _strip_ansi(result.output)
-
-    def test_key_without_cert_errors(self):
-        result = runner.invoke(
-            app,
-            [
-                "get-product",
-                "d4d9f54a-abcf-11ee-ac79-1a52914d44b1",
-                "--base-url",
-                BASE_URL,
-                "--client-key",
-                "/tmp/key.pem",
-            ],
-        )
-        assert result.exit_code == 1
-        assert "--client-cert" in _strip_ansi(result.output)
-
-    @responses.activate
-    def test_both_cert_and_key_succeeds(self):
-        responses.get(
-            f"{BASE_URL}/product/d4d9f54a-abcf-11ee-ac79-1a52914d44b1",
-            json={"uuid": "d4d9f54a-abcf-11ee-ac79-1a52914d44b1", "name": "Test", "identifiers": []},
-        )
-        result = runner.invoke(
-            app,
-            [
-                "get-product",
-                "d4d9f54a-abcf-11ee-ac79-1a52914d44b1",
-                "--base-url",
-                BASE_URL,
-                "--client-cert",
-                "/tmp/cert.pem",
-                "--client-key",
-                "/tmp/key.pem",
-            ],
-        )
-        assert result.exit_code == 0
 
 
 class TestCLIErrorHandlingCoverage:

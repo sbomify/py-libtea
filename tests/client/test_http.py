@@ -1,6 +1,5 @@
 import hashlib
 import warnings
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -9,7 +8,6 @@ import responses
 
 from libtea._http import (
     _MAX_DOWNLOAD_REDIRECTS,
-    MtlsConfig,
     TeaHttpClient,
     _get_package_version,
 )
@@ -341,14 +339,6 @@ class TestBasicAuth:
         client.close()
         assert client._session.auth is None
 
-    def test_close_clears_mtls_cert(self):
-        """P2-4: close() should clear mTLS cert references."""
-        mtls = MtlsConfig(client_cert=Path("/tmp/cert.pem"), client_key=Path("/tmp/key.pem"))
-        client = TeaHttpClient(base_url=BASE_URL, mtls=mtls)
-        assert client._session.cert is not None
-        client.close()
-        assert client._session.cert is None
-
     @responses.activate
     def test_basic_auth_not_sent_to_download(self, tmp_path):
         """Basic auth must NOT leak to artifact download URLs."""
@@ -357,28 +347,6 @@ class TestBasicAuth:
         with TeaHttpClient(base_url=BASE_URL, basic_auth=("user", "pass")) as client:
             client.download_with_hashes(url=artifact_url, dest=tmp_path / "test_dl.xml")
         assert "Authorization" not in responses.calls[0].request.headers
-
-
-class TestMtlsConfig:
-    def test_mtls_sets_cert_on_session(self):
-        mtls = MtlsConfig(client_cert=Path("/tmp/cert.pem"), client_key=Path("/tmp/key.pem"))
-        client = TeaHttpClient(base_url=BASE_URL, mtls=mtls)
-        assert client._session.cert == ("/tmp/cert.pem", "/tmp/key.pem")
-        client.close()
-
-    def test_mtls_with_ca_bundle(self):
-        mtls = MtlsConfig(
-            client_cert=Path("/tmp/cert.pem"), client_key=Path("/tmp/key.pem"), ca_bundle=Path("/tmp/ca.pem")
-        )
-        client = TeaHttpClient(base_url=BASE_URL, mtls=mtls)
-        assert client._session.verify == "/tmp/ca.pem"
-        client.close()
-
-    def test_mtls_without_ca_uses_default(self):
-        mtls = MtlsConfig(client_cert=Path("/tmp/cert.pem"), client_key=Path("/tmp/key.pem"))
-        client = TeaHttpClient(base_url=BASE_URL, mtls=mtls)
-        assert client._session.verify is True
-        client.close()
 
 
 class TestRetryConfig:

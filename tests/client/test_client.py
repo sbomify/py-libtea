@@ -1,10 +1,8 @@
-from pathlib import Path
-
 import pytest
 import requests
 import responses
 
-from libtea._http import MtlsConfig, probe_endpoint
+from libtea._http import probe_endpoint
 from libtea.client import TeaClient
 from libtea.exceptions import TeaConnectionError, TeaDiscoveryError, TeaServerError, TeaValidationError
 from libtea.models import (
@@ -686,40 +684,6 @@ class TestCLE:
         responses.get(f"{base_url}/product/{uuid}/cle", json={"bad": "data"})
         with pytest.raises(TeaValidationError, match="Invalid CLE response"):
             client.get_product_cle(uuid)
-
-
-class TestProbeEndpointMtls:
-    """probe_endpoint passes mTLS config to the standalone HEAD request."""
-
-    @responses.activate
-    def test_probe_with_mtls_config(self):
-        responses.head("https://api.example.com/v1", status=200)
-        mtls = MtlsConfig(client_cert=Path("/tmp/cert.pem"), client_key=Path("/tmp/key.pem"))
-        probe_endpoint("https://api.example.com/v1", mtls=mtls)  # should not raise
-
-    @responses.activate
-    def test_probe_with_mtls_ca_bundle(self):
-        responses.head("https://api.example.com/v1", status=200)
-        mtls = MtlsConfig(
-            client_cert=Path("/tmp/cert.pem"), client_key=Path("/tmp/key.pem"), ca_bundle=Path("/tmp/ca.pem")
-        )
-        probe_endpoint("https://api.example.com/v1", mtls=mtls)  # should not raise
-
-    @responses.activate
-    def test_from_well_known_passes_mtls_to_probe(self):
-        """from_well_known must propagate mTLS config to probe_endpoint."""
-        responses.get(
-            "https://example.com/.well-known/tea",
-            json={
-                "schemaVersion": 1,
-                "endpoints": [{"url": "https://api.example.com", "versions": ["0.3.0-beta.2"]}],
-            },
-        )
-        responses.head("https://api.example.com/v0.3.0-beta.2", status=200)
-        mtls = MtlsConfig(client_cert=Path("/tmp/cert.pem"), client_key=Path("/tmp/key.pem"))
-        client = TeaClient.from_well_known("example.com", mtls=mtls)
-        assert client is not None
-        client.close()
 
 
 class TestWeakChecksumWarning:

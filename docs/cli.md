@@ -41,9 +41,6 @@ Every command accepts the following options for server selection and authenticat
 | `--domain` *DOMAIN* | Discover server from the domain's `.well-known/tea` endpoint. The domain can also be auto-extracted from a TEI URN argument. |
 | `--token` *TOKEN* | Bearer token for authentication. Prefer the `TEA_TOKEN` environment variable to avoid exposing the token in shell history. |
 | `--auth` *USER:PASSWORD* | HTTP basic authentication credentials. Prefer the `TEA_AUTH` environment variable to avoid exposing credentials in shell history. Mutually exclusive with `--token`. |
-| `--client-cert` *PATH* | Path to client certificate for mutual TLS (mTLS). Must be used with `--client-key`. |
-| `--client-key` *PATH* | Path to client private key for mTLS. Must be used with `--client-cert`. |
-| `--ca-bundle` *PATH* | Path to CA bundle for mTLS server verification. |
 | `--timeout` *SECONDS* | Request timeout in seconds (default: 30). |
 | `--use-http` | Use HTTP instead of HTTPS for `.well-known/tea` discovery. Intended for local development only. |
 | `--port` *PORT* | Port for well-known resolution (overrides the default for the scheme). |
@@ -279,8 +276,6 @@ tea-cli get-cle [--entity TYPE] UUID
 
 **HTTP basic auth:** Pass via `--auth USER:PASSWORD` or `TEA_AUTH`. Requires HTTPS.
 
-**Mutual TLS (mTLS):** Pass certificate and key via `--client-cert` and `--client-key`. Optionally provide a CA bundle with `--ca-bundle`.
-
 Using credentials over plaintext HTTP raises an error. Use `--use-http` only for unauthenticated local development.
 
 ## Examples
@@ -337,15 +332,6 @@ tea-cli discover "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify"
 tea-cli get-product <product-uuid>
 ```
 
-Mutual TLS authentication:
-
-```bash
-tea-cli get-product <uuid> \
-    --domain trust.sbomify.com \
-    --client-cert client.pem \
-    --client-key client-key.pem \
-    --ca-bundle ca-bundle.pem
-```
 
 ## Exit Status
 

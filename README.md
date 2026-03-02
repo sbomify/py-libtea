@@ -21,7 +21,7 @@ TEA is an open standard for discovering and retrieving software transparency art
 - Common Lifecycle Enumeration (CLE) — ECMA-428 lifecycle events
 - Artifact download with on-the-fly checksum verification (MD5 through BLAKE2b)
 - Endpoint failover with SemVer-compatible version selection
-- Bearer token, HTTP basic auth, and mutual TLS (mTLS) authentication
+- Bearer token and HTTP basic auth authentication
 - Bearer token isolation — tokens are never sent to artifact download hosts
 - Typed Pydantic v2 models with full camelCase/snake_case conversion
 - Structured exception hierarchy with error context
@@ -217,24 +217,13 @@ with TeaClient.from_well_known("trust.sbomify.com") as client:
 ### Authentication
 
 ```python
-from libtea import TeaClient, MtlsConfig
-from pathlib import Path
+from libtea import TeaClient
 
 # Bearer token
 client = TeaClient.from_well_known("trust.sbomify.com", token="your-token")
 
 # HTTP basic auth
 client = TeaClient.from_well_known("trust.sbomify.com", basic_auth=("user", "password"))
-
-# Mutual TLS (mTLS)
-client = TeaClient.from_well_known(
-    "trust.sbomify.com",
-    mtls=MtlsConfig(
-        client_cert=Path("client.pem"),
-        client_key=Path("client-key.pem"),
-        ca_bundle=Path("ca-bundle.pem"),  # optional
-    ),
-)
 ```
 
 ## CLI

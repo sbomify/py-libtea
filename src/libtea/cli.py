@@ -16,7 +16,6 @@ from typing import Annotated, Any, NoReturn
 import typer
 from pydantic import BaseModel
 
-from libtea._http import MtlsConfig
 from libtea.client import TEA_SPEC_VERSION, TeaClient
 from libtea.discovery import parse_tei
 from libtea.exceptions import TeaDiscoveryError, TeaError
@@ -45,9 +44,6 @@ _domain_opt = typer.Option(help="Discover server from domain's .well-known/tea")
 _timeout_opt = typer.Option(help="Request timeout in seconds")
 _use_http_opt = typer.Option(help="Use HTTP instead of HTTPS for discovery")
 _port_opt = typer.Option(help="Port for well-known resolution")
-_client_cert_opt = typer.Option(help="Path to client certificate for mTLS")
-_client_key_opt = typer.Option(help="Path to client private key for mTLS")
-_ca_bundle_opt = typer.Option(help="Path to CA bundle for mTLS server verification")
 
 
 def _parse_basic_auth(auth: str | None) -> tuple[str, str] | None:
@@ -62,27 +58,6 @@ def _parse_basic_auth(auth: str | None) -> tuple[str, str] | None:
         _error("Invalid --auth format. Expected USER:PASSWORD")
     user, password = auth.split(":", 1)
     return (user, password)
-
-
-def _build_mtls(client_cert: str | None, client_key: str | None, ca_bundle: str | None) -> MtlsConfig | None:
-    """Build an :class:`~libtea.MtlsConfig` from CLI options, or return ``None``.
-
-    Both ``--client-cert`` and ``--client-key`` must be provided together.
-    Calls :func:`_error` if only one is specified.
-    """
-    if not client_cert and not client_key:
-        return None
-    if client_cert and not client_key:
-        _error("--client-key is required when --client-cert is specified")
-    if client_key and not client_cert:
-        _error("--client-cert is required when --client-key is specified")
-    assert client_cert is not None
-    assert client_key is not None
-    return MtlsConfig(
-        client_cert=Path(client_cert),
-        client_key=Path(client_key),
-        ca_bundle=Path(ca_bundle) if ca_bundle else None,
-    )
 
 
 def _domain_from_tei(tei: str | None) -> str | None:
@@ -107,9 +82,6 @@ def _build_client(
     use_http: bool,
     port: int | None,
     auth: str | None = None,
-    client_cert: str | None = None,
-    client_key: str | None = None,
-    ca_bundle: str | None = None,
     tei: str | None = None,
 ) -> TeaClient:
     """Build a TeaClient from CLI options.
@@ -124,13 +96,12 @@ def _build_client(
     if not base_url and not domain:
         _error("Must specify either --base-url or --domain (or provide a TEI to auto-discover)")
     basic_auth = _parse_basic_auth(auth)
-    mtls = _build_mtls(client_cert, client_key, ca_bundle)
     if base_url:
-        return TeaClient(base_url=base_url, token=token, basic_auth=basic_auth, timeout=timeout, mtls=mtls)
+        return TeaClient(base_url=base_url, token=token, basic_auth=basic_auth, timeout=timeout)
     assert domain is not None
     scheme = "http" if use_http else "https"
     return TeaClient.from_well_known(
-        domain, token=token, basic_auth=basic_auth, timeout=timeout, scheme=scheme, port=port, mtls=mtls
+        domain, token=token, basic_auth=basic_auth, timeout=timeout, scheme=scheme, port=port
     )
 
 
@@ -175,15 +146,10 @@ def discover(
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
     port: Annotated[int | None, _port_opt] = None,
-    client_cert: Annotated[str | None, _client_cert_opt] = None,
-    client_key: Annotated[str | None, _client_key_opt] = None,
-    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ) -> None:
     """Resolve a TEI to product release UUID(s)."""
     try:
-        with _build_client(
-            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle, tei=tei
-        ) as client:
+        with _build_client(base_url, token, domain, timeout, use_http, port, auth, tei=tei) as client:
             result = client.discover(tei)
         if quiet:
             for d in result:
@@ -207,15 +173,10 @@ def search_products(
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
     port: Annotated[int | None, _port_opt] = None,
-    client_cert: Annotated[str | None, _client_cert_opt] = None,
-    client_key: Annotated[str | None, _client_key_opt] = None,
-    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ) -> None:
     """Search for products by identifier."""
     try:
-        with _build_client(
-            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle
-        ) as client:
+        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
             result = client.search_products(id_type, id_value, page_offset=page_offset, page_size=page_size)
         _output(result)
     except TeaError as exc:
@@ -235,15 +196,10 @@ def search_releases(
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
     port: Annotated[int | None, _port_opt] = None,
-    client_cert: Annotated[str | None, _client_cert_opt] = None,
-    client_key: Annotated[str | None, _client_key_opt] = None,
-    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ) -> None:
     """Search for product releases by identifier."""
     try:
-        with _build_client(
-            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle
-        ) as client:
+        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
             result = client.search_product_releases(id_type, id_value, page_offset=page_offset, page_size=page_size)
         _output(result)
     except TeaError as exc:
@@ -260,15 +216,10 @@ def get_product(
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
     port: Annotated[int | None, _port_opt] = None,
-    client_cert: Annotated[str | None, _client_cert_opt] = None,
-    client_key: Annotated[str | None, _client_key_opt] = None,
-    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ) -> None:
     """Get a product by UUID."""
     try:
-        with _build_client(
-            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle
-        ) as client:
+        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
             result = client.get_product(uuid)
         _output(result)
     except TeaError as exc:
@@ -288,15 +239,10 @@ def get_release(
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
     port: Annotated[int | None, _port_opt] = None,
-    client_cert: Annotated[str | None, _client_cert_opt] = None,
-    client_key: Annotated[str | None, _client_key_opt] = None,
-    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ) -> None:
     """Get a product or component release by UUID."""
     try:
-        with _build_client(
-            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle
-        ) as client:
+        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
             result: ProductRelease | ComponentReleaseWithCollection
             if component:
                 result = client.get_component_release(uuid)
@@ -321,15 +267,10 @@ def get_collection(
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
     port: Annotated[int | None, _port_opt] = None,
-    client_cert: Annotated[str | None, _client_cert_opt] = None,
-    client_key: Annotated[str | None, _client_key_opt] = None,
-    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ) -> None:
     """Get a collection (latest or by version)."""
     try:
-        with _build_client(
-            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle
-        ) as client:
+        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
             if component:
                 if version is not None:
                     result = client.get_component_release_collection(uuid, version)
@@ -357,15 +298,10 @@ def get_product_releases(
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
     port: Annotated[int | None, _port_opt] = None,
-    client_cert: Annotated[str | None, _client_cert_opt] = None,
-    client_key: Annotated[str | None, _client_key_opt] = None,
-    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ) -> None:
     """List releases for a product UUID."""
     try:
-        with _build_client(
-            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle
-        ) as client:
+        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
             result = client.get_product_releases(uuid, page_offset=page_offset, page_size=page_size)
         _output(result)
     except TeaError as exc:
@@ -382,15 +318,10 @@ def get_component(
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
     port: Annotated[int | None, _port_opt] = None,
-    client_cert: Annotated[str | None, _client_cert_opt] = None,
-    client_key: Annotated[str | None, _client_key_opt] = None,
-    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ) -> None:
     """Get a component by UUID."""
     try:
-        with _build_client(
-            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle
-        ) as client:
+        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
             result = client.get_component(uuid)
         _output(result)
     except TeaError as exc:
@@ -407,15 +338,10 @@ def get_component_releases(
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
     port: Annotated[int | None, _port_opt] = None,
-    client_cert: Annotated[str | None, _client_cert_opt] = None,
-    client_key: Annotated[str | None, _client_key_opt] = None,
-    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ) -> None:
     """List releases for a component UUID."""
     try:
-        with _build_client(
-            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle
-        ) as client:
+        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
             result = client.get_component_releases(uuid)
         _output(result, command="releases")
     except TeaError as exc:
@@ -435,15 +361,10 @@ def list_collections(
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
     port: Annotated[int | None, _port_opt] = None,
-    client_cert: Annotated[str | None, _client_cert_opt] = None,
-    client_key: Annotated[str | None, _client_key_opt] = None,
-    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ) -> None:
     """List all collection versions for a release UUID."""
     try:
-        with _build_client(
-            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle
-        ) as client:
+        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
             if component:
                 result = client.get_component_release_collections(uuid)
             else:
@@ -470,9 +391,6 @@ def get_cle(
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
     port: Annotated[int | None, _port_opt] = None,
-    client_cert: Annotated[str | None, _client_cert_opt] = None,
-    client_key: Annotated[str | None, _client_key_opt] = None,
-    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ) -> None:
     """Get Common Lifecycle Enumeration (CLE) for an entity."""
     entity_methods = {
@@ -484,9 +402,7 @@ def get_cle(
     if entity not in entity_methods:
         _error(f"Invalid --entity: {entity!r}. Must be one of: {', '.join(entity_methods)}")
     try:
-        with _build_client(
-            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle
-        ) as client:
+        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
             result = getattr(client, entity_methods[entity])(uuid)
         _output(result)
     except TeaError as exc:
@@ -503,15 +419,10 @@ def get_artifact(
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
     port: Annotated[int | None, _port_opt] = None,
-    client_cert: Annotated[str | None, _client_cert_opt] = None,
-    client_key: Annotated[str | None, _client_key_opt] = None,
-    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ) -> None:
     """Get artifact metadata by UUID."""
     try:
-        with _build_client(
-            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle
-        ) as client:
+        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
             result = client.get_artifact(uuid)
         _output(result)
     except TeaError as exc:
@@ -533,9 +444,6 @@ def download(
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
     port: Annotated[int | None, _port_opt] = None,
-    client_cert: Annotated[str | None, _client_cert_opt] = None,
-    client_key: Annotated[str | None, _client_key_opt] = None,
-    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ) -> None:
     """Download an artifact file with optional checksum verification."""
     checksums = None
@@ -556,9 +464,7 @@ def download(
             checksums.append(Checksum(algorithm_type=alg_enum, algorithm_value=value))
 
     try:
-        with _build_client(
-            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle
-        ) as client:
+        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
             result = client.download_artifact(
                 url, dest, verify_checksums=checksums, max_download_bytes=max_download_bytes
             )
@@ -580,15 +486,10 @@ def inspect(
     timeout: Annotated[float, _timeout_opt] = 30.0,
     use_http: Annotated[bool, _use_http_opt] = False,
     port: Annotated[int | None, _port_opt] = None,
-    client_cert: Annotated[str | None, _client_cert_opt] = None,
-    client_key: Annotated[str | None, _client_key_opt] = None,
-    ca_bundle: Annotated[str | None, _ca_bundle_opt] = None,
 ) -> None:
     """Full flow: TEI -> discovery -> releases -> artifacts."""
     try:
-        with _build_client(
-            base_url, token, domain, timeout, use_http, port, auth, client_cert, client_key, ca_bundle, tei=tei
-        ) as client:
+        with _build_client(base_url, token, domain, timeout, use_http, port, auth, tei=tei) as client:
             discoveries = client.discover(tei)
             result = []
             for disc in discoveries:

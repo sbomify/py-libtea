@@ -12,7 +12,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Self
 
-from libtea._http import MtlsConfig, TeaHttpClient, probe_endpoint
+from libtea._http import TeaHttpClient, probe_endpoint
 from libtea._validation import (
     _validate,
     _validate_collection_version,
@@ -66,7 +66,6 @@ class TeaClient:
         basic_auth: Optional ``(username, password)`` tuple for HTTP Basic auth.
             Mutually exclusive with ``token``. Rejected with plaintext HTTP.
         timeout: Request timeout in seconds (default 30).
-        mtls: Optional :class:`~libtea.MtlsConfig` for mutual TLS authentication.
         max_retries: Number of automatic retries on 5xx responses (default 3).
         backoff_factor: Exponential backoff multiplier between retries (default 0.5).
     """
@@ -78,7 +77,6 @@ class TeaClient:
         token: str | None = None,
         basic_auth: tuple[str, str] | None = None,
         timeout: float = 30.0,
-        mtls: MtlsConfig | None = None,
         max_retries: int = 3,
         backoff_factor: float = 0.5,
     ):
@@ -87,7 +85,6 @@ class TeaClient:
             token=token,
             basic_auth=basic_auth,
             timeout=timeout,
-            mtls=mtls,
             max_retries=max_retries,
             backoff_factor=backoff_factor,
         )
@@ -103,7 +100,6 @@ class TeaClient:
         version: str = TEA_SPEC_VERSION,
         scheme: str = "https",
         port: int | None = None,
-        mtls: MtlsConfig | None = None,
         max_retries: int = 3,
         backoff_factor: float = 0.5,
     ) -> Self:
@@ -122,7 +118,6 @@ class TeaClient:
             version: TEA spec SemVer to match against (default: library's built-in version).
             scheme: URL scheme for discovery — ``"https"`` (default) or ``"http"``.
             port: Optional port for ``.well-known`` resolution.
-            mtls: Optional :class:`~libtea.MtlsConfig`.
             max_retries: Retry count on 5xx (default 3).
             backoff_factor: Backoff multiplier (default 0.5).
 
@@ -133,14 +128,14 @@ class TeaClient:
             TeaDiscoveryError: If no compatible or reachable endpoint is found
                 (wraps the last probe failure as ``__cause__``).
         """
-        well_known = fetch_well_known(domain, timeout=timeout, scheme=scheme, port=port, mtls=mtls)
+        well_known = fetch_well_known(domain, timeout=timeout, scheme=scheme, port=port)
         candidates = select_endpoints(well_known, version)
 
         errors: list[tuple[str, Exception]] = []
         for endpoint in candidates:
             base_url = f"{endpoint.url.rstrip('/')}/v{version}"
             try:
-                probe_endpoint(base_url, timeout=min(timeout, 5.0), mtls=mtls)
+                probe_endpoint(base_url, timeout=min(timeout, 5.0))
             except (TeaConnectionError, TeaServerError) as exc:
                 logger.warning("Endpoint %s unreachable, trying next: %s", base_url, exc)
                 errors.append((base_url, exc))
@@ -150,7 +145,6 @@ class TeaClient:
                 token=token,
                 basic_auth=basic_auth,
                 timeout=timeout,
-                mtls=mtls,
                 max_retries=max_retries,
                 backoff_factor=backoff_factor,
             )
