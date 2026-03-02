@@ -411,16 +411,36 @@ class TestProbeEndpoint:
         probe_endpoint("https://api.example.com/v1")  # should not raise
 
     @responses.activate
-    def test_probe_redirect_raises_connection_error(self):
-        """3xx means the server redirects — probe should fail since get_json rejects redirects."""
+    def test_probe_trailing_slash_redirect_is_ok(self):
+        """Trailing-slash redirect (e.g. Django APPEND_SLASH) should not fail the probe."""
         responses.head("https://api.example.com/v1", status=301, headers={"Location": "/v1/"})
+        probe_endpoint("https://api.example.com/v1")  # should not raise
+
+    @responses.activate
+    def test_probe_trailing_slash_redirect_absolute_url(self):
+        """Trailing-slash redirect with absolute Location header."""
+        responses.head(
+            "https://api.example.com/v1",
+            status=301,
+            headers={"Location": "https://api.example.com/v1/"},
+        )
+        probe_endpoint("https://api.example.com/v1")  # should not raise
+
+    @responses.activate
+    def test_probe_cross_path_redirect_raises_connection_error(self):
+        """Redirect to a different path should fail."""
+        responses.head("https://api.example.com/v1", status=302, headers={"Location": "/elsewhere"})
         with pytest.raises(TeaConnectionError, match="redirect"):
             probe_endpoint("https://api.example.com/v1")
 
     @responses.activate
-    def test_probe_302_raises_connection_error(self):
-        """302 redirect also treated as probe failure."""
-        responses.head("https://api.example.com/v1", status=302, headers={"Location": "/elsewhere"})
+    def test_probe_cross_origin_redirect_raises_connection_error(self):
+        """Redirect to a different host should fail."""
+        responses.head(
+            "https://api.example.com/v1",
+            status=301,
+            headers={"Location": "https://evil.example.com/v1/"},
+        )
         with pytest.raises(TeaConnectionError, match="redirect"):
             probe_endpoint("https://api.example.com/v1")
 

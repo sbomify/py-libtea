@@ -71,7 +71,12 @@ def probe_endpoint(url: str, timeout: float = 5.0) -> None:
     except requests.RequestException as exc:
         raise TeaConnectionError(str(exc)) from exc
     if 300 <= resp.status_code < 400:
-        raise TeaConnectionError(f"Endpoint probe returned redirect: HTTP {resp.status_code}")
+        location = resp.headers.get("Location", "")
+        resolved = urljoin(url, location)
+        # Allow trailing-slash redirects (e.g. /path -> /path/) which are
+        # normal server behaviour (Django APPEND_SLASH, Caddy, nginx).
+        if resolved.rstrip("/") != url.rstrip("/"):
+            raise TeaConnectionError(f"Endpoint probe returned redirect: HTTP {resp.status_code}")
     if resp.status_code >= 500:
         raise TeaServerError(f"Server error: HTTP {resp.status_code}")
 
