@@ -238,7 +238,7 @@ The `tea-cli` command provides a terminal interface for all TEA operations. Inst
 --version    Show version
 ```
 
-All commands accept connection options: `--base-url`, `--domain`, `--token`, `--auth`, `--use-http`, `--port`, `--client-cert`, `--client-key`, `--ca-bundle`.
+All commands accept connection options: `--base-url`, `--domain`, `--token`, `--auth`, `--use-http`, `--port`.
 
 ### Discover
 

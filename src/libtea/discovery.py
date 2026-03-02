@@ -153,7 +153,9 @@ def fetch_well_known(
                     try:
                         _validate_download_url(current_url)
                     except TeaValidationError as exc:
-                        raise TeaDiscoveryError(f"Discovery for {domain} redirected to blocked target: {exc}") from exc
+                        raise TeaDiscoveryError(
+                            f"Discovery for {domain} redirected to a blocked or disallowed URL"
+                        ) from exc
                     response.close()
                     response = None
                     continue

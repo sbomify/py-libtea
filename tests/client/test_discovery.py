@@ -296,7 +296,7 @@ class TestFetchWellKnownSsrfProtection:
             status=302,
             headers={"Location": "http://169.254.169.254/latest/meta-data/"},
         )
-        with pytest.raises(TeaDiscoveryError, match="redirected to blocked target"):
+        with pytest.raises(TeaDiscoveryError, match="redirected to a blocked or disallowed URL"):
             fetch_well_known("example.com")
 
     @responses.activate
@@ -307,7 +307,7 @@ class TestFetchWellKnownSsrfProtection:
             status=302,
             headers={"Location": "http://localhost/admin"},
         )
-        with pytest.raises(TeaDiscoveryError, match="redirected to blocked target"):
+        with pytest.raises(TeaDiscoveryError, match="redirected to a blocked or disallowed URL"):
             fetch_well_known("example.com")
 
 

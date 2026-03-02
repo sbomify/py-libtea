@@ -4,7 +4,7 @@ Provides the ``tea-cli`` command backed by typer. Each subcommand maps
 to a :class:`~libtea.client.TeaClient` method and outputs rich-formatted
 tables and panels by default (or JSON when ``--json`` is specified).
 All commands accept ``--base-url`` / ``--domain`` for server selection,
-and ``--token`` / ``--auth`` / ``--client-cert`` for authentication.
+and ``--token`` / ``--auth`` for authentication.
 """
 
 import json
@@ -96,13 +96,16 @@ def _build_client(
     if not base_url and not domain:
         _error("Must specify either --base-url or --domain (or provide a TEI to auto-discover)")
     basic_auth = _parse_basic_auth(auth)
-    if base_url:
-        return TeaClient(base_url=base_url, token=token, basic_auth=basic_auth, timeout=timeout)
-    assert domain is not None
-    scheme = "http" if use_http else "https"
-    return TeaClient.from_well_known(
-        domain, token=token, basic_auth=basic_auth, timeout=timeout, scheme=scheme, port=port
-    )
+    try:
+        if base_url:
+            return TeaClient(base_url=base_url, token=token, basic_auth=basic_auth, timeout=timeout)
+        assert domain is not None
+        scheme = "http" if use_http else "https"
+        return TeaClient.from_well_known(
+            domain, token=token, basic_auth=basic_auth, timeout=timeout, scheme=scheme, port=port
+        )
+    except ValueError as exc:
+        _error(str(exc))
 
 
 def _output(data: Any, *, command: str | None = None) -> None:
