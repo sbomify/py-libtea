@@ -72,6 +72,29 @@ class TestSsrfProtection:
     def test_accepts_public_ip(self):
         _validate_download_url("https://8.8.8.8/file.xml")
 
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://127.0.0.1/file.xml",
+            "http://10.0.0.1/file.xml",
+            "http://192.168.1.1/file.xml",
+            "http://localhost/file.xml",
+            "http://100.64.0.1/file.xml",
+        ],
+    )
+    def test_allow_private_ips_bypasses_internal_checks(self, url):
+        """allow_private_ips=True skips IP-based SSRF checks."""
+        _validate_download_url(url, allow_private_ips=True)
+
+    def test_allow_private_ips_still_rejects_bad_scheme(self):
+        """Scheme validation is always enforced, even with allow_private_ips."""
+        with pytest.raises(TeaValidationError, match="http or https scheme"):
+            _validate_download_url("ftp://127.0.0.1/file.xml", allow_private_ips=True)
+
+    def test_allow_private_ips_still_rejects_missing_hostname(self):
+        with pytest.raises(TeaValidationError, match="must include a hostname"):
+            _validate_download_url("http:///path/only", allow_private_ips=True)
+
 
 class TestIsInternalIp:
     """Tests for the _is_internal_ip helper."""
@@ -173,22 +196,13 @@ class TestDnsRebindingProtection:
             with pytest.raises(TeaValidationError, match="resolves to private/internal IP"):
                 _validate_resolved_ips("evil-cgnat.example.com")
 
-    def test_dns_failure_logs_warning(self, caplog):
-        """DNS failure should log a warning, not silently pass."""
-        import logging
-        import socket
-
-        with caplog.at_level(logging.WARNING, logger="libtea"):
-            with patch("libtea._security.socket.getaddrinfo", side_effect=socket.gaierror("NXDOMAIN")):
-                _validate_resolved_ips("nonexistent.example.com")
-        assert "DNS resolution failed" in caplog.text
-
-    def test_dns_failure_is_ignored(self):
-        """If DNS resolution fails, let the actual request handle it."""
+    def test_dns_failure_raises_validation_error(self):
+        """DNS failure should raise TeaValidationError (fail-closed)."""
         import socket
 
         with patch("libtea._security.socket.getaddrinfo", side_effect=socket.gaierror("NXDOMAIN")):
-            _validate_resolved_ips("nonexistent.example.com")  # should not raise
+            with pytest.raises(TeaValidationError, match="DNS resolution failed"):
+                _validate_resolved_ips("nonexistent.example.com")
 
     def test_validate_download_url_calls_dns_check(self):
         """Non-IP hostnames trigger DNS resolution check."""

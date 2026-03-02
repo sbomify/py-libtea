@@ -6,16 +6,19 @@ This module is an implementation detail. Public consumers should use
 
 import json
 import logging
+import threading
+import time
 import warnings
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Self
+from typing import Any, Self, cast
 from urllib.parse import urljoin, urlparse
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from libtea._constants import USER_AGENT
 from libtea._hashing import _build_hashers
 from libtea._security import _validate_download_url
 from libtea.exceptions import (
@@ -30,21 +33,9 @@ from libtea.exceptions import (
 
 logger = logging.getLogger("libtea")
 
-
-def _get_package_version() -> str:
-    """Get the package version for User-Agent header."""
-    try:
-        from importlib.metadata import PackageNotFoundError, version
-
-        return version("libtea")
-    except (PackageNotFoundError, ValueError):
-        return "unknown"
-
-
-USER_AGENT = f"py-libtea/{_get_package_version()} (hello@sbomify.com)"
-
-
 _MAX_DOWNLOAD_REDIRECTS = 10
+_ERROR_BODY_SNIPPET_BYTES = 200
+_DOWNLOAD_CHUNK_SIZE = 8192
 
 
 def probe_endpoint(url: str, timeout: float = 5.0) -> None:
@@ -122,6 +113,7 @@ class TeaHttpClient:
         timeout: float = 30.0,
         max_retries: int = 3,
         backoff_factor: float = 0.5,
+        cache_ttl: float | None = None,
     ):
         parsed = urlparse(base_url)
         if parsed.scheme not in ("http", "https"):
@@ -136,6 +128,8 @@ class TeaHttpClient:
             raise ValueError("Cannot use basic auth with plaintext HTTP. Use https:// or remove basic_auth.")
         if max_retries < 0:
             raise ValueError(f"max_retries must be >= 0, got {max_retries}")
+        if cache_ttl is not None and cache_ttl <= 0:
+            raise ValueError(f"cache_ttl must be > 0, got {cache_ttl}")
         if parsed.scheme == "http":
             warnings.warn(
                 "Using plaintext HTTP is insecure. Use HTTPS in production.",
@@ -165,6 +159,10 @@ class TeaHttpClient:
         self._session.mount("https://", adapter)
         self._session.mount("http://", adapter)
 
+        self._cache_ttl = cache_ttl
+        self._cache: dict[tuple[str, frozenset[tuple[str, Any]]], tuple[float, Any]] = {}
+        self._cache_lock = threading.Lock()
+
     def get_json(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
         """Send GET request and return parsed JSON.
 
@@ -181,6 +179,23 @@ class TeaHttpClient:
             TeaAuthenticationError: On HTTP 401/403.
             TeaServerError: On HTTP 5xx.
         """
+        # Cache lookup — key is (path, params).  Auth is not included because
+        # credentials are constructor-only and immutable for the session lifetime.
+        # If token refresh is ever added, the key must include an auth fingerprint.
+        cache_key = (
+            (path, frozenset(params.items()) if params else frozenset()) if self._cache_ttl is not None else None
+        )
+        if cache_key is not None:
+            ttl = cast(float, self._cache_ttl)  # guaranteed non-None by cache_key construction
+            with self._cache_lock:
+                cached = self._cache.get(cache_key)
+                if cached is not None:
+                    ts, value = cached
+                    if time.monotonic() - ts < ttl:
+                        logger.debug("CACHE HIT %s params=%s", path, params)
+                        return value
+                    del self._cache[cache_key]
+
         url = f"{self._base_url}{path}"
         logger.debug("GET %s params=%s", url, params)
         try:
@@ -212,9 +227,16 @@ class TeaHttpClient:
             if len(body) > limit:
                 raise TeaValidationError(f"Response body exceeds limit: >{limit} bytes (limit {limit})")
             try:
-                return json.loads(body)
+                result = json.loads(body)
             except (ValueError, UnicodeDecodeError) as exc:
                 raise TeaValidationError(f"Invalid JSON in response: {exc}") from exc
+
+            # Cache store
+            if cache_key is not None:
+                with self._cache_lock:
+                    self._cache[cache_key] = (time.monotonic(), result)
+
+            return result
         finally:
             response.close()
 
@@ -225,6 +247,7 @@ class TeaHttpClient:
         algorithms: list[str] | None = None,
         *,
         max_download_bytes: int | None = None,
+        allow_private_ips: bool = False,
     ) -> dict[str, str]:
         """Download a file and compute checksums on-the-fly.
 
@@ -246,7 +269,7 @@ class TeaHttpClient:
             TeaChecksumError: If an unsupported algorithm is requested.
             TeaValidationError: If download exceeds max_download_bytes or fails SSRF check.
         """
-        _validate_download_url(url)
+        _validate_download_url(url, allow_private_ips=allow_private_ips)
         logger.debug("DOWNLOAD %s -> %s", url, dest)
         hashers = _build_hashers(algorithms) if algorithms else {}
 
@@ -272,7 +295,7 @@ class TeaHttpClient:
                             if not location:
                                 raise TeaRequestError(f"Redirect without Location header: HTTP {response.status_code}")
                             current_url = urljoin(current_url, location)
-                            _validate_download_url(current_url)
+                            _validate_download_url(current_url, allow_private_ips=allow_private_ips)
                             response.close()
                             response = None
                             continue
@@ -282,7 +305,7 @@ class TeaHttpClient:
 
                     downloaded = 0
                     with open(dest, "wb") as f:
-                        for chunk in response.iter_content(chunk_size=8192):
+                        for chunk in response.iter_content(chunk_size=_DOWNLOAD_CHUNK_SIZE):
                             downloaded += len(chunk)
                             if max_download_bytes is not None and downloaded > max_download_bytes:
                                 raise TeaValidationError(f"Download exceeds size limit of {max_download_bytes} bytes")
@@ -307,8 +330,14 @@ class TeaHttpClient:
 
         return {alg: h.hexdigest() for alg, h in hashers.items()}
 
+    def clear_cache(self) -> None:
+        """Clear all cached responses."""
+        with self._cache_lock:
+            self._cache.clear()
+
     def close(self) -> None:
         """Close the HTTP session and clear sensitive credentials from memory."""
+        self.clear_cache()
         self._session.headers.pop("authorization", None)
         self._session.auth = None
         self._session.cert = None
@@ -324,6 +353,25 @@ class TeaHttpClient:
         exc_tb: TracebackType | None,
     ) -> None:
         self.close()
+
+    @staticmethod
+    def _read_error_body(response: requests.Response) -> bytes:
+        """Read a bounded snippet of the response body for error messages.
+
+        Returns up to ``_ERROR_BODY_SNIPPET_BYTES + 1`` bytes so callers can
+        detect truncation.  Falls back to ``response.content`` when the raw
+        stream is empty (e.g. already consumed by the transport layer).
+        """
+        limit = _ERROR_BODY_SNIPPET_BYTES
+        try:
+            if response.raw:
+                response.raw.decode_content = True
+            raw_bytes = response.raw.read(limit + 1) if response.raw else b""
+            if not raw_bytes:
+                raw_bytes = response.content[: limit + 1]
+        except Exception:
+            raw_bytes = b""
+        return raw_bytes
 
     @staticmethod
     def _raise_for_status(response: requests.Response) -> None:
@@ -345,9 +393,7 @@ class TeaHttpClient:
         if status == 404:
             error_type = None
             try:
-                if response.raw:
-                    response.raw.decode_content = True
-                raw_bytes = response.raw.read(1024) if response.raw else b""
+                raw_bytes = TeaHttpClient._read_error_body(response)
                 if raw_bytes:
                     body = json.loads(raw_bytes)
                     if isinstance(body, dict):
@@ -358,17 +404,12 @@ class TeaHttpClient:
         if status >= 500:
             raise TeaServerError(f"Server error: HTTP {status}")
         # Remaining 4xx codes (400, 405-499 excluding 401/403/404)
-        # Use bounded read to avoid loading a large error body into memory
-        # (e.g. when called on a streaming response from download_with_hashes).
+        limit = _ERROR_BODY_SNIPPET_BYTES
         body_text = ""
         try:
-            if response.raw:
-                response.raw.decode_content = True
-            raw_bytes = response.raw.read(201) if response.raw else b""
-            if not raw_bytes:
-                raw_bytes = response.content[:201]
-            body_text = raw_bytes.decode("utf-8", errors="replace")[:200]
-            if len(raw_bytes) > 200:
+            raw_bytes = TeaHttpClient._read_error_body(response)
+            body_text = raw_bytes.decode("utf-8", errors="replace")[:limit]
+            if len(raw_bytes) > limit:
                 body_text += " (truncated)"
         except Exception:
             pass

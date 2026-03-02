@@ -3,7 +3,16 @@ import requests
 import responses
 from pydantic import ValidationError
 
-from libtea.discovery import _is_valid_domain, fetch_well_known, parse_tei, select_endpoint, select_endpoints
+from libtea.discovery import (
+    VersionedEndpoint,
+    _is_compatible_version,
+    _is_valid_domain,
+    fetch_well_known,
+    parse_tei,
+    select_best_endpoint,
+    select_endpoint,
+    select_endpoints,
+)
 from libtea.exceptions import TeaDiscoveryError
 from libtea.models import DiscoveryInfo, TeaEndpoint, TeaWellKnown, TeiType
 
@@ -306,6 +315,76 @@ class TestFetchWellKnownSsrfProtection:
             fetch_well_known("example.com")
 
 
+class TestFetchWellKnownRedirectEdgeCases:
+    """Test redirect branches in fetch_well_known that were previously uncovered."""
+
+    @responses.activate
+    def test_too_many_redirects(self):
+        """Redirect chain exceeding max hops should raise."""
+        for i in range(11):
+            responses.get(
+                f"https://hop{i}.example.com/.well-known/tea" if i > 0 else "https://example.com/.well-known/tea",
+                status=302,
+                headers={"Location": f"https://hop{i + 1}.example.com/.well-known/tea"},
+            )
+        with pytest.raises(TeaDiscoveryError, match="Too many discovery redirects"):
+            fetch_well_known("example.com")
+
+    @responses.activate
+    def test_redirect_without_location_header(self):
+        """3xx response without Location header should raise."""
+        responses.get(
+            "https://example.com/.well-known/tea",
+            status=302,
+            headers={},
+        )
+        with pytest.raises(TeaDiscoveryError, match="redirect without Location header"):
+            fetch_well_known("example.com")
+
+    @responses.activate
+    def test_redirect_to_internal_ip_same_scheme(self):
+        """HTTPS→HTTPS redirect to an internal IP should be caught by SSRF check."""
+        responses.get(
+            "https://example.com/.well-known/tea",
+            status=302,
+            headers={"Location": "https://10.0.0.1/.well-known/tea"},
+        )
+        with pytest.raises(TeaDiscoveryError, match="blocked or disallowed URL"):
+            fetch_well_known("example.com")
+
+    @responses.activate
+    def test_error_body_included_in_message(self):
+        """4xx/5xx error body should appear in the error message."""
+        responses.get(
+            "https://example.com/.well-known/tea",
+            status=404,
+            body=b"not found here",
+        )
+        with pytest.raises(TeaDiscoveryError, match="not found here"):
+            fetch_well_known("example.com")
+
+    @responses.activate
+    def test_error_body_truncated(self):
+        """Large error body should be truncated to 200 chars."""
+        responses.get(
+            "https://example.com/.well-known/tea",
+            status=500,
+            body=b"x" * 300,
+        )
+        with pytest.raises(TeaDiscoveryError, match="truncated"):
+            fetch_well_known("example.com")
+
+    @responses.activate
+    def test_connection_error_wrapped(self):
+        """requests.ConnectionError should be wrapped in TeaDiscoveryError."""
+        responses.get(
+            "https://example.com/.well-known/tea",
+            body=requests.ConnectionError("refused"),
+        )
+        with pytest.raises(TeaDiscoveryError, match="Failed to connect"):
+            fetch_well_known("example.com")
+
+
 class TestSelectEndpoint:
     def _make_well_known(self, endpoints: list[dict]) -> TeaWellKnown:
         return TeaWellKnown(
@@ -525,3 +604,136 @@ class TestSelectEndpoints:
         wk = self._make_well_known([{"url": "https://api.example.com", "versions": ["1.0.0"]}])
         with pytest.raises(TeaDiscoveryError, match="Invalid version string"):
             select_endpoints(wk, "not-a-version")
+
+
+class TestIsCompatibleVersion:
+    """Unit tests for _is_compatible_version helper."""
+
+    def _v(self, s: str):
+        from semver import Version
+
+        return Version.parse(s)
+
+    def test_exact_match(self):
+        assert _is_compatible_version(self._v("0.3.0"), self._v("0.3.0"))
+
+    def test_client_higher_minor_pre_1(self):
+        """Client 0.3.x can downgrade to server 0.2.x."""
+        assert _is_compatible_version(self._v("0.3.0"), self._v("0.2.0"))
+
+    def test_client_lower_minor_pre_1(self):
+        """Client 0.2.x cannot connect to server 0.3.x."""
+        assert not _is_compatible_version(self._v("0.2.0"), self._v("0.3.0"))
+
+    def test_different_major(self):
+        assert not _is_compatible_version(self._v("1.0.0"), self._v("2.0.0"))
+
+    def test_post_1_same_major_client_higher(self):
+        """Post-1.0: client 1.3.0 can downgrade to server 1.2.0."""
+        assert _is_compatible_version(self._v("1.3.0"), self._v("1.2.0"))
+
+    def test_post_1_client_lower(self):
+        """Post-1.0: client 1.2.0 cannot connect to server 1.3.0."""
+        assert not _is_compatible_version(self._v("1.2.0"), self._v("1.3.0"))
+
+    def test_prerelease_compatibility(self):
+        """0.3.0-beta.2 client can downgrade to 0.2.0-beta.2 server."""
+        assert _is_compatible_version(self._v("0.3.0-beta.2"), self._v("0.2.0-beta.2"))
+
+    def test_prerelease_same_minor(self):
+        """0.3.0-beta.2 client compatible with 0.3.0-beta.1 server."""
+        assert _is_compatible_version(self._v("0.3.0-beta.2"), self._v("0.3.0-beta.1"))
+
+    def test_post_1_patch_level_client_higher(self):
+        """Post-1.0: client 1.2.1 can connect to server 1.2.0."""
+        assert _is_compatible_version(self._v("1.2.1"), self._v("1.2.0"))
+
+    def test_post_1_patch_level_client_lower(self):
+        """Post-1.0: client 1.2.0 cannot connect to server 1.2.1."""
+        assert not _is_compatible_version(self._v("1.2.0"), self._v("1.2.1"))
+
+    def test_post_1_prerelease_ignored(self):
+        """Post-1.0: 1.2.0-beta.1 client is compatible with 1.2.0-beta.2 server (core is equal)."""
+        assert _is_compatible_version(self._v("1.2.0-beta.1"), self._v("1.2.0-beta.2"))
+
+
+class TestSelectBestEndpoint:
+    def _make_well_known(self, endpoints: list[dict]) -> TeaWellKnown:
+        return TeaWellKnown(
+            schema_version=1,
+            endpoints=[TeaEndpoint(**ep) for ep in endpoints],
+        )
+
+    def test_exact_match_preferred(self):
+        """When exact match exists, use it."""
+        wk = self._make_well_known([{"url": "https://api.example.com", "versions": ["0.3.0-beta.2"]}])
+        result = select_best_endpoint(wk, "0.3.0-beta.2")
+        assert isinstance(result, VersionedEndpoint)
+        assert result.matched_version == "0.3.0-beta.2"
+        assert result.endpoint.url == "https://api.example.com"
+
+    def test_negotiates_to_lower_version(self):
+        """Client 0.3.0-beta.2 negotiates to server 0.2.0-beta.2."""
+        wk = self._make_well_known([{"url": "https://api.example.com", "versions": ["0.2.0-beta.2"]}])
+        result = select_best_endpoint(wk, "0.3.0-beta.2")
+        assert result.matched_version == "0.2.0-beta.2"
+
+    def test_rejects_higher_server_version(self):
+        """Client 0.2.0-beta.2 cannot connect to server 0.4.0."""
+        wk = self._make_well_known([{"url": "https://api.example.com", "versions": ["0.4.0"]}])
+        with pytest.raises(TeaDiscoveryError, match="No compatible endpoint"):
+            select_best_endpoint(wk, "0.2.0-beta.2")
+
+    def test_prefers_highest_compatible(self):
+        """When multiple compatible versions, prefer the highest."""
+        wk = self._make_well_known(
+            [
+                {"url": "https://old.example.com", "versions": ["0.1.0"]},
+                {"url": "https://new.example.com", "versions": ["0.2.0-beta.2"]},
+            ]
+        )
+        result = select_best_endpoint(wk, "0.3.0-beta.2")
+        assert result.matched_version == "0.2.0-beta.2"
+        assert result.endpoint.url == "https://new.example.com"
+
+    def test_invalid_version_raises(self):
+        wk = self._make_well_known([{"url": "https://api.example.com", "versions": ["1.0.0"]}])
+        with pytest.raises(TeaDiscoveryError, match="Invalid version string"):
+            select_best_endpoint(wk, "not-a-version")
+
+    def test_no_compatible_version_raises(self):
+        wk = self._make_well_known([{"url": "https://api.example.com", "versions": ["2.0.0"]}])
+        with pytest.raises(TeaDiscoveryError, match="No compatible endpoint"):
+            select_best_endpoint(wk, "0.3.0-beta.2")
+
+    def test_malformed_version_strings_skipped(self):
+        """Endpoints with invalid version strings are silently skipped."""
+        wk = self._make_well_known(
+            [
+                {"url": "https://bad.example.com", "versions": ["not-semver"]},
+                {"url": "https://ok.example.com", "versions": ["0.2.0"]},
+            ]
+        )
+        result = select_best_endpoint(wk, "0.3.0-beta.2")
+        assert result.endpoint.url == "https://ok.example.com"
+
+    def test_compatible_priority_tiebreaker(self):
+        """When two endpoints have the same compatible version, prefer higher priority."""
+        wk = self._make_well_known(
+            [
+                {"url": "https://low.example.com", "versions": ["0.2.0"], "priority": 0.3},
+                {"url": "https://high.example.com", "versions": ["0.2.0"], "priority": 0.9},
+            ]
+        )
+        result = select_best_endpoint(wk, "0.3.0-beta.2")
+        assert result.endpoint.url == "https://high.example.com"
+
+    def test_negotiation_emits_warning(self):
+        """Fallback to compatible version should emit a UserWarning."""
+        wk = self._make_well_known([{"url": "https://api.example.com", "versions": ["0.2.0"]}])
+        import warnings
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            select_best_endpoint(wk, "0.3.0-beta.2")
+        assert any("negotiated to server version" in str(warning.message) for warning in w)

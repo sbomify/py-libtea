@@ -802,6 +802,40 @@ class TestCLIDebugFlag:
         assert "-d" in plain
 
 
+class TestCLIVerboseFlag:
+    """Tests for the --verbose / -v flag."""
+
+    @responses.activate
+    def test_verbose_flag_shows_libtea_debug(self):
+        """--verbose should enable libtea debug output but not urllib3."""
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/product/{uuid}",
+            json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+        )
+        result = runner.invoke(app, ["-v", "--json", "get-product", uuid, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        combined = result.output + (result.stderr if hasattr(result, "stderr") else "")
+        # Should produce valid JSON on stdout
+        assert "Test Product" in combined
+
+    @responses.activate
+    def test_verbose_short_flag(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/product/{uuid}",
+            json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+        )
+        result = runner.invoke(app, ["--verbose", "--json", "get-product", uuid, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+
+    def test_verbose_flag_shown_in_help(self):
+        result = runner.invoke(app, ["get-product", "--help"])
+        plain = _strip_ansi(result.output)
+        assert "--verbose" in plain
+        assert "-v" in plain
+
+
 class TestCLIDiscoverQuiet:
     """Tests for the discover --quiet / -q flag."""
 

@@ -159,6 +159,9 @@ class Checksum(_TeaModel):
     underscore form (``SHA_256``) to the canonical hyphen form.
     """
 
+    # Manual aliases because the TEA spec wire format uses abbreviated names
+    # (algType/algValue) rather than the full algorithmType/algorithmValue
+    # that to_camel would generate from the Python field names.
     algorithm_type: ChecksumAlgorithm = Field(alias="algType")
     algorithm_value: str = Field(alias="algValue")
 

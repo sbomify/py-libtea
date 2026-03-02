@@ -6,10 +6,10 @@ import pytest
 import requests
 import responses
 
+from libtea._constants import _get_package_version
 from libtea._http import (
     _MAX_DOWNLOAD_REDIRECTS,
     TeaHttpClient,
-    _get_package_version,
 )
 from libtea.exceptions import (
     TeaAuthenticationError,
@@ -521,4 +521,27 @@ class TestResponseSizeLimit:
         responses.get("https://api.example.com/v1/product/abc", json={"uuid": "abc"}, status=200)
         result = client.get_json("/product/abc")
         assert result == {"uuid": "abc"}
+        client.close()
+
+
+class TestGzipDecoding:
+    """Verify that gzip-encoded responses are transparently decoded."""
+
+    @responses.activate
+    def test_gzip_response_decoded(self):
+        """get_json should handle gzip Content-Encoding transparently."""
+        import gzip
+        import json
+
+        payload = json.dumps({"uuid": "abc", "name": "Gzipped"}).encode()
+        compressed = gzip.compress(payload)
+        responses.get(
+            "https://api.example.com/v1/product/abc",
+            body=compressed,
+            headers={"Content-Encoding": "gzip", "Content-Type": "application/json"},
+            status=200,
+        )
+        client = TeaHttpClient("https://api.example.com/v1")
+        result = client.get_json("/product/abc")
+        assert result["name"] == "Gzipped"
         client.close()
