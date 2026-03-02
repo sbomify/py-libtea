@@ -74,6 +74,8 @@ def _parse_basic_auth(auth: str | None) -> tuple[str, str] | None:
     if ":" not in auth:
         _error("Invalid --auth format. Expected USER:PASSWORD")
     user, password = auth.split(":", 1)
+    if not user:
+        _error("Invalid --auth format: username must not be empty")
     return (user, password)
 
 

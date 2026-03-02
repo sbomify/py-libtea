@@ -417,6 +417,13 @@ class TestCLIAuthOptions:
         )
         assert result.exit_code == 1
 
+    def test_auth_empty_username_rejected(self):
+        result = runner.invoke(
+            app, ["get-product", "d4d9f54a-abcf-11ee-ac79-1a52914d44b1", "--base-url", BASE_URL, "--auth", ":password"]
+        )
+        assert result.exit_code == 1
+        assert "username must not be empty" in result.stderr
+
     def test_token_over_http_shows_clean_error(self):
         result = runner.invoke(
             app,

@@ -405,9 +405,29 @@ class TestProbeEndpoint:
         probe_endpoint("https://api.example.com/v1")  # should not raise
 
     @responses.activate
-    def test_probe_404_is_ok(self):
-        """404 means the server is alive — probe should succeed."""
+    def test_probe_404_triggers_failover(self):
+        """404 means wrong path/version — probe should fail to trigger failover."""
         responses.head("https://api.example.com/v1", status=404)
+        with pytest.raises(TeaConnectionError, match="HTTP 404"):
+            probe_endpoint("https://api.example.com/v1")
+
+    @responses.activate
+    def test_probe_410_triggers_failover(self):
+        """410 Gone means endpoint removed — probe should fail to trigger failover."""
+        responses.head("https://api.example.com/v1", status=410)
+        with pytest.raises(TeaConnectionError, match="HTTP 410"):
+            probe_endpoint("https://api.example.com/v1")
+
+    @responses.activate
+    def test_probe_401_is_ok(self):
+        """401 means auth required but server is reachable — probe should succeed."""
+        responses.head("https://api.example.com/v1", status=401)
+        probe_endpoint("https://api.example.com/v1")  # should not raise
+
+    @responses.activate
+    def test_probe_405_is_ok(self):
+        """405 means HEAD not allowed but server is reachable — probe should succeed."""
+        responses.head("https://api.example.com/v1", status=405)
         probe_endpoint("https://api.example.com/v1")  # should not raise
 
     @responses.activate

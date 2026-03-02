@@ -58,7 +58,8 @@ def probe_endpoint(url: str, timeout: float = 5.0) -> None:
         timeout: Request timeout in seconds.
 
     Raises:
-        TeaConnectionError: If the endpoint is unreachable.
+        TeaConnectionError: If the endpoint is unreachable, returns
+            HTTP 404/410, or redirects to a different path.
         TeaServerError: If the endpoint returns HTTP 5xx.
     """
     kwargs: dict[str, Any] = {
@@ -82,6 +83,10 @@ def probe_endpoint(url: str, timeout: float = 5.0) -> None:
         # normal server behaviour (Django APPEND_SLASH, Caddy, nginx).
         if resolved.rstrip("/") != url.rstrip("/"):
             raise TeaConnectionError(f"Endpoint probe returned redirect: HTTP {resp.status_code}")
+    # 404/410 indicate a wrong path or removed endpoint — failover to next candidate.
+    # 401/403 (auth needed) and 405 (HEAD not supported) are fine — server is reachable.
+    if resp.status_code in (404, 410):
+        raise TeaConnectionError(f"Endpoint probe returned HTTP {resp.status_code}")
     if resp.status_code >= 500:
         raise TeaServerError(f"Server error: HTTP {resp.status_code}")
 
@@ -200,7 +205,9 @@ class TeaHttpClient:
                 )
             # Read at most limit+1 bytes to detect oversized responses without
             # loading an unbounded body into memory (stream=True defers the read).
+            # decode_content=True tells urllib3 to decompress gzip/deflate.
             limit = self._max_response_bytes
+            response.raw.decode_content = True
             body = response.raw.read(limit + 1)
             if len(body) > limit:
                 raise TeaValidationError(f"Response body exceeds limit: >{limit} bytes (limit {limit})")
@@ -338,10 +345,14 @@ class TeaHttpClient:
         if status == 404:
             error_type = None
             try:
-                body = response.json()
-                if isinstance(body, dict):
-                    error_type = body.get("error")
-            except ValueError:
+                if response.raw:
+                    response.raw.decode_content = True
+                raw_bytes = response.raw.read(1024) if response.raw else b""
+                if raw_bytes:
+                    body = json.loads(raw_bytes)
+                    if isinstance(body, dict):
+                        error_type = body.get("error")
+            except (ValueError, UnicodeDecodeError):
                 pass
             raise TeaNotFoundError(f"Not found: HTTP {status}", error_type=error_type)
         if status >= 500:
@@ -351,6 +362,8 @@ class TeaHttpClient:
         # (e.g. when called on a streaming response from download_with_hashes).
         body_text = ""
         try:
+            if response.raw:
+                response.raw.decode_content = True
             raw_bytes = response.raw.read(201) if response.raw else b""
             if not raw_bytes:
                 raw_bytes = response.content[:201]
