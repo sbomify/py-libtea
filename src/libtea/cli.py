@@ -39,8 +39,10 @@ def _configure_logging(*, verbose: bool, debug: bool) -> None:
         logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(message)s", stream=sys.stderr)
         logging.getLogger("libtea").setLevel(logging.DEBUG)
     elif verbose:
-        logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s", stream=sys.stderr)
+        logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(message)s", stream=sys.stderr)
         logging.getLogger("libtea").setLevel(logging.DEBUG)
+        logging.getLogger("urllib3").setLevel(logging.WARNING)
+        logging.getLogger("requests").setLevel(logging.WARNING)
 
 
 # --- Shared options decorator ---

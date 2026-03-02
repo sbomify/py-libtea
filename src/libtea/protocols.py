@@ -34,9 +34,10 @@ class TeaClientProtocol(Protocol):
     All public methods of :class:`~libtea.client.TeaClient` are declared here
     so that consumers can program against this protocol for easier testing.
 
-    Note: ``from_well_known`` is a classmethod and cannot be represented in a
-    ``Protocol``.  To mock the discovery flow, patch :func:`~libtea.discovery.fetch_well_known`
-    and :func:`~libtea._http.probe_endpoint` instead.
+    Note: ``from_well_known`` is a classmethod on :class:`~libtea.client.TeaClient`
+    and is intentionally not included in this instance-level protocol. To mock the
+    discovery flow, patch :func:`~libtea.discovery.fetch_well_known` and
+    :func:`~libtea._http.probe_endpoint` instead.
     """
 
     # --- Discovery ---

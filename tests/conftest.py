@@ -15,8 +15,8 @@ _real_getaddrinfo = socket.getaddrinfo
 
 
 def _mock_getaddrinfo(host, port, *args, **kwargs):
-    """Return a fake public IP for *.example.com test hostnames, delegate otherwise."""
-    if isinstance(host, str) and host.endswith(".example.com"):
+    """Return a fake public IP for example.com and *.example.com test hostnames, delegate otherwise."""
+    if isinstance(host, str) and (host == "example.com" or host.endswith(".example.com")):
         return _FAKE_PUBLIC_ADDR
     return _real_getaddrinfo(host, port, *args, **kwargs)
 

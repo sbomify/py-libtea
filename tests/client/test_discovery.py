@@ -728,6 +728,17 @@ class TestSelectBestEndpoint:
         result = select_best_endpoint(wk, "0.3.0-beta.2")
         assert result.endpoint.url == "https://high.example.com"
 
+    def test_picks_highest_compatible_version_per_endpoint(self):
+        """When an endpoint advertises multiple compatible versions, pick the highest."""
+        wk = self._make_well_known(
+            [
+                # Versions deliberately NOT ordered highest-first
+                {"url": "https://api.example.com", "versions": ["0.1.0", "0.2.0", "0.1.5"]},
+            ]
+        )
+        result = select_best_endpoint(wk, "0.3.0-beta.2")
+        assert result.matched_version == "0.2.0"
+
     def test_negotiation_emits_warning(self):
         """Fallback to compatible version should emit a UserWarning."""
         wk = self._make_well_known([{"url": "https://api.example.com", "versions": ["0.2.0"]}])

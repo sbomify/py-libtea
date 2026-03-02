@@ -24,6 +24,7 @@ _BLOCKED_HOSTNAMES = frozenset(
         "metadata.google.internal.",
         # Kubernetes in-cluster service discovery
         "kubernetes.default.svc",
+        "kubernetes.default.svc.",
     }
 )
 

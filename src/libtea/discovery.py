@@ -334,14 +334,16 @@ def select_best_endpoint(well_known: TeaWellKnown, supported_version: str) -> Ve
     # Phase 2: compatible match (client >= server in same family)
     compatible: list[tuple[_SemVer, TeaEndpoint]] = []
     for ep in well_known.endpoints:
+        best_v_for_ep: _SemVer | None = None
         for v_str in ep.versions:
             try:
                 v = _SemVer.parse(v_str)
             except ValueError:
                 continue
-            if _is_compatible_version(target, v):
-                compatible.append((v, ep))
-                break  # best match per endpoint
+            if _is_compatible_version(target, v) and (best_v_for_ep is None or v > best_v_for_ep):
+                best_v_for_ep = v
+        if best_v_for_ep is not None:
+            compatible.append((best_v_for_ep, ep))
 
     if not compatible:
         available = {v for ep in well_known.endpoints for v in ep.versions}
