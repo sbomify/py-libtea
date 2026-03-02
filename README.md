@@ -45,7 +45,7 @@ pip install libtea[cli]
 from libtea import TeaClient
 
 # Auto-discover the sbomify TEA server from its .well-known/tea
-with TeaClient.from_well_known("trust.sbomify.com", token="your-bearer-token") as client:
+with TeaClient.from_well_known("trust.sbomify.com") as client:
     # Discover a product by TEI
     results = client.discover(
         "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify"
@@ -63,7 +63,6 @@ Or connect directly to a known endpoint:
 ```python
 client = TeaClient(
     base_url="https://trust.sbomify.com/tea/v0.3.0-beta.2",
-    token="your-bearer-token",
     timeout=30.0,
 )
 ```
@@ -73,7 +72,6 @@ Using `from_well_known`, you can also override the spec version and timeout:
 ```python
 client = TeaClient.from_well_known(
     "trust.sbomify.com",
-    token="your-bearer-token",
     timeout=15.0,
     version="0.3.0-beta.2",  # default
 )
