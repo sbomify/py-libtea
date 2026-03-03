@@ -615,6 +615,12 @@ class TeaClient:
     def get_products(self, uuids: list[str], *, max_workers: int = 5) -> list[Product]:
         """Fetch multiple products by UUID in parallel.
 
+        Concurrency caveat: workers share a single ``requests.Session`` which
+        is not documented as thread-safe.  This works reliably for typical
+        workloads but may exhibit race conditions under heavy load.  Use
+        ``max_workers=1`` for strictly safe serial execution.  A thread-safe
+        transport is planned for the httpx migration.
+
         Args:
             uuids: List of product UUIDs.
             max_workers: Maximum concurrent threads (default 5).
@@ -630,6 +636,8 @@ class TeaClient:
     def get_product_releases_bulk(self, uuids: list[str], *, max_workers: int = 5) -> list[ProductRelease]:
         """Fetch multiple product releases by UUID in parallel.
 
+        See :meth:`get_products` for concurrency caveats.
+
         Args:
             uuids: List of product release UUIDs.
             max_workers: Maximum concurrent threads (default 5).
@@ -644,6 +652,8 @@ class TeaClient:
 
     def get_artifacts(self, uuids: list[str], *, max_workers: int = 5) -> list[Artifact]:
         """Fetch multiple artifacts by UUID in parallel.
+
+        See :meth:`get_products` for concurrency caveats.
 
         Args:
             uuids: List of artifact UUIDs.
