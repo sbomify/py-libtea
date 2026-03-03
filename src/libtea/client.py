@@ -690,7 +690,14 @@ class TeaClient:
             raise ValueError(f"max_workers must be >= 1, got {max_workers}")
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = [pool.submit(fn, uid) for uid in uuids]
-            return [f.result() for f in futures]
+            try:
+                return [f.result() for f in futures]
+            except Exception:
+                # Cancel pending futures so we don't block waiting for
+                # in-flight work after the first failure.
+                for f in futures:
+                    f.cancel()
+                raise
 
     # --- Cache ---
 
