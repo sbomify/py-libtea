@@ -806,8 +806,10 @@ class TestCLIVerboseFlag:
     """Tests for the --verbose / -v flag."""
 
     @responses.activate
-    def test_verbose_flag_shows_libtea_debug(self):
-        """--verbose should enable libtea debug output but not urllib3."""
+    def test_verbose_flag_configures_logging_correctly(self):
+        """--verbose should set libtea to DEBUG and suppress urllib3/requests."""
+        import logging
+
         uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
         responses.get(
             f"{BASE_URL}/product/{uuid}",
@@ -815,9 +817,13 @@ class TestCLIVerboseFlag:
         )
         result = runner.invoke(app, ["-v", "--json", "get-product", uuid, "--base-url", BASE_URL])
         assert result.exit_code == 0
-        combined = result.output + (result.stderr if hasattr(result, "stderr") else "")
-        # Should produce valid JSON on stdout
-        assert "Test Product" in combined
+        # Verify JSON output is valid
+        data = json.loads(result.output)
+        assert data["name"] == "Test Product"
+        # Verify logging levels were configured correctly
+        assert logging.getLogger("libtea").level == logging.DEBUG
+        assert logging.getLogger("urllib3").level == logging.WARNING
+        assert logging.getLogger("requests").level == logging.WARNING
 
     @responses.activate
     def test_verbose_short_flag(self):

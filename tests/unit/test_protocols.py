@@ -14,4 +14,7 @@ class TestProtocol:
         client.close()
 
     def test_protocol_is_runtime_checkable(self):
-        assert hasattr(TeaClientProtocol, "__protocol_attrs__") or hasattr(TeaClientProtocol, "__abstractmethods__")
+        """TeaClientProtocol supports runtime isinstance checks."""
+        client = TeaClient(BASE_URL)
+        assert isinstance(client, TeaClientProtocol)
+        client.close()

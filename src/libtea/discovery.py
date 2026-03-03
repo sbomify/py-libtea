@@ -136,7 +136,7 @@ def fetch_well_known(
         redirects = 0
         try:
             while True:
-                response = requests.get(current_url, **kwargs)
+                response = requests.get(current_url, stream=True, **kwargs)
                 if 300 <= response.status_code < 400:
                     redirects += 1
                     if redirects > _max_discovery_redirects:
@@ -171,8 +171,9 @@ def fetch_well_known(
             if response.status_code >= 400:
                 body_snippet = ""
                 try:
-                    # Non-streamed response: body is already in .content
-                    raw_bytes = response.content[:201]
+                    if response.raw:
+                        response.raw.decode_content = True
+                    raw_bytes = response.raw.read(201) if response.raw else b""
                     body_snippet = raw_bytes.decode("utf-8", errors="replace")[:200]
                     if len(raw_bytes) > 200:
                         body_snippet += " (truncated)"
@@ -288,16 +289,14 @@ def _is_compatible_version(client: _SemVer, server: _SemVer) -> bool:
     Compares only core version (major.minor.patch), ignoring prerelease tags.
 
     Rules:
-    - For pre-1.0 (major == 0): same major, client minor >= server minor.
-    - For 1.0+: same major, client core >= server core.
+    - Same major version.
+    - Server core version (major.minor.patch) must be <= client core version.
     """
     if client.major != server.major:
         return False
     # Compare only (major, minor, patch), ignoring prerelease/build metadata
     client_core = (client.major, client.minor, client.patch)
     server_core = (server.major, server.minor, server.patch)
-    if client.major == 0:
-        return client.minor >= server.minor
     return client_core >= server_core
 
 

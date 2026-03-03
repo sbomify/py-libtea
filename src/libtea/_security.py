@@ -77,8 +77,8 @@ def _validate_download_url(url: str, *, allow_private_ips: bool = False) -> None
     Args:
         url: URL to validate.
         allow_private_ips: When ``True``, skip IP-based SSRF checks (private IP,
-            DNS rebinding, blocked hostnames). Scheme and hostname-presence
-            validation is always enforced.
+            DNS rebinding). Scheme, hostname-presence, and blocked-hostname
+            (cloud metadata, k8s) validation is always enforced.
     """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
@@ -86,12 +86,14 @@ def _validate_download_url(url: str, *, allow_private_ips: bool = False) -> None
     if not parsed.hostname:
         raise TeaValidationError(f"URL must include a hostname: {url!r}")
 
-    if allow_private_ips:
-        return
-
     hostname = parsed.hostname.lower()
+
+    # Always enforce blocked hostnames (cloud metadata, k8s) even with allow_private_ips
     if hostname in _BLOCKED_HOSTNAMES:
         raise TeaValidationError(f"URL must not target internal hosts: {hostname!r}")
+
+    if allow_private_ips:
+        return
 
     try:
         addr = ipaddress.ip_address(hostname)

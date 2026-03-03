@@ -78,13 +78,25 @@ class TestSsrfProtection:
             "http://127.0.0.1/file.xml",
             "http://10.0.0.1/file.xml",
             "http://192.168.1.1/file.xml",
-            "http://localhost/file.xml",
             "http://100.64.0.1/file.xml",
         ],
     )
     def test_allow_private_ips_bypasses_internal_checks(self, url):
         """allow_private_ips=True skips IP-based SSRF checks."""
         _validate_download_url(url, allow_private_ips=True)
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://localhost/file.xml",
+            "https://metadata.google.internal/latest",
+            "https://kubernetes.default.svc/api",
+        ],
+    )
+    def test_allow_private_ips_still_rejects_blocked_hostnames(self, url):
+        """Blocked hostnames (cloud metadata, k8s) are always enforced."""
+        with pytest.raises(TeaValidationError, match="internal hosts"):
+            _validate_download_url(url, allow_private_ips=True)
 
     def test_allow_private_ips_still_rejects_bad_scheme(self):
         """Scheme validation is always enforced, even with allow_private_ips."""
