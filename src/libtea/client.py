@@ -533,8 +533,8 @@ class TeaClient:
             TeaChecksumError: If any checksum does not match.
         """
         for cs in checksums:
-            assert cs.algorithm_type is not None  # guaranteed by caller's filter
-            assert cs.algorithm_value is not None
+            if cs.algorithm_type is None or cs.algorithm_value is None:
+                continue  # skip incomplete checksums (fields optional per spec)
             alg_name = cs.algorithm_type.value
             expected = cs.algorithm_value.lower()
             if alg_name not in computed:

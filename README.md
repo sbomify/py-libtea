@@ -16,7 +16,7 @@ TEA is an open standard for discovering and retrieving software transparency art
 ### Features
 
 - Auto-discovery via `.well-known/tea` and TEI URNs
-- Flexible version negotiation — client 0.3.0 can connect to server 0.2.0-beta.2
+- Flexible version negotiation — connects to older server versions within the same major series
 - Products, components, releases, and versioned collections
 - Search by PURL, CPE, or TEI identifier
 - Pagination auto-iterators for search results
