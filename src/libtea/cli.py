@@ -51,8 +51,9 @@ def _configure_logging(*, verbose: bool, debug: bool) -> None:
 def shared_options(fn):  # type: ignore[no-untyped-def]
     """Apply connection options and global flags to a command function.
 
-    Global flags (``--json``, ``--debug``) are applied per-command so they
-    work in any position (before or after the subcommand name).
+    Global flags (``--json``, ``--verbose``, ``--debug``, ``--allow-private-ips``)
+    are applied per-command so they work in any position (before or after
+    the subcommand name).
     """
 
     @click.option("--port", type=int, default=None, help="Port for well-known resolution")

@@ -312,6 +312,8 @@ The `tea-cli` command provides a terminal interface for all TEA operations. Inst
 
 ### Global options
 
+These flags can be placed before or after the subcommand name. They appear under each subcommand's `--help` output.
+
 ```
 --json             Output raw JSON instead of rich-formatted tables
 --verbose, -v      Show verbose output (libtea debug logs)
@@ -320,7 +322,7 @@ The `tea-cli` command provides a terminal interface for all TEA operations. Inst
 --version          Show version
 ```
 
-All commands accept connection options: `--base-url`, `--domain`, `--token`, `--auth`, `--use-http`, `--port`.
+All commands also accept connection options: `--base-url`, `--domain`, `--token`, `--auth`, `--use-http`, `--port`.
 
 ### Discover
 

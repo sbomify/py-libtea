@@ -156,6 +156,36 @@ class TestResponseCache:
         assert len(products) == 2
 
     @responses.activate
+    def test_cache_evicts_oldest_when_full(self):
+        """Cache should evict the oldest entry when max size is reached."""
+        with TeaClient(BASE_URL, cache_ttl=60.0) as client:
+            # Shrink max entries for testing
+            client._http._cache_max_entries = 2
+
+            # Fill cache with 2 entries
+            responses.get(f"{BASE_URL}/product/{UUID1}", json=_product_json(UUID1, "First"))
+            responses.get(f"{BASE_URL}/product/{UUID2}", json=_product_json(UUID2, "Second"))
+            client.get_product(UUID1)
+            client.get_product(UUID2)
+            assert len(responses.calls) == 2
+
+            # Add a 3rd entry — should evict UUID1
+            uuid3 = "c3d4e5f6-a7b8-9012-cdef-123456789012"
+            responses.get(f"{BASE_URL}/product/{uuid3}", json=_product_json(uuid3, "Third"))
+            client.get_product(uuid3)
+            assert len(client._http._cache) == 2
+
+            # UUID2 and UUID3 should still be cached
+            client.get_product(UUID2)
+            client.get_product(uuid3)
+            assert len(responses.calls) == 3  # no new HTTP calls
+
+            # UUID1 was evicted — should trigger a new HTTP call
+            responses.get(f"{BASE_URL}/product/{UUID1}", json=_product_json(UUID1, "First-Refetched"))
+            client.get_product(UUID1)
+            assert len(responses.calls) == 4
+
+    @responses.activate
     def test_concurrent_cache_reads_are_safe(self):
         """Multiple threads reading the same cached entry should not raise."""
         responses.get(

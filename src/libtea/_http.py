@@ -160,6 +160,7 @@ class TeaHttpClient:
         self._session.mount("http://", adapter)
 
         self._cache_ttl = cache_ttl
+        self._cache_max_entries = 256
         self._cache: dict[tuple[str, frozenset[tuple[str, Any]]], tuple[float, Any]] = {}
         self._cache_lock = threading.Lock()
 
@@ -231,9 +232,12 @@ class TeaHttpClient:
             except (ValueError, UnicodeDecodeError) as exc:
                 raise TeaValidationError(f"Invalid JSON in response: {exc}") from exc
 
-            # Cache store
+            # Cache store (bounded: evict oldest entry when full)
             if cache_key is not None:
                 with self._cache_lock:
+                    if len(self._cache) >= self._cache_max_entries and cache_key not in self._cache:
+                        oldest_key = next(iter(self._cache))
+                        del self._cache[oldest_key]
                     self._cache[cache_key] = (time.monotonic(), result)
 
             return result
