@@ -595,8 +595,11 @@ class TeaClient:
         """
         return self._paginate(self.search_product_releases, page_size, id_type=id_type, id_value=id_value)
 
-    def iter_releases(self, uuid: str, *, page_size: int = 100) -> Iterator[ProductRelease]:
-        """Iterate over all releases for a product, auto-paginating.
+    def iter_releases_for_product(self, uuid: str, *, page_size: int = 100) -> Iterator[ProductRelease]:
+        """Iterate over all releases for a specific product UUID, auto-paginating.
+
+        This is the auto-paginated counterpart of :meth:`get_product_releases`.
+        Compare with :meth:`iter_product_releases` which searches by identifier.
 
         Args:
             uuid: Product UUID.

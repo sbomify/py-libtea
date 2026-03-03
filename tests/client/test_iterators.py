@@ -141,9 +141,9 @@ class TestIterProductReleases:
         assert releases[1].version == "2.0.0"
 
 
-class TestIterReleases:
+class TestIterReleasesForProduct:
     @responses.activate
-    def test_iter_releases_empty(self):
+    def test_iter_releases_for_product_empty(self):
         uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
         responses.get(
             f"{BASE_URL}/product/{uuid}/releases",
@@ -156,11 +156,11 @@ class TestIterReleases:
             },
         )
         with TeaClient(BASE_URL) as client:
-            releases = list(client.iter_releases(uuid))
+            releases = list(client.iter_releases_for_product(uuid))
         assert releases == []
 
     @responses.activate
-    def test_iter_releases_multi_page(self):
+    def test_iter_releases_for_product_multi_page(self):
         uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
         responses.get(
             f"{BASE_URL}/product/{uuid}/releases",
@@ -183,7 +183,7 @@ class TestIterReleases:
             },
         )
         with TeaClient(BASE_URL) as client:
-            releases = list(client.iter_releases(uuid, page_size=1))
+            releases = list(client.iter_releases_for_product(uuid, page_size=1))
         assert len(releases) == 2
         assert all(isinstance(r, ProductRelease) for r in releases)
 
