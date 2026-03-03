@@ -186,7 +186,7 @@ class Checksum(_TeaModel):
 class ReleaseDistribution(_TeaModel):
     """A distribution format for a component release (e.g. binary, source)."""
 
-    distribution_type: str
+    distribution_type: str | None = None
     description: str | None = None
     identifiers: tuple[Identifier, ...] = ()
     url: str | None = None
@@ -197,11 +197,19 @@ class ReleaseDistribution(_TeaModel):
 class ArtifactFormat(_TeaModel):
     """A TEA artifact in a specific format with download URL and checksums."""
 
-    media_type: str
+    media_type: str | None = None
     description: str | None = None
-    url: str
+    url: str | None = None
     signature_url: str | None = None
     checksums: tuple[Checksum, ...] = ()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_mime_type(cls, data: dict) -> dict:  # type: ignore[type-arg]
+        """Accept ``mimeType`` as an alias for ``mediaType`` (older server compat)."""
+        if isinstance(data, dict) and "mimeType" in data and "mediaType" not in data:
+            data["mediaType"] = data.pop("mimeType")
+        return data
 
 
 class Artifact(_TeaModel):

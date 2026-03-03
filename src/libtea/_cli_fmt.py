@@ -103,7 +103,7 @@ def _artifacts_table(artifacts: Sequence[Artifact], *, console: Console) -> None
     tbl.add_column("Applies To")
     tbl.add_column("Formats")
     for a in artifacts:
-        fmt_str = ", ".join(f.media_type for f in a.formats) or "-"
+        fmt_str = ", ".join(f.media_type or "?" for f in a.formats) or "-"
         applies = ", ".join(a.distribution_types) if a.distribution_types else "-"
         tbl.add_row(escape(a.uuid), escape(a.name), escape(a.type), escape(applies), escape(fmt_str))
     console.print(tbl)
@@ -121,7 +121,7 @@ def _formats_table(formats: Sequence[ArtifactFormat], *, console: Console) -> No
     tbl.add_column("Checksums")
     for f in formats:
         checksums = ", ".join(f"{cs.algorithm_type}:{cs.algorithm_value[:12]}..." for cs in f.checksums) or "-"
-        tbl.add_row(escape(f.media_type), _esc(f.description), escape(f.url), _esc(f.signature_url), escape(checksums))
+        tbl.add_row(_esc(f.media_type), _esc(f.description), _esc(f.url), _esc(f.signature_url), escape(checksums))
     console.print(tbl)
 
 
@@ -435,7 +435,7 @@ def _inspect_component_details(comp: dict[str, Any], *, console: Console) -> Non
                 ", ".join(f"{cs.get('algType', '?')}:{cs.get('algValue', '')[:12]}..." for cs in checksums_list) or "-"
             )
             tbl.add_row(
-                escape(d.get("distributionType", "-")),
+                _esc(d.get("distributionType")),
                 _esc(d.get("description")),
                 _esc(d.get("url")),
                 _esc(d.get("signatureUrl")),
