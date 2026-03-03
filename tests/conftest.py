@@ -11,14 +11,12 @@ BASE_URL = "https://api.example.com/tea/v1"
 # Public IP used by getaddrinfo mock so SSRF validation passes for test hostnames.
 _FAKE_PUBLIC_ADDR = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
 
-_real_getaddrinfo = socket.getaddrinfo
-
 
 def _mock_getaddrinfo(host, port, *args, **kwargs):
-    """Return a fake public IP for example.com and *.example.com test hostnames, delegate otherwise."""
+    """Return a fake public IP for example.com test hostnames; fail for all others."""
     if isinstance(host, str) and (host == "example.com" or host.endswith(".example.com")):
         return _FAKE_PUBLIC_ADDR
-    return _real_getaddrinfo(host, port, *args, **kwargs)
+    raise socket.gaierror(f"DNS resolution disabled for host {host!r} in tests")
 
 
 @pytest.fixture(autouse=True)
