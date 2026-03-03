@@ -857,6 +857,53 @@ class TestCLIVerboseFlag:
             for name, level in original_levels.items():
                 logging.getLogger(name).setLevel(level)
 
+    @responses.activate
+    def test_group_level_debug_not_overridden_by_subcommand(self):
+        """Group-level -d should not be undone by subcommand shared_options."""
+        import logging
+
+        loggers = {name: logging.getLogger(name) for name in ("libtea", "urllib3", "requests")}
+        original_levels = {name: lg.level for name, lg in loggers.items()}
+
+        try:
+            uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+            responses.get(
+                f"{BASE_URL}/product/{uuid}",
+                json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+            )
+            # -d before subcommand (group-level), no flags on subcommand
+            result = runner.invoke(app, ["-d", "--json", "get-product", uuid, "--base-url", BASE_URL])
+            assert result.exit_code == 0
+            assert logging.getLogger("libtea").level == logging.DEBUG
+            assert logging.getLogger("urllib3").level == logging.DEBUG
+        finally:
+            for name, level in original_levels.items():
+                logging.getLogger(name).setLevel(level)
+
+    @responses.activate
+    def test_group_level_verbose_not_overridden_by_subcommand(self):
+        """Group-level -v should not be undone by subcommand shared_options."""
+        import logging
+
+        loggers = {name: logging.getLogger(name) for name in ("libtea", "urllib3", "requests")}
+        original_levels = {name: lg.level for name, lg in loggers.items()}
+
+        try:
+            uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+            responses.get(
+                f"{BASE_URL}/product/{uuid}",
+                json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+            )
+            # -v before subcommand (group-level), no flags on subcommand
+            result = runner.invoke(app, ["-v", "--json", "get-product", uuid, "--base-url", BASE_URL])
+            assert result.exit_code == 0
+            assert logging.getLogger("libtea").level == logging.DEBUG
+            # -v suppresses urllib3/requests
+            assert logging.getLogger("urllib3").level == logging.WARNING
+        finally:
+            for name, level in original_levels.items():
+                logging.getLogger(name).setLevel(level)
+
     def test_verbose_flag_shown_in_help(self):
         result = runner.invoke(app, ["get-product", "--help"])
         plain = _strip_ansi(result.output)

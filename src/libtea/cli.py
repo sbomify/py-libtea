@@ -95,9 +95,11 @@ def shared_options(fn):  # type: ignore[no-untyped-def]
         ctx.ensure_object(dict)
         if output_json:
             ctx.obj["json"] = True
-        # Merge group-level --allow-private-ips with subcommand-level flag
+        # Merge group-level flags with subcommand-level flags
         if ctx.obj.get("allow_private_ips"):
             kwargs["allow_private_ips"] = True
+        verbose = verbose or ctx.obj.get("verbose", False)
+        debug = debug or ctx.obj.get("debug", False)
         _configure_logging(verbose=verbose, debug=debug)
         return ctx.invoke(fn, *args, **kwargs)
 
@@ -269,6 +271,10 @@ def app(ctx: click.Context, output_json: bool, verbose: bool, debug: bool, allow
         ctx.obj["json"] = True
     if allow_private_ips:
         ctx.obj["allow_private_ips"] = True
+    if verbose:
+        ctx.obj["verbose"] = True
+    if debug:
+        ctx.obj["debug"] = True
     _configure_logging(verbose=verbose, debug=debug)
 
 
