@@ -850,6 +850,36 @@ class TestCLIVerboseFlag:
         assert "-v" in plain
 
 
+class TestCLIAllowPrivateIps:
+    """Tests for the --allow-private-ips flag position flexibility."""
+
+    @responses.activate
+    def test_allow_private_ips_before_subcommand(self):
+        """--allow-private-ips works when placed before the subcommand name."""
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/product/{uuid}",
+            json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+        )
+        result = runner.invoke(app, ["--allow-private-ips", "--json", "get-product", uuid, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["name"] == "Test Product"
+
+    @responses.activate
+    def test_allow_private_ips_after_subcommand(self):
+        """--allow-private-ips works when placed after the subcommand name."""
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/product/{uuid}",
+            json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+        )
+        result = runner.invoke(app, ["--json", "get-product", uuid, "--allow-private-ips", "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["name"] == "Test Product"
+
+
 class TestCLIDiscoverQuiet:
     """Tests for the discover --quiet / -q flag."""
 

@@ -91,6 +91,9 @@ def shared_options(fn):  # type: ignore[no-untyped-def]
         ctx.ensure_object(dict)
         if output_json:
             ctx.obj["json"] = True
+        # Merge group-level --allow-private-ips with subcommand-level flag
+        if ctx.obj.get("allow_private_ips"):
+            kwargs["allow_private_ips"] = True
         _configure_logging(verbose=verbose, debug=debug)
         return ctx.invoke(fn, *args, **kwargs)
 
@@ -253,12 +256,15 @@ def _error(message: str) -> NoReturn:
 @click.option("--json", "output_json", is_flag=True, hidden=True)
 @click.option("-v", "--verbose", is_flag=True, hidden=True)
 @click.option("-d", "--debug", is_flag=True, hidden=True)
+@click.option("--allow-private-ips", is_flag=True, hidden=True)
 @click.pass_context
-def app(ctx: click.Context, output_json: bool, verbose: bool, debug: bool) -> None:
+def app(ctx: click.Context, output_json: bool, verbose: bool, debug: bool, allow_private_ips: bool) -> None:
     """TEA (Transparency Exchange API) CLI client."""
     ctx.ensure_object(dict)
     if output_json:
         ctx.obj["json"] = True
+    if allow_private_ips:
+        ctx.obj["allow_private_ips"] = True
     _configure_logging(verbose=verbose, debug=debug)
 
 
