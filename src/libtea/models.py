@@ -146,10 +146,12 @@ class Identifier(_TeaModel):
     The ``id_type`` field accepts any string for forward-compatibility with
     future TEA spec versions. Compare against :class:`IdentifierType` members
     for known types (e.g. ``ident.id_type == IdentifierType.PURL``).
+
+    Per spec, neither field is required.
     """
 
-    id_type: str
-    id_value: str
+    id_type: str | None = None
+    id_value: str | None = None
 
 
 class Checksum(_TeaModel):
@@ -162,8 +164,8 @@ class Checksum(_TeaModel):
     # Manual aliases because the TEA spec wire format uses abbreviated names
     # (algType/algValue) rather than the full algorithmType/algorithmValue
     # that to_camel would generate from the Python field names.
-    algorithm_type: ChecksumAlgorithm = Field(alias="algType")
-    algorithm_value: str = Field(alias="algValue")
+    algorithm_type: ChecksumAlgorithm | None = Field(default=None, alias="algType")
+    algorithm_value: str | None = Field(default=None, alias="algValue")
 
     @field_validator("algorithm_type", mode="before")
     @classmethod
@@ -213,19 +215,25 @@ class ArtifactFormat(_TeaModel):
 
 
 class Artifact(_TeaModel):
-    """A security-related artifact (e.g. SBOM, VEX, attestation) with available formats."""
+    """A security-related artifact (e.g. SBOM, VEX, attestation) with available formats.
 
-    uuid: str
-    name: str
-    type: ArtifactType
+    Per spec, no fields are required.
+    """
+
+    uuid: str | None = None
+    name: str | None = None
+    type: ArtifactType | None = None
     distribution_types: tuple[str, ...] | None = None
     formats: tuple[ArtifactFormat, ...] = ()
 
 
 class CollectionUpdateReason(_TeaModel):
-    """Reason for a collection version update, with optional comment."""
+    """Reason for a collection version update, with optional comment.
 
-    type: CollectionUpdateReasonType
+    Per spec, no fields are required.
+    """
+
+    type: CollectionUpdateReasonType | None = None
     comment: str | None = None
 
 

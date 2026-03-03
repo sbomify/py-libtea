@@ -147,18 +147,6 @@ class TestValidationErrors:
         ident = Identifier.model_validate({"idType": "SPDXID", "idValue": "some-value"})
         assert ident.id_type == "SPDXID"
 
-    def test_checksum_rejects_missing_algorithm_type(self):
-        with pytest.raises(ValidationError):
-            Checksum.model_validate({"algValue": "abcdef1234567890"})
-
-    def test_checksum_rejects_missing_algorithm_value(self):
-        with pytest.raises(ValidationError):
-            Checksum.model_validate({"algType": "SHA-256"})
-
-    def test_identifier_rejects_missing_id_value(self):
-        with pytest.raises(ValidationError):
-            Identifier.model_validate({"idType": "PURL"})
-
 
 class TestEnumCompleteness:
     def test_checksum_algorithm_all_members(self):
@@ -623,3 +611,62 @@ class TestInteropCompat:
 
         dist = ReleaseDistribution.model_validate({})
         assert dist.distribution_type is None
+
+    def test_identifier_all_fields_optional(self):
+        """Per spec, Identifier has no required fields."""
+        ident = Identifier.model_validate({})
+        assert ident.id_type is None
+        assert ident.id_value is None
+
+    def test_identifier_partial_fields(self):
+        """Per spec, only idType without idValue is valid."""
+        ident = Identifier.model_validate({"idType": "PURL"})
+        assert ident.id_type == "PURL"
+        assert ident.id_value is None
+
+    def test_checksum_all_fields_optional(self):
+        """Per spec, Checksum has no required fields."""
+        cs = Checksum.model_validate({})
+        assert cs.algorithm_type is None
+        assert cs.algorithm_value is None
+
+    def test_checksum_partial_algorithm_type_only(self):
+        """Per spec, algType without algValue is valid."""
+        cs = Checksum.model_validate({"algType": "SHA-256"})
+        assert cs.algorithm_type == ChecksumAlgorithm.SHA_256
+        assert cs.algorithm_value is None
+
+    def test_artifact_all_fields_optional(self):
+        """Per spec, Artifact has no required fields."""
+        from libtea.models import Artifact
+
+        art = Artifact.model_validate({})
+        assert art.uuid is None
+        assert art.name is None
+        assert art.type is None
+        assert art.formats == ()
+
+    def test_artifact_partial_fields(self):
+        """Per spec, uuid alone is valid."""
+        from libtea.models import Artifact
+
+        art = Artifact.model_validate({"uuid": "abc-123"})
+        assert art.uuid == "abc-123"
+        assert art.name is None
+        assert art.type is None
+
+    def test_collection_update_reason_all_fields_optional(self):
+        """Per spec, CollectionUpdateReason has no required fields."""
+        from libtea.models import CollectionUpdateReason
+
+        reason = CollectionUpdateReason.model_validate({})
+        assert reason.type is None
+        assert reason.comment is None
+
+    def test_collection_update_reason_comment_only(self):
+        """Per spec, comment without type is valid."""
+        from libtea.models import CollectionUpdateReason
+
+        reason = CollectionUpdateReason.model_validate({"comment": "Updated manually"})
+        assert reason.type is None
+        assert reason.comment == "Updated manually"
