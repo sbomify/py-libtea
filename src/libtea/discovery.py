@@ -207,17 +207,18 @@ def fetch_well_known(
 
 
 def select_endpoints(well_known: TeaWellKnown, supported_version: str) -> list[TeaEndpoint]:
-    """Select all endpoints that support the given version, sorted by priority.
+    """Select all endpoints that exactly match the given version, sorted by priority.
 
-    Per TEA spec: uses SemVer 2.0.0 comparison to match versions, then
-    sorts by highest matching version with priority as tiebreaker.
+    Uses exact SemVer 2.0.0 comparison (no range matching). For flexible
+    version negotiation that can downgrade to compatible server versions,
+    use :func:`select_best_endpoint` instead.
 
     Args:
         well_known: Parsed .well-known/tea document.
-        supported_version: SemVer version string the client supports.
+        supported_version: Exact SemVer version string to match.
 
     Returns:
-        List of matching endpoints, best first.
+        List of matching endpoints, highest priority first.
 
     Raises:
         TeaDiscoveryError: If no endpoint supports the requested version.
@@ -244,7 +245,7 @@ def select_endpoints(well_known: TeaWellKnown, supported_version: str) -> list[T
             f"No compatible endpoint found for version {supported_version!r}. Available versions: {sorted(available)}"
         )
 
-    # Sort by: highest SemVer version desc, then priority desc (default 1.0 per spec)
+    # All matched versions are identical (exact match); sort by priority desc (default 1.0 per spec)
     candidates.sort(
         key=_endpoint_sort_key,
         reverse=True,
