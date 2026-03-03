@@ -144,7 +144,7 @@ class TeaClient:
         well_known = fetch_well_known(domain, timeout=timeout, scheme=scheme, port=port)
         best = select_best_endpoint(well_known, version)
         matched_version = best.matched_version
-        # Get all endpoints compatible with the matched version for failover
+        # Get all endpoints that advertise the matched version (exact match) for failover
         candidates = select_endpoints(well_known, matched_version)
 
         errors: list[tuple[str, Exception]] = []

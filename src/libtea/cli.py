@@ -70,7 +70,9 @@ def shared_options(fn):  # type: ignore[no-untyped-def]
     )
     @click.option("--base-url", envvar="TEA_BASE_URL", default=None, help="TEA server base URL")
     @click.option(
-        "--allow-private-ips", is_flag=True, help="Allow downloads from private/internal IPs (disables SSRF protection)"
+        "--allow-private-ips",
+        is_flag=True,
+        help="Allow artifact downloads from private/internal IPs (relaxes SSRF checks for downloads only)",
     )
     @click.option("--json", "output_json", is_flag=True, help="Output raw JSON instead of rich-formatted tables")
     @click.option("-v", "--verbose", is_flag=True, help="Show verbose output (libtea debug logs)")
