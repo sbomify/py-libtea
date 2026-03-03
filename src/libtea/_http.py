@@ -232,11 +232,11 @@ class TeaHttpClient:
             except (ValueError, UnicodeDecodeError) as exc:
                 raise TeaValidationError(f"Invalid JSON in response: {exc}") from exc
 
-            # Cache store (bounded: evict oldest entry when full)
+            # Cache store (bounded: evict least-recently-stored entry when full)
             if cache_key is not None:
                 with self._cache_lock:
                     if len(self._cache) >= self._cache_max_entries and cache_key not in self._cache:
-                        oldest_key = next(iter(self._cache))
+                        oldest_key = min(self._cache, key=lambda k: self._cache[k][0])
                         del self._cache[oldest_key]
                     self._cache[cache_key] = (time.monotonic(), result)
 

@@ -417,7 +417,7 @@ class TestSelectEndpoint:
                 {"url": "https://api.example.com", "versions": ["2.0.0"]},
             ]
         )
-        with pytest.raises(TeaDiscoveryError, match="No compatible endpoint"):
+        with pytest.raises(TeaDiscoveryError, match="No .*endpoint found"):
             select_endpoint(wk, "1.0.0")
 
     def test_prefers_highest_matching_version(self):
@@ -453,7 +453,7 @@ class TestSelectEndpoint:
                 {"url": "https://api.example.com", "versions": ["1.0"]},
             ]
         )
-        with pytest.raises(TeaDiscoveryError, match="No compatible endpoint"):
+        with pytest.raises(TeaDiscoveryError, match="No .*endpoint found"):
             select_endpoint(wk, "1.0.0")
 
     def test_semver_matches_with_prerelease(self):
@@ -473,7 +473,7 @@ class TestSelectEndpoint:
                 {"url": "https://api.example.com", "versions": ["1.0.0-beta.1"]},
             ]
         )
-        with pytest.raises(TeaDiscoveryError, match="No compatible endpoint"):
+        with pytest.raises(TeaDiscoveryError, match="No .*endpoint found"):
             select_endpoint(wk, "1.0.0")
 
     def test_invalid_semver_in_endpoint_skipped(self):
@@ -584,7 +584,7 @@ class TestSelectEndpoints:
                 {"url": "https://api.example.com", "versions": ["2.0.0"]},
             ]
         )
-        with pytest.raises(TeaDiscoveryError, match="No compatible endpoint"):
+        with pytest.raises(TeaDiscoveryError, match="No .*endpoint found"):
             select_endpoints(wk, "1.0.0")
 
     def test_select_endpoint_returns_first(self):
@@ -681,7 +681,7 @@ class TestSelectBestEndpoint:
     def test_rejects_higher_server_version(self):
         """Client 0.2.0-beta.2 cannot connect to server 0.4.0."""
         wk = self._make_well_known([{"url": "https://api.example.com", "versions": ["0.4.0"]}])
-        with pytest.raises(TeaDiscoveryError, match="No compatible endpoint"):
+        with pytest.raises(TeaDiscoveryError, match="No .*endpoint found"):
             select_best_endpoint(wk, "0.2.0-beta.2")
 
     def test_prefers_highest_compatible(self):
@@ -703,7 +703,7 @@ class TestSelectBestEndpoint:
 
     def test_no_compatible_version_raises(self):
         wk = self._make_well_known([{"url": "https://api.example.com", "versions": ["2.0.0"]}])
-        with pytest.raises(TeaDiscoveryError, match="No compatible endpoint"):
+        with pytest.raises(TeaDiscoveryError, match="No .*endpoint found"):
             select_best_endpoint(wk, "0.3.0-beta.2")
 
     def test_malformed_version_strings_skipped(self):

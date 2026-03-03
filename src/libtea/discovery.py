@@ -242,7 +242,7 @@ def select_endpoints(well_known: TeaWellKnown, supported_version: str) -> list[T
     if not candidates:
         available = {v for ep in well_known.endpoints for v in ep.versions}
         raise TeaDiscoveryError(
-            f"No compatible endpoint found for version {supported_version!r}. Available versions: {sorted(available)}"
+            f"No endpoint found for version {supported_version!r}. Available versions: {sorted(available)}"
         )
 
     # All matched versions are identical (exact match); sort by priority desc (default 1.0 per spec)
