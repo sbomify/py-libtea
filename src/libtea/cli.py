@@ -38,6 +38,9 @@ def _configure_logging(*, verbose: bool, debug: bool) -> None:
     if debug:
         logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(message)s", stream=sys.stderr)
         logging.getLogger("libtea").setLevel(logging.DEBUG)
+        # Ensure full firehose even if --verbose was applied first (e.g. group-level -v, subcommand -d)
+        logging.getLogger("urllib3").setLevel(logging.DEBUG)
+        logging.getLogger("requests").setLevel(logging.DEBUG)
     elif verbose:
         logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(message)s", stream=sys.stderr)
         logging.getLogger("libtea").setLevel(logging.DEBUG)

@@ -10,7 +10,6 @@ click = pytest.importorskip("click", reason="click not installed (install libtea
 
 from click.testing import CliRunner  # noqa: E402
 
-import libtea.cli  # noqa: E402
 from libtea.cli import app  # noqa: E402
 
 runner = CliRunner()
@@ -22,14 +21,6 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 def _strip_ansi(text: str) -> str:
     return _ANSI_RE.sub("", text)
-
-
-@pytest.fixture(autouse=True)
-def _reset_cli_flags():
-    """Reset module-level CLI flags between test invocations."""
-    libtea.cli._json_output = False
-    yield
-    libtea.cli._json_output = False
 
 
 class TestCliEntryPoint:
@@ -842,6 +833,29 @@ class TestCLIVerboseFlag:
         )
         result = runner.invoke(app, ["--verbose", "--json", "get-product", uuid, "--base-url", BASE_URL])
         assert result.exit_code == 0
+
+    @responses.activate
+    def test_debug_overrides_verbose_suppression(self):
+        """When both -v and -d are used, -d should enable full firehose (urllib3 at DEBUG, not WARNING)."""
+        import logging
+
+        loggers = {name: logging.getLogger(name) for name in ("libtea", "urllib3", "requests")}
+        original_levels = {name: lg.level for name, lg in loggers.items()}
+
+        try:
+            uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+            responses.get(
+                f"{BASE_URL}/product/{uuid}",
+                json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+            )
+            result = runner.invoke(app, ["-v", "-d", "--json", "get-product", uuid, "--base-url", BASE_URL])
+            assert result.exit_code == 0
+            # -d should override -v's suppression: urllib3/requests at DEBUG, not WARNING
+            assert logging.getLogger("urllib3").level == logging.DEBUG
+            assert logging.getLogger("requests").level == logging.DEBUG
+        finally:
+            for name, level in original_levels.items():
+                logging.getLogger(name).setLevel(level)
 
     def test_verbose_flag_shown_in_help(self):
         result = runner.invoke(app, ["get-product", "--help"])
