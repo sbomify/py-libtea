@@ -623,7 +623,7 @@ class TeaClient:
             Products in the same order as ``uuids``.
 
         Raises:
-            TeaError: On the first error encountered.
+            TeaError: From the first failing UUID in input order.
         """
         return self._bulk_fetch(self.get_product, uuids, max_workers=max_workers)
 
@@ -638,7 +638,7 @@ class TeaClient:
             Product releases in the same order as ``uuids``.
 
         Raises:
-            TeaError: On the first error encountered.
+            TeaError: From the first failing UUID in input order.
         """
         return self._bulk_fetch(self.get_product_release, uuids, max_workers=max_workers)
 
@@ -653,7 +653,7 @@ class TeaClient:
             Artifacts in the same order as ``uuids``.
 
         Raises:
-            TeaError: On the first error encountered.
+            TeaError: From the first failing UUID in input order.
         """
         return self._bulk_fetch(self.get_artifact, uuids, max_workers=max_workers)
 
