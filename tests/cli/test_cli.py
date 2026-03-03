@@ -810,20 +810,28 @@ class TestCLIVerboseFlag:
         """--verbose should set libtea to DEBUG and suppress urllib3/requests."""
         import logging
 
-        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
-        responses.get(
-            f"{BASE_URL}/product/{uuid}",
-            json={"uuid": uuid, "name": "Test Product", "identifiers": []},
-        )
-        result = runner.invoke(app, ["-v", "--json", "get-product", uuid, "--base-url", BASE_URL])
-        assert result.exit_code == 0
-        # Verify JSON output is valid
-        data = json.loads(result.output)
-        assert data["name"] == "Test Product"
-        # Verify logging levels were configured correctly
-        assert logging.getLogger("libtea").level == logging.DEBUG
-        assert logging.getLogger("urllib3").level == logging.WARNING
-        assert logging.getLogger("requests").level == logging.WARNING
+        # Save original logger levels to restore after test
+        loggers = {name: logging.getLogger(name) for name in ("libtea", "urllib3", "requests")}
+        original_levels = {name: lg.level for name, lg in loggers.items()}
+
+        try:
+            uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+            responses.get(
+                f"{BASE_URL}/product/{uuid}",
+                json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+            )
+            result = runner.invoke(app, ["-v", "--json", "get-product", uuid, "--base-url", BASE_URL])
+            assert result.exit_code == 0
+            # Verify JSON output is valid
+            data = json.loads(result.output)
+            assert data["name"] == "Test Product"
+            # Verify logging levels were configured correctly
+            assert logging.getLogger("libtea").level == logging.DEBUG
+            assert logging.getLogger("urllib3").level == logging.WARNING
+            assert logging.getLogger("requests").level == logging.WARNING
+        finally:
+            for name, level in original_levels.items():
+                logging.getLogger(name).setLevel(level)
 
     @responses.activate
     def test_verbose_short_flag(self):
