@@ -188,6 +188,29 @@ class TestIterReleases:
         assert all(isinstance(r, ProductRelease) for r in releases)
 
 
+class TestPaginateValidation:
+    def test_iter_products_rejects_zero_page_size(self):
+        from libtea.exceptions import TeaValidationError
+
+        with TeaClient(BASE_URL) as client:
+            with pytest.raises(TeaValidationError, match="page_size"):
+                list(client.iter_products("PURL", "pkg:pypi/foo", page_size=0))
+
+    def test_iter_products_rejects_negative_page_size(self):
+        from libtea.exceptions import TeaValidationError
+
+        with TeaClient(BASE_URL) as client:
+            with pytest.raises(TeaValidationError, match="page_size"):
+                list(client.iter_products("PURL", "pkg:pypi/foo", page_size=-1))
+
+    def test_iter_products_rejects_oversized_page_size(self):
+        from libtea.exceptions import TeaValidationError
+
+        with TeaClient(BASE_URL) as client:
+            with pytest.raises(TeaValidationError, match="page_size"):
+                list(client.iter_products("PURL", "pkg:pypi/foo", page_size=10001))
+
+
 class TestBulkFetch:
     @responses.activate
     def test_get_products_parallel(self):

@@ -560,6 +560,7 @@ class TeaClient:
     @staticmethod
     def _paginate(fetch_page: typing.Callable[..., typing.Any], page_size: int, **kwargs: typing.Any) -> Iterator[_T]:
         """Generic paginator: calls *fetch_page* with page_offset/page_size, yields results."""
+        _validate_page_size(page_size)
         offset = 0
         while True:
             page = fetch_page(**kwargs, page_offset=offset, page_size=page_size)
@@ -657,12 +658,14 @@ class TeaClient:
     def _bulk_fetch(fn: typing.Callable[[str], _T], uuids: list[str], *, max_workers: int = 5) -> list[_T]:
         """Fetch multiple resources in parallel, preserving input order.
 
-        Note: ``fn`` is a bound method that uses a shared ``requests.Session``.
-        ``requests.Session`` is not officially thread-safe, but CPython's GIL
-        makes concurrent read-only GETs safe in practice (no cookie/auth
-        mutation occurs). A proper per-thread session or async client is
-        planned for the httpx migration.
+        Note: ``fn`` is typically a bound method that issues HTTP requests via
+        a shared ``requests.Session``. The ``requests`` library does not
+        document ``Session`` as thread-safe, so concurrent use may expose race
+        conditions in connection pooling. A per-thread session or async client
+        is planned for the httpx migration.
         """
+        if not uuids:
+            return []
         if max_workers < 1:
             raise ValueError(f"max_workers must be >= 1, got {max_workers}")
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
