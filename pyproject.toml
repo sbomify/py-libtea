@@ -47,6 +47,7 @@ tea-conformance = "libtea.conformance.plugin"
 dev = [
     "pytest>=9.0.0,<10",
     "pytest-cov>=7.0.0,<8",
+    "pytest-timeout>=2.3.0,<3",
     "ruff>=0.15.0,<0.16",
     "pre-commit>=4.5.0,<5",
     "responses>=0.26.0,<1",
@@ -66,7 +67,7 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "--cov=libtea --cov-report=term-missing --cov-branch"
+addopts = "--cov=src/libtea --cov-report=term-missing --cov-branch --timeout=30"
 
 [tool.coverage.run]
 branch = true
