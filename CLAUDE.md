@@ -52,7 +52,7 @@ _cli_entry.py        Entry point wrapper that handles missing CLI extras gracefu
 
 conformance/         Conformance test suite (optional dependency: pytest)
   __init__.py        Public API: run_conformance, CheckResult, CheckStatus, ConformanceResult
-  _checks.py         25 check functions organized by category, CheckContext shared state
+  _checks.py         26 check functions organized by category, CheckContext shared state
   _runner.py         Orchestrates checks, collects results into ConformanceResult
   _types.py          CheckStatus (StrEnum), CheckResult (frozen dataclass), ConformanceResult
   plugin.py          pytest plugin — --tea-base-url options, parametrized test generation

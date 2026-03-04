@@ -475,7 +475,7 @@ _TEA_CLI_COMPLETE=fish_source tea-cli | source
 
 ## Conformance testing
 
-The conformance suite validates that a TEA server correctly implements the specification. It runs 25 checks covering discovery, products, releases, components, artifacts, CLE, and cross-cutting concerns (UUID format, pagination, camelCase).
+The conformance suite validates that a TEA server correctly implements the specification. It runs 26 checks covering discovery, products, releases, components, artifacts, CLE, and cross-cutting concerns (UUID format, pagination, camelCase).
 
 ### Programmatic
 

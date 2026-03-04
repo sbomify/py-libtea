@@ -1,6 +1,6 @@
 # Conformance Test Suite
 
-The `libtea.conformance` module validates that a TEA server correctly implements the [Transparency Exchange API specification](https://github.com/CycloneDX/transparency-exchange-api). It runs 25 checks covering discovery, products, releases, components, artifacts, CLE, and cross-cutting concerns.
+The `libtea.conformance` module validates that a TEA server correctly implements the [Transparency Exchange API specification](https://github.com/CycloneDX/transparency-exchange-api). It runs 26 checks covering discovery, products, releases, components, artifacts, CLE, and cross-cutting concerns.
 
 ## Installation
 
