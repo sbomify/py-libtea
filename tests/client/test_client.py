@@ -170,6 +170,51 @@ class TestSearchProductReleases:
         assert "idType=PURL" in str(request.url)
 
 
+class TestListProductReleases:
+    @responses.activate
+    def test_list_product_releases_no_filters(self, client, base_url):
+        responses.get(
+            f"{base_url}/productReleases",
+            json={
+                "timestamp": "2024-03-20T15:30:00Z",
+                "pageStartIndex": 0,
+                "pageSize": 100,
+                "totalResults": 1,
+                "results": [
+                    {
+                        "uuid": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+                        "version": "1.0.0",
+                        "createdDate": "2024-01-01T00:00:00Z",
+                        "components": [{"uuid": "c3d4e5f6-a7b8-9012-cdef-123456789012"}],
+                    }
+                ],
+            },
+        )
+        resp = client.list_product_releases()
+        assert isinstance(resp, PaginatedProductReleaseResponse)
+        assert resp.total_results == 1
+        request = responses.calls[0].request
+        assert "idType" not in str(request.url)
+        assert "idValue" not in str(request.url)
+
+    @responses.activate
+    def test_list_product_releases_with_pagination(self, client, base_url):
+        responses.get(
+            f"{base_url}/productReleases",
+            json={
+                "timestamp": "2024-03-20T15:30:00Z",
+                "pageStartIndex": 5,
+                "pageSize": 50,
+                "totalResults": 100,
+                "results": [],
+            },
+        )
+        client.list_product_releases(page_offset=5, page_size=50)
+        request = responses.calls[0].request
+        assert "pageOffset=5" in str(request.url)
+        assert "pageSize=50" in str(request.url)
+
+
 class TestProduct:
     @responses.activate
     def test_get_product(self, client, base_url):

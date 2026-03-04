@@ -270,6 +270,24 @@ class TeaClient:
 
     # --- Product Releases ---
 
+    def list_product_releases(self, *, page_offset: int = 0, page_size: int = 100) -> PaginatedProductReleaseResponse:
+        """List all product releases (no identifier filter).
+
+        Args:
+            page_offset: Zero-based page offset (default 0).
+            page_size: Number of results per page (default 100, max 10000).
+
+        Returns:
+            Paginated response containing product releases.
+        """
+        _validate_page_size(page_size)
+        _validate_page_offset(page_offset)
+        data = self._http.get_json(
+            "/productReleases",
+            params={"pageOffset": page_offset, "pageSize": page_size},
+        )
+        return _validate(PaginatedProductReleaseResponse, data)
+
     def search_product_releases(
         self, id_type: str, id_value: str, *, page_offset: int = 0, page_size: int = 100
     ) -> PaginatedProductReleaseResponse:
