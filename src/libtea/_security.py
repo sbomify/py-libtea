@@ -30,15 +30,17 @@ _CGNAT_NETWORK = ipaddress.IPv4Network("100.64.0.0/10")
 
 def _is_internal_ip(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     """Return True if the IP address is non-global: private, loopback, link-local, reserved, unspecified, multicast, or CGNAT."""
+    # Unwrap IPv4-mapped IPv6 (::ffff:x.x.x.x) first so all checks below
+    # operate on the real IPv4 address.  Without this, Python 3.12+ considers
+    # the ::ffff:0:0/96 prefix itself "private", making public IPs like
+    # ::ffff:8.8.8.8 incorrectly fail the is_private check.
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
+        addr = addr.ipv4_mapped
     if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
         return True
     if addr.is_unspecified or addr.is_multicast:
         return True
-    # Extract embedded IPv4 from IPv4-mapped IPv6 (::ffff:x.x.x.x) before CGNAT check
-    check_v4 = addr
-    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
-        check_v4 = addr.ipv4_mapped
-    if isinstance(check_v4, ipaddress.IPv4Address) and check_v4 in _CGNAT_NETWORK:
+    if isinstance(addr, ipaddress.IPv4Address) and addr in _CGNAT_NETWORK:
         return True
     return False
 
