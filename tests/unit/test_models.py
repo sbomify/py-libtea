@@ -13,6 +13,7 @@ from libtea.models import (
     Collection,
     CollectionBelongsTo,
     CollectionUpdateReasonType,
+    ErrorResponse,
     ErrorType,
     Identifier,
     IdentifierType,
@@ -670,3 +671,29 @@ class TestInteropCompat:
         reason = CollectionUpdateReason.model_validate({"comment": "Updated manually"})
         assert reason.type is None
         assert reason.comment == "Updated manually"
+
+
+class TestErrorResponse:
+    def test_from_json_object_unknown(self):
+        data = {"error": "OBJECT_UNKNOWN"}
+        resp = ErrorResponse.model_validate(data)
+        assert resp.error == ErrorType.OBJECT_UNKNOWN
+
+    def test_from_json_object_not_shareable(self):
+        data = {"error": "OBJECT_NOT_SHAREABLE"}
+        resp = ErrorResponse.model_validate(data)
+        assert resp.error == ErrorType.OBJECT_NOT_SHAREABLE
+
+    def test_to_json(self):
+        resp = ErrorResponse(error=ErrorType.OBJECT_UNKNOWN)
+        data = resp.model_dump(by_alias=True)
+        assert data == {"error": "OBJECT_UNKNOWN"}
+
+    def test_rejects_unknown_error_type(self):
+        with pytest.raises(ValidationError):
+            ErrorResponse.model_validate({"error": "INVALID_TYPE"})
+
+    def test_extra_fields_tolerated(self):
+        """_TeaModel uses extra='ignore' — tolerant parsing for robustness."""
+        resp = ErrorResponse.model_validate({"error": "OBJECT_UNKNOWN", "detail": "something"})
+        assert resp.error == ErrorType.OBJECT_UNKNOWN
