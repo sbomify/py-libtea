@@ -1354,8 +1354,17 @@ class TestAllChecksRegistry:
         for check in ALL_CHECKS:
             assert callable(check), f"{check} is not callable"
 
+    @responses.activate
     def test_all_checks_have_unique_names(self):
         """Each check function should produce a unique check name."""
+        responses.get(f"{BASE_URL}/products", json=_PAGINATED_PRODUCTS)
+        responses.get(f"{BASE_URL}/productReleases", json=_PAGINATED_RELEASES)
+        responses.get(
+            f"{BASE_URL}/product/00000000-0000-0000-0000-000000000000",
+            status=404,
+            json={"error": "OBJECT_UNKNOWN"},
+        )
+        responses.get(f"{BASE_URL}/discovery", status=404, json={"error": "OBJECT_UNKNOWN"})
         client = _make_client()
         ctx = CheckContext()
         names = []
