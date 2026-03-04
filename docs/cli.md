@@ -282,13 +282,14 @@ tea-cli conformance --base-url URL [OPTIONS]
 | `--product-uuid` *UUID* | Explicit product UUID for direct testing. |
 | `--release-uuid` *UUID* | Explicit product release UUID. |
 | `--component-uuid` *UUID* | Explicit component UUID. |
+| `--component-release-uuid` *UUID* | Explicit component release UUID. |
 | `--artifact-uuid` *UUID* | Explicit artifact UUID. |
 | `--token` *TOKEN* | Bearer token. Can also be set via `TEA_TOKEN`. |
 | `--auth` *USER:PASSWORD* | Basic auth credentials. Can also be set via `TEA_AUTH`. |
 | `--timeout` *SECONDS* | Request timeout in seconds (default: 30). |
 | `--allow-private-ips` | Allow private IPs in downloads. |
 | `--json` | Output results as JSON. |
-| `-v`, `--verbose` | Show failure details. |
+| `-v`, `--verbose` | Show failure details and increase logging verbosity. |
 | `-d`, `--debug` | Show debug output. |
 
 The command exits with code 0 if all checks pass, and code 1 if any check fails.

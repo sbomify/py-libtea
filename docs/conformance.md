@@ -102,6 +102,7 @@ pytest --tea-base-url https://tea.example.com/v1 -v
 | `--tea-product-uuid` | Explicit product UUID |
 | `--tea-release-uuid` | Explicit product release UUID |
 | `--tea-component-uuid` | Explicit component UUID |
+| `--tea-component-release-uuid` | Explicit component release UUID |
 | `--tea-artifact-uuid` | Explicit artifact UUID |
 | `--tea-timeout` | Request timeout in seconds (default: 30) |
 

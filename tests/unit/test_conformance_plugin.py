@@ -45,6 +45,7 @@ class TestPytestAddoption:
         assert "--tea-product-uuid" in option_names
         assert "--tea-release-uuid" in option_names
         assert "--tea-component-uuid" in option_names
+        assert "--tea-component-release-uuid" in option_names
         assert "--tea-artifact-uuid" in option_names
         assert "--tea-timeout" in option_names
 
