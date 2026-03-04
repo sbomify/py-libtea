@@ -11,6 +11,8 @@ import functools
 import json
 import logging
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -30,14 +32,32 @@ from libtea.models import (
 
 logger = logging.getLogger("libtea")
 
-_json_output: bool = False
+
+def _configure_logging(*, verbose: bool, debug: bool) -> None:
+    """Set up logging based on --verbose / --debug flags."""
+    if debug:
+        logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(message)s", stream=sys.stderr)
+        logging.getLogger("libtea").setLevel(logging.DEBUG)
+        # Ensure full firehose even if --verbose was applied first (e.g. group-level -v, subcommand -d)
+        logging.getLogger("urllib3").setLevel(logging.DEBUG)
+        logging.getLogger("requests").setLevel(logging.DEBUG)
+    elif verbose:
+        logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(message)s", stream=sys.stderr)
+        logging.getLogger("libtea").setLevel(logging.DEBUG)
+        logging.getLogger("urllib3").setLevel(logging.WARNING)
+        logging.getLogger("requests").setLevel(logging.WARNING)
 
 
 # --- Shared options decorator ---
 
 
 def shared_options(fn):  # type: ignore[no-untyped-def]
-    """Apply the 7 common CLI options to a command function."""
+    """Apply connection options and global flags to a command function.
+
+    Global flags (``--json``, ``--verbose``, ``--debug``, ``--allow-private-ips``)
+    are applied per-command so they work in any position (before or after
+    the subcommand name).
+    """
 
     @click.option("--port", type=int, default=None, help="Port for well-known resolution")
     @click.option("--use-http", is_flag=True, help="Use HTTP instead of HTTPS for discovery")
@@ -53,9 +73,35 @@ def shared_options(fn):  # type: ignore[no-untyped-def]
         help="Bearer token (prefer TEA_TOKEN env var to avoid shell history exposure)",
     )
     @click.option("--base-url", envvar="TEA_BASE_URL", default=None, help="TEA server base URL")
+    @click.option(
+        "--allow-private-ips",
+        is_flag=True,
+        help="Allow artifact downloads from private/internal IPs (relaxes SSRF checks for downloads only)",
+    )
+    @click.option("--json", "output_json", is_flag=True, help="Output raw JSON instead of rich-formatted tables")
+    @click.option("-v", "--verbose", is_flag=True, help="Show verbose output (libtea debug logs)")
+    @click.option("-d", "--debug", is_flag=True, help="Show debug output (HTTP requests, timing)")
     @functools.wraps(fn)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        return fn(*args, **kwargs)
+    @click.pass_context
+    def wrapper(
+        ctx: click.Context,
+        /,
+        *args: Any,
+        output_json: bool = False,
+        verbose: bool = False,
+        debug: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        ctx.ensure_object(dict)
+        if output_json:
+            ctx.obj["json"] = True
+        # Merge group-level flags with subcommand-level flags
+        if ctx.obj.get("allow_private_ips"):
+            kwargs["allow_private_ips"] = True
+        verbose = verbose or ctx.obj.get("verbose", False)
+        debug = debug or ctx.obj.get("debug", False)
+        _configure_logging(verbose=verbose, debug=debug)
+        return ctx.invoke(fn, *args, **kwargs)
 
     return wrapper
 
@@ -76,6 +122,8 @@ def _parse_basic_auth(auth: str | None) -> tuple[str, str] | None:
     user, password = auth.split(":", 1)
     if not user:
         _error("Invalid --auth format: username must not be empty")
+    if not password:
+        logger.debug("Basic auth password is empty for user %r", user)
     return (user, password)
 
 
@@ -103,6 +151,7 @@ def _build_client(
     port: int | None,
     auth: str | None = None,
     tei: str | None = None,
+    allow_private_ips: bool = False,
 ) -> TeaClient:
     """Build a TeaClient from CLI options.
 
@@ -118,15 +167,55 @@ def _build_client(
     basic_auth = _parse_basic_auth(auth)
     try:
         if base_url:
-            return TeaClient(base_url=base_url, token=token, basic_auth=basic_auth, timeout=timeout)
+            return TeaClient(
+                base_url=base_url,
+                token=token,
+                basic_auth=basic_auth,
+                timeout=timeout,
+                allow_private_ips=allow_private_ips,
+            )
         if domain is None:  # pragma: no cover — unreachable; _error() above guarantees non-None
             _error("Internal error: domain is unexpectedly None")
         scheme = "http" if use_http else "https"
         return TeaClient.from_well_known(
-            domain, token=token, basic_auth=basic_auth, timeout=timeout, scheme=scheme, port=port
+            domain,
+            token=token,
+            basic_auth=basic_auth,
+            timeout=timeout,
+            scheme=scheme,
+            port=port,
+            allow_private_ips=allow_private_ips,
         )
     except ValueError as exc:
         _error(str(exc))
+
+
+@contextmanager
+def _client_session(
+    base_url: str | None,
+    token: str | None,
+    domain: str | None,
+    timeout: float,
+    use_http: bool,
+    port: int | None,
+    auth: str | None = None,
+    tei: str | None = None,
+    allow_private_ips: bool = False,
+) -> Iterator[TeaClient]:
+    """Build a TeaClient and handle TeaError, yielding the client for use."""
+    try:
+        with _build_client(
+            base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
+        ) as client:
+            yield client
+    except TeaError as exc:
+        _error(str(exc))
+
+
+def _is_json_output() -> bool:
+    """Check if JSON output mode is active via Click context."""
+    ctx = click.get_current_context(silent=True)
+    return bool(ctx and ctx.obj and ctx.obj.get("json"))
 
 
 def _output(data: Any, *, command: str | None = None) -> None:
@@ -135,7 +224,7 @@ def _output(data: Any, *, command: str | None = None) -> None:
     In JSON mode, Pydantic models are serialized via ``model_dump(mode="json",
     by_alias=True)`` to produce camelCase keys matching the TEA API wire format.
     """
-    if _json_output:
+    if _is_json_output():
         if isinstance(data, BaseModel):
             data = data.model_dump(mode="json", by_alias=True)
         elif isinstance(data, list):
@@ -170,15 +259,23 @@ def _error(message: str) -> NoReturn:
     prog_name="tea-cli",
     message=f"%(prog)s %(version)s (TEA spec {TEA_SPEC_VERSION})",
 )
-@click.option("--json", "output_json", is_flag=True, help="Output raw JSON instead of rich-formatted tables")
-@click.option("--debug", "-d", is_flag=True, help="Show debug output (HTTP requests, timing)")
-def app(output_json: bool, debug: bool) -> None:
+@click.option("--json", "output_json", is_flag=True, hidden=True)
+@click.option("-v", "--verbose", is_flag=True, hidden=True)
+@click.option("-d", "--debug", is_flag=True, hidden=True)
+@click.option("--allow-private-ips", is_flag=True, hidden=True)
+@click.pass_context
+def app(ctx: click.Context, output_json: bool, verbose: bool, debug: bool, allow_private_ips: bool) -> None:
     """TEA (Transparency Exchange API) CLI client."""
-    global _json_output  # noqa: PLW0603
-    _json_output = output_json
+    ctx.ensure_object(dict)
+    if output_json:
+        ctx.obj["json"] = True
+    if allow_private_ips:
+        ctx.obj["allow_private_ips"] = True
+    if verbose:
+        ctx.obj["verbose"] = True
     if debug:
-        logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(message)s", stream=sys.stderr)
-        logging.getLogger("libtea").setLevel(logging.DEBUG)
+        ctx.obj["debug"] = True
+    _configure_logging(verbose=verbose, debug=debug)
 
 
 # --- Commands ---
@@ -198,18 +295,18 @@ def discover(
     timeout: float,
     use_http: bool,
     port: int | None,
+    allow_private_ips: bool,
 ) -> None:
     """Resolve a TEI to product release UUID(s)."""
-    try:
-        with _build_client(base_url, token, domain, timeout, use_http, port, auth, tei=tei) as client:
-            result = client.discover(tei)
-        if quiet:
-            for d in result:
-                print(d.product_release_uuid)
-        else:
-            _output(result, command="discover")
-    except TeaError as exc:
-        _error(str(exc))
+    with _client_session(
+        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
+    ) as client:
+        result = client.discover(tei)
+    if quiet:
+        for d in result:
+            print(d.product_release_uuid)
+    else:
+        _output(result, command="discover")
 
 
 @app.command("search-products")
@@ -230,14 +327,14 @@ def search_products(
     timeout: float,
     use_http: bool,
     port: int | None,
+    allow_private_ips: bool,
 ) -> None:
     """Search for products by identifier."""
-    try:
-        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
-            result = client.search_products(id_type, id_value, page_offset=page_offset, page_size=page_size)
-        _output(result)
-    except TeaError as exc:
-        _error(str(exc))
+    with _client_session(
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+    ) as client:
+        result = client.search_products(id_type, id_value, page_offset=page_offset, page_size=page_size)
+    _output(result)
 
 
 @app.command("search-releases")
@@ -258,14 +355,14 @@ def search_releases(
     timeout: float,
     use_http: bool,
     port: int | None,
+    allow_private_ips: bool,
 ) -> None:
     """Search for product releases by identifier."""
-    try:
-        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
-            result = client.search_product_releases(id_type, id_value, page_offset=page_offset, page_size=page_size)
-        _output(result)
-    except TeaError as exc:
-        _error(str(exc))
+    with _client_session(
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+    ) as client:
+        result = client.search_product_releases(id_type, id_value, page_offset=page_offset, page_size=page_size)
+    _output(result)
 
 
 @app.command("get-product")
@@ -280,14 +377,14 @@ def get_product(
     timeout: float,
     use_http: bool,
     port: int | None,
+    allow_private_ips: bool,
 ) -> None:
     """Get a product by UUID."""
-    try:
-        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
-            result = client.get_product(uuid)
-        _output(result)
-    except TeaError as exc:
-        _error(str(exc))
+    with _client_session(
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+    ) as client:
+        result = client.get_product(uuid)
+    _output(result)
 
 
 @app.command("get-release")
@@ -304,18 +401,18 @@ def get_release(
     timeout: float,
     use_http: bool,
     port: int | None,
+    allow_private_ips: bool,
 ) -> None:
     """Get a product or component release by UUID."""
-    try:
-        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
-            result: ProductRelease | ComponentReleaseWithCollection
-            if component:
-                result = client.get_component_release(uuid)
-            else:
-                result = client.get_product_release(uuid)
-        _output(result)
-    except TeaError as exc:
-        _error(str(exc))
+    with _client_session(
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+    ) as client:
+        result: ProductRelease | ComponentReleaseWithCollection
+        if component:
+            result = client.get_component_release(uuid)
+        else:
+            result = client.get_product_release(uuid)
+    _output(result)
 
 
 @app.command("get-collection")
@@ -334,23 +431,23 @@ def get_collection(
     timeout: float,
     use_http: bool,
     port: int | None,
+    allow_private_ips: bool,
 ) -> None:
     """Get a collection (latest or by version)."""
-    try:
-        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
-            if component:
-                if version is not None:
-                    result = client.get_component_release_collection(uuid, version)
-                else:
-                    result = client.get_component_release_collection_latest(uuid)
+    with _client_session(
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+    ) as client:
+        if component:
+            if version is not None:
+                result = client.get_component_release_collection(uuid, version)
             else:
-                if version is not None:
-                    result = client.get_product_release_collection(uuid, version)
-                else:
-                    result = client.get_product_release_collection_latest(uuid)
-        _output(result)
-    except TeaError as exc:
-        _error(str(exc))
+                result = client.get_component_release_collection_latest(uuid)
+        else:
+            if version is not None:
+                result = client.get_product_release_collection(uuid, version)
+            else:
+                result = client.get_product_release_collection_latest(uuid)
+    _output(result)
 
 
 @app.command("get-product-releases")
@@ -369,14 +466,14 @@ def get_product_releases(
     timeout: float,
     use_http: bool,
     port: int | None,
+    allow_private_ips: bool,
 ) -> None:
     """List releases for a product UUID."""
-    try:
-        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
-            result = client.get_product_releases(uuid, page_offset=page_offset, page_size=page_size)
-        _output(result)
-    except TeaError as exc:
-        _error(str(exc))
+    with _client_session(
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+    ) as client:
+        result = client.get_product_releases(uuid, page_offset=page_offset, page_size=page_size)
+    _output(result)
 
 
 @app.command("get-component")
@@ -391,14 +488,14 @@ def get_component(
     timeout: float,
     use_http: bool,
     port: int | None,
+    allow_private_ips: bool,
 ) -> None:
     """Get a component by UUID."""
-    try:
-        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
-            result = client.get_component(uuid)
-        _output(result)
-    except TeaError as exc:
-        _error(str(exc))
+    with _client_session(
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+    ) as client:
+        result = client.get_component(uuid)
+    _output(result)
 
 
 @app.command("get-component-releases")
@@ -413,14 +510,14 @@ def get_component_releases(
     timeout: float,
     use_http: bool,
     port: int | None,
+    allow_private_ips: bool,
 ) -> None:
     """List releases for a component UUID."""
-    try:
-        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
-            result = client.get_component_releases(uuid)
-        _output(result, command="releases")
-    except TeaError as exc:
-        _error(str(exc))
+    with _client_session(
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+    ) as client:
+        result = client.get_component_releases(uuid)
+    _output(result, command="releases")
 
 
 @app.command("list-collections")
@@ -437,17 +534,17 @@ def list_collections(
     timeout: float,
     use_http: bool,
     port: int | None,
+    allow_private_ips: bool,
 ) -> None:
     """List all collection versions for a release UUID."""
-    try:
-        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
-            if component:
-                result = client.get_component_release_collections(uuid)
-            else:
-                result = client.get_product_release_collections(uuid)
-        _output(result, command="collections")
-    except TeaError as exc:
-        _error(str(exc))
+    with _client_session(
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+    ) as client:
+        if component:
+            result = client.get_component_release_collections(uuid)
+        else:
+            result = client.get_product_release_collections(uuid)
+    _output(result, command="collections")
 
 
 @app.command("get-cle")
@@ -469,6 +566,7 @@ def get_cle(
     timeout: float,
     use_http: bool,
     port: int | None,
+    allow_private_ips: bool,
 ) -> None:
     """Get Common Lifecycle Enumeration (CLE) for an entity."""
     entity_methods = {
@@ -477,12 +575,11 @@ def get_cle(
         "component": "get_component_cle",
         "component-release": "get_component_release_cle",
     }
-    try:
-        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
-            result = getattr(client, entity_methods[entity])(uuid)
-        _output(result)
-    except TeaError as exc:
-        _error(str(exc))
+    with _client_session(
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+    ) as client:
+        result = getattr(client, entity_methods[entity])(uuid)
+    _output(result)
 
 
 @app.command("get-artifact")
@@ -497,14 +594,14 @@ def get_artifact(
     timeout: float,
     use_http: bool,
     port: int | None,
+    allow_private_ips: bool,
 ) -> None:
     """Get artifact metadata by UUID."""
-    try:
-        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
-            result = client.get_artifact(uuid)
-        _output(result)
-    except TeaError as exc:
-        _error(str(exc))
+    with _client_session(
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+    ) as client:
+        result = client.get_artifact(uuid)
+    _output(result)
 
 
 @app.command()
@@ -525,6 +622,7 @@ def download(
     timeout: float,
     use_http: bool,
     port: int | None,
+    allow_private_ips: bool,
 ) -> None:
     """Download an artifact file with optional checksum verification."""
     checksums = None
@@ -545,13 +643,13 @@ def download(
             checksums.append(Checksum(algorithm_type=alg_enum, algorithm_value=value))
 
     try:
-        with _build_client(base_url, token, domain, timeout, use_http, port, auth) as client:
+        with _client_session(
+            base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+        ) as client:
             result = client.download_artifact(
                 url, Path(dest), verify_checksums=checksums, max_download_bytes=max_download_bytes
             )
         print(f"Downloaded to {result}", file=sys.stderr)
-    except TeaError as exc:
-        _error(str(exc))
     except OSError as exc:
         _error(f"I/O error: {exc}")
 
@@ -572,52 +670,52 @@ def inspect(
     timeout: float,
     use_http: bool,
     port: int | None,
+    allow_private_ips: bool,
 ) -> None:
     """Full flow: TEI -> discovery -> releases -> artifacts."""
-    try:
-        with _build_client(base_url, token, domain, timeout, use_http, port, auth, tei=tei) as client:
-            discoveries = client.discover(tei)
-            result = []
-            for disc in discoveries:
-                pr = client.get_product_release(disc.product_release_uuid)
-                components = []
-                for comp_ref in pr.components[:max_components]:
-                    if comp_ref.release:
-                        cr = client.get_component_release(comp_ref.release)
-                        components.append(cr.model_dump(mode="json", by_alias=True))
-                    else:
-                        # Unpinned component — resolve latest release like rearm does
-                        comp = client.get_component(comp_ref.uuid)
-                        comp_data = comp.model_dump(mode="json", by_alias=True)
-                        try:
-                            releases = client.get_component_releases(comp_ref.uuid)
-                            if releases:
-                                latest = releases[0]
-                                cr = client.get_component_release(latest.uuid)
-                                comp_data["resolvedRelease"] = cr.model_dump(mode="json", by_alias=True)
-                                comp_data["resolvedNote"] = "latest release (not pinned)"
-                        except TeaError as exc:
-                            logger.debug("Could not resolve releases for component %s: %s", comp_ref.uuid, exc)
-                            print(
-                                f"Warning: could not resolve releases for component {comp_ref.uuid}: {exc}",
-                                file=sys.stderr,
-                            )
-                        components.append(comp_data)
-                truncated = len(pr.components) > max_components
-                entry: dict[str, Any] = {
-                    "discovery": disc.model_dump(mode="json", by_alias=True),
-                    "productRelease": pr.model_dump(mode="json", by_alias=True),
-                    "components": components,
-                }
-                if truncated:
-                    entry["truncated"] = True
-                    entry["totalComponents"] = len(pr.components)
-                    print(
-                        f"Warning: truncated {len(pr.components)} components to {max_components} "
-                        f"(use --max-components to increase)",
-                        file=sys.stderr,
-                    )
-                result.append(entry)
-            _output(result, command="inspect")
-    except TeaError as exc:
-        _error(str(exc))
+    with _client_session(
+        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
+    ) as client:
+        discoveries = client.discover(tei)
+        result = []
+        for disc in discoveries:
+            pr = client.get_product_release(disc.product_release_uuid)
+            components = []
+            for comp_ref in pr.components[:max_components]:
+                if comp_ref.release:
+                    cr = client.get_component_release(comp_ref.release)
+                    components.append(cr.model_dump(mode="json", by_alias=True))
+                else:
+                    # Unpinned component — resolve latest release like rearm does
+                    comp = client.get_component(comp_ref.uuid)
+                    comp_data = comp.model_dump(mode="json", by_alias=True)
+                    try:
+                        releases = client.get_component_releases(comp_ref.uuid)
+                        if releases:
+                            latest = releases[0]
+                            cr = client.get_component_release(latest.uuid)
+                            comp_data["resolvedRelease"] = cr.model_dump(mode="json", by_alias=True)
+                            comp_data["resolvedNote"] = "latest release (not pinned)"
+                    except TeaError as exc:
+                        logger.debug("Could not resolve releases for component %s: %s", comp_ref.uuid, exc)
+                        print(
+                            f"Warning: could not resolve releases for component {comp_ref.uuid}: {exc}",
+                            file=sys.stderr,
+                        )
+                    components.append(comp_data)
+            truncated = len(pr.components) > max_components
+            entry: dict[str, Any] = {
+                "discovery": disc.model_dump(mode="json", by_alias=True),
+                "productRelease": pr.model_dump(mode="json", by_alias=True),
+                "components": components,
+            }
+            if truncated:
+                entry["truncated"] = True
+                entry["totalComponents"] = len(pr.components)
+                print(
+                    f"Warning: truncated {len(pr.components)} components to {max_components} "
+                    f"(use --max-components to increase)",
+                    file=sys.stderr,
+                )
+            result.append(entry)
+        _output(result, command="inspect")

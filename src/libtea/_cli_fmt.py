@@ -54,7 +54,7 @@ def _fmt_identifiers(identifiers: Sequence[Identifier]) -> str:
     """Format a list of :class:`Identifier` objects as comma-joined ``type:value``."""
     if not identifiers:
         return "-"
-    return ", ".join(f"{i.id_type}:{i.id_value}" for i in identifiers)
+    return ", ".join(f"{_opt(i.id_type)}:{_opt(i.id_value)}" for i in identifiers)
 
 
 def _kv_panel(title: str, fields: list[tuple[str, str]], *, console: Console) -> None:
@@ -85,7 +85,9 @@ def _distributions_table(distributions: Sequence[ReleaseDistribution], *, consol
     tbl.add_column("Signature URL")
     tbl.add_column("Checksums")
     for d in distributions:
-        checksums = ", ".join(f"{cs.algorithm_type}:{cs.algorithm_value[:12]}..." for cs in d.checksums) or "-"
+        checksums = (
+            ", ".join(f"{_opt(cs.algorithm_type)}:{(_opt(cs.algorithm_value))[:12]}..." for cs in d.checksums) or "-"
+        )
         tbl.add_row(
             _esc(d.distribution_type), _esc(d.description), _esc(d.url), _esc(d.signature_url), escape(checksums)
         )
@@ -103,9 +105,9 @@ def _artifacts_table(artifacts: Sequence[Artifact], *, console: Console) -> None
     tbl.add_column("Applies To")
     tbl.add_column("Formats")
     for a in artifacts:
-        fmt_str = ", ".join(f.media_type for f in a.formats) or "-"
+        fmt_str = ", ".join(f.media_type or "?" for f in a.formats) or "-"
         applies = ", ".join(a.distribution_types) if a.distribution_types else "-"
-        tbl.add_row(escape(a.uuid), escape(a.name), escape(a.type), escape(applies), escape(fmt_str))
+        tbl.add_row(_esc(a.uuid), _esc(a.name), _esc(a.type), escape(applies), escape(fmt_str))
     console.print(tbl)
 
 
@@ -120,8 +122,10 @@ def _formats_table(formats: Sequence[ArtifactFormat], *, console: Console) -> No
     tbl.add_column("Signature URL")
     tbl.add_column("Checksums")
     for f in formats:
-        checksums = ", ".join(f"{cs.algorithm_type}:{cs.algorithm_value[:12]}..." for cs in f.checksums) or "-"
-        tbl.add_row(escape(f.media_type), _esc(f.description), escape(f.url), _esc(f.signature_url), escape(checksums))
+        checksums = (
+            ", ".join(f"{_opt(cs.algorithm_type)}:{(_opt(cs.algorithm_value))[:12]}..." for cs in f.checksums) or "-"
+        )
+        tbl.add_row(_esc(f.media_type), _esc(f.description), _esc(f.url), _esc(f.signature_url), escape(checksums))
     console.print(tbl)
 
 
@@ -237,7 +241,7 @@ def fmt_collection(data: Collection, *, console: Console) -> None:
     """Render a collection as a panel with artifacts table."""
     reason = "-"
     if data.update_reason:
-        reason = data.update_reason.type
+        reason = _opt(data.update_reason.type)
         if data.update_reason.comment:
             reason += f" ({data.update_reason.comment})"
     _kv_panel(
@@ -258,7 +262,7 @@ def fmt_artifact(data: Artifact, *, console: Console) -> None:
     """Render artifact metadata as a panel with formats table."""
     _kv_panel(
         "Artifact",
-        [("UUID", data.uuid), ("Name", data.name), ("Type", data.type)],
+        [("UUID", _opt(data.uuid)), ("Name", _opt(data.name)), ("Type", _opt(data.type))],
         console=console,
     )
     _formats_table(data.formats, console=console)
@@ -435,7 +439,7 @@ def _inspect_component_details(comp: dict[str, Any], *, console: Console) -> Non
                 ", ".join(f"{cs.get('algType', '?')}:{cs.get('algValue', '')[:12]}..." for cs in checksums_list) or "-"
             )
             tbl.add_row(
-                escape(d.get("distributionType", "-")),
+                _esc(d.get("distributionType")),
                 _esc(d.get("description")),
                 _esc(d.get("url")),
                 _esc(d.get("signatureUrl")),

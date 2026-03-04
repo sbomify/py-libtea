@@ -7,6 +7,7 @@ SemVer 2.0.0 comparison and priority-based ordering.
 
 import logging
 import warnings
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
@@ -14,7 +15,7 @@ import requests
 from pydantic import ValidationError
 from semver import Version as _SemVer
 
-from libtea._http import USER_AGENT
+from libtea._constants import USER_AGENT
 from libtea._security import _validate_download_url
 from libtea.exceptions import TeaDiscoveryError, TeaInsecureTransportWarning, TeaValidationError
 from libtea.models import TeaEndpoint, TeaWellKnown, TeiType
@@ -22,6 +23,13 @@ from libtea.models import TeaEndpoint, TeaWellKnown, TeiType
 logger = logging.getLogger("libtea")
 
 _VALID_TEI_TYPES = frozenset(e.value for e in TeiType)
+
+
+def _endpoint_sort_key(pair: tuple[_SemVer, TeaEndpoint]) -> tuple[_SemVer, float]:
+    """Sort key: highest SemVer version desc, then priority desc (default 1.0 per TEA spec)."""
+    return (pair[0], pair[1].priority if pair[1].priority is not None else 1.0)
+
+
 _DOMAIN_LABEL_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-")
 
 
@@ -128,7 +136,7 @@ def fetch_well_known(
         redirects = 0
         try:
             while True:
-                response = requests.get(current_url, **kwargs)
+                response = requests.get(current_url, stream=True, **kwargs)
                 if 300 <= response.status_code < 400:
                     redirects += 1
                     if redirects > _max_discovery_redirects:
@@ -161,9 +169,16 @@ def fetch_well_known(
                 break
 
             if response.status_code >= 400:
-                body_snippet = (response.text or "")[:200]
-                if len(response.text or "") > 200:
-                    body_snippet += " (truncated)"
+                body_snippet = ""
+                try:
+                    if response.raw:
+                        response.raw.decode_content = True
+                    raw_bytes = response.raw.read(201) if response.raw else b""
+                    body_snippet = raw_bytes.decode("utf-8", errors="replace")[:200]
+                    if len(raw_bytes) > 200:
+                        body_snippet += " (truncated)"
+                except Exception:
+                    pass
                 msg = f"Failed to fetch {current_url}: HTTP {response.status_code}"
                 if body_snippet:
                     msg = f"{msg} — {body_snippet}"
@@ -192,17 +207,18 @@ def fetch_well_known(
 
 
 def select_endpoints(well_known: TeaWellKnown, supported_version: str) -> list[TeaEndpoint]:
-    """Select all endpoints that support the given version, sorted by priority.
+    """Select all endpoints that exactly match the given version, sorted by priority.
 
-    Per TEA spec: uses SemVer 2.0.0 comparison to match versions, then
-    sorts by highest matching version with priority as tiebreaker.
+    Uses exact SemVer 2.0.0 comparison (no range matching). For flexible
+    version negotiation that can downgrade to compatible server versions,
+    use :func:`select_best_endpoint` instead.
 
     Args:
         well_known: Parsed .well-known/tea document.
-        supported_version: SemVer version string the client supports.
+        supported_version: Exact SemVer version string to match.
 
     Returns:
-        List of matching endpoints, best first.
+        List of matching endpoints, highest priority first.
 
     Raises:
         TeaDiscoveryError: If no endpoint supports the requested version.
@@ -226,12 +242,12 @@ def select_endpoints(well_known: TeaWellKnown, supported_version: str) -> list[T
     if not candidates:
         available = {v for ep in well_known.endpoints for v in ep.versions}
         raise TeaDiscoveryError(
-            f"No compatible endpoint found for version {supported_version!r}. Available versions: {sorted(available)}"
+            f"No endpoint found for version {supported_version!r}. Available versions: {sorted(available)}"
         )
 
-    # Sort by: highest SemVer version desc, then priority desc (default 1.0 per spec)
+    # All matched versions are identical (exact match); sort by priority desc (default 1.0 per spec)
     candidates.sort(
-        key=lambda pair: (pair[0], pair[1].priority if pair[1].priority is not None else 1.0),
+        key=_endpoint_sort_key,
         reverse=True,
     )
     return [ep for _, ep in candidates]
@@ -256,9 +272,109 @@ def select_endpoint(well_known: TeaWellKnown, supported_version: str) -> TeaEndp
     return select_endpoints(well_known, supported_version)[0]
 
 
+@dataclass(frozen=True)
+class VersionedEndpoint:
+    """An endpoint paired with the server version it was matched on.
+
+    Returned by :func:`select_best_endpoint` to let callers know which
+    version to use in the URL path (``v{matched_version}``).
+    """
+
+    endpoint: TeaEndpoint
+    matched_version: str
+
+
+def _is_compatible_version(client: _SemVer, server: _SemVer) -> bool:
+    """Check if a client version is backward-compatible with a server version.
+
+    Compares only core version (major.minor.patch), ignoring prerelease tags.
+
+    Rules:
+    - Same major version.
+    - Server core version (major.minor.patch) must be <= client core version.
+    """
+    if client.major != server.major:
+        return False
+    # Compare only (major, minor, patch), ignoring prerelease/build metadata
+    client_core = (client.major, client.minor, client.patch)
+    server_core = (server.major, server.minor, server.patch)
+    return client_core >= server_core
+
+
+def select_best_endpoint(well_known: TeaWellKnown, supported_version: str) -> VersionedEndpoint:
+    """Select the best compatible endpoint using flexible version negotiation.
+
+    First tries exact match (existing behavior). If no exact match, finds
+    endpoints with backward-compatible versions: the client can downgrade to
+    a server with a lower version in the same compatibility family, but never
+    connects to a server with a higher version than the client supports.
+
+    Args:
+        well_known: Parsed .well-known/tea document.
+        supported_version: SemVer version string the client supports.
+
+    Returns:
+        The best matching endpoint with the server version it was matched on.
+
+    Raises:
+        TeaDiscoveryError: If no compatible endpoint is found.
+    """
+    try:
+        target = _SemVer.parse(supported_version)
+    except ValueError as exc:
+        raise TeaDiscoveryError(f"Invalid version string {supported_version!r}: {exc}") from exc
+
+    # Phase 1: exact match — delegate to select_endpoints
+    try:
+        exact = select_endpoints(well_known, supported_version)
+        return VersionedEndpoint(endpoint=exact[0], matched_version=supported_version)
+    except TeaDiscoveryError:
+        pass  # fall through to Phase 2 (compatible match)
+
+    # Phase 2: compatible match (client >= server in same family)
+    compatible: list[tuple[_SemVer, TeaEndpoint]] = []
+    for ep in well_known.endpoints:
+        best_v_for_ep: _SemVer | None = None
+        for v_str in ep.versions:
+            try:
+                v = _SemVer.parse(v_str)
+            except ValueError:
+                continue
+            if _is_compatible_version(target, v) and (best_v_for_ep is None or v > best_v_for_ep):
+                best_v_for_ep = v
+        if best_v_for_ep is not None:
+            compatible.append((best_v_for_ep, ep))
+
+    if not compatible:
+        available = {v for ep in well_known.endpoints for v in ep.versions}
+        raise TeaDiscoveryError(
+            f"No compatible endpoint found for version {supported_version!r}. Available versions: {sorted(available)}"
+        )
+
+    # Prefer highest compatible version, then highest priority
+    compatible.sort(
+        key=_endpoint_sort_key,
+        reverse=True,
+    )
+    best_ver, best_ep = compatible[0]
+    logger.info(
+        "No exact match for %s; negotiated to compatible server version %s",
+        supported_version,
+        best_ver,
+    )
+    warnings.warn(
+        f"No exact version match for {supported_version!r}; negotiated to server version {best_ver}. "
+        f"The server may not support all features of the requested version.",
+        stacklevel=2,
+    )
+    return VersionedEndpoint(endpoint=best_ep, matched_version=str(best_ver))
+
+
 __all__ = [
+    "VersionedEndpoint",
     "fetch_well_known",
     "parse_tei",
+    "select_best_endpoint",
     "select_endpoint",
     "select_endpoints",
 ]

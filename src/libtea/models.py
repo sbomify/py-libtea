@@ -146,10 +146,12 @@ class Identifier(_TeaModel):
     The ``id_type`` field accepts any string for forward-compatibility with
     future TEA spec versions. Compare against :class:`IdentifierType` members
     for known types (e.g. ``ident.id_type == IdentifierType.PURL``).
+
+    Per spec, neither field is required.
     """
 
-    id_type: str
-    id_value: str
+    id_type: str | None = None
+    id_value: str | None = None
 
 
 class Checksum(_TeaModel):
@@ -159,8 +161,11 @@ class Checksum(_TeaModel):
     underscore form (``SHA_256``) to the canonical hyphen form.
     """
 
-    algorithm_type: ChecksumAlgorithm = Field(alias="algType")
-    algorithm_value: str = Field(alias="algValue")
+    # Manual aliases because the TEA spec wire format uses abbreviated names
+    # (algType/algValue) rather than the full algorithmType/algorithmValue
+    # that to_camel would generate from the Python field names.
+    algorithm_type: ChecksumAlgorithm | None = Field(default=None, alias="algType")
+    algorithm_value: str | None = Field(default=None, alias="algValue")
 
     @field_validator("algorithm_type", mode="before")
     @classmethod
@@ -183,7 +188,7 @@ class Checksum(_TeaModel):
 class ReleaseDistribution(_TeaModel):
     """A distribution format for a component release (e.g. binary, source)."""
 
-    distribution_type: str
+    distribution_type: str | None = None
     description: str | None = None
     identifiers: tuple[Identifier, ...] = ()
     url: str | None = None
@@ -194,27 +199,41 @@ class ReleaseDistribution(_TeaModel):
 class ArtifactFormat(_TeaModel):
     """A TEA artifact in a specific format with download URL and checksums."""
 
-    media_type: str
+    media_type: str | None = None
     description: str | None = None
-    url: str
+    url: str | None = None
     signature_url: str | None = None
     checksums: tuple[Checksum, ...] = ()
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_mime_type(cls, data: dict) -> dict:  # type: ignore[type-arg]
+        """Accept ``mimeType`` as an alias for ``mediaType`` (older server compat)."""
+        if isinstance(data, dict) and "mimeType" in data and "mediaType" not in data:
+            data["mediaType"] = data.pop("mimeType")
+        return data
+
 
 class Artifact(_TeaModel):
-    """A security-related artifact (e.g. SBOM, VEX, attestation) with available formats."""
+    """A security-related artifact (e.g. SBOM, VEX, attestation) with available formats.
 
-    uuid: str
-    name: str
-    type: ArtifactType
+    Per spec, no fields are required.
+    """
+
+    uuid: str | None = None
+    name: str | None = None
+    type: ArtifactType | None = None
     distribution_types: tuple[str, ...] | None = None
     formats: tuple[ArtifactFormat, ...] = ()
 
 
 class CollectionUpdateReason(_TeaModel):
-    """Reason for a collection version update, with optional comment."""
+    """Reason for a collection version update, with optional comment.
 
-    type: CollectionUpdateReasonType
+    Per spec, no fields are required.
+    """
+
+    type: CollectionUpdateReasonType | None = None
     comment: str | None = None
 
 

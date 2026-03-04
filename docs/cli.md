@@ -27,9 +27,13 @@ pip install libtea[cli]
 | Option | Description |
 |--------|-------------|
 | `--json` | Output raw JSON instead of rich-formatted tables |
-| `--debug`, `-d` | Show debug output (HTTP requests, timing) on stderr |
+| `--verbose`, `-v` | Show verbose output (libtea debug logs on stderr, suppresses urllib3/requests noise) |
+| `--debug`, `-d` | Show full debug output (all HTTP requests, urllib3, timing) on stderr |
+| `--allow-private-ips` | Allow artifact downloads from private/internal IPs (relaxes SSRF checks for downloads only). Scheme validation and cloud metadata endpoint blocking are always enforced. |
 | `--version` | Show version and exit |
 | `--help` | Show help message and exit |
+
+`-v` and `-d` can be combined: `-v -d` is equivalent to `-d` alone (full firehose).
 
 ## Connection Options
 
@@ -44,6 +48,7 @@ Every command accepts the following options for server selection and authenticat
 | `--timeout` *SECONDS* | Request timeout in seconds (default: 30). |
 | `--use-http` | Use HTTP instead of HTTPS for `.well-known/tea` discovery. Intended for local development only. |
 | `--port` *PORT* | Port for well-known resolution (overrides the default for the scheme). |
+| `--allow-private-ips` | Allow artifact downloads from private/internal IPs. Useful when the TEA server or its artifacts are hosted on a local network. |
 
 ## Commands
 
@@ -321,6 +326,24 @@ Pipe UUIDs to another tool:
 ```bash
 tea-cli discover -q "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify" | \
     xargs -I {} tea-cli --json get-release {} --domain trust.sbomify.com
+```
+
+Verbose logging to diagnose issues:
+
+```bash
+# libtea debug logs only (no urllib3 noise)
+tea-cli -v discover "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify"
+
+# Full HTTP firehose
+tea-cli -d discover "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify"
+```
+
+Local development with private IPs:
+
+```bash
+# Allow downloads from a local TEA server
+tea-cli download "http://192.168.1.100:8080/sbom.json" ./sbom.json \
+    --allow-private-ips --base-url "http://192.168.1.100:8080/tea/v0.3.0-beta.2"
 ```
 
 Using environment variables to avoid repeating credentials:

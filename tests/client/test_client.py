@@ -490,6 +490,67 @@ class TestProbeEndpoint:
             probe_endpoint("https://api.example.com/v1")
 
 
+class TestVersionNegotiation:
+    """Version negotiation in from_well_known."""
+
+    @responses.activate
+    def test_from_well_known_negotiates_to_lower_version(self):
+        """Server advertises 0.2.0-beta.2, client requests 0.3.0-beta.2 — should succeed."""
+        responses.get(
+            "https://example.com/.well-known/tea",
+            json={
+                "schemaVersion": 1,
+                "endpoints": [{"url": "https://api.example.com", "versions": ["0.2.0-beta.2"]}],
+            },
+        )
+        responses.head("https://api.example.com/v0.2.0-beta.2", status=200)
+        client = TeaClient.from_well_known("example.com")
+        assert client is not None
+        client.close()
+        # Verify the URL uses the negotiated version, not the client version
+        assert responses.calls[1].request.url == "https://api.example.com/v0.2.0-beta.2"
+
+    @responses.activate
+    def test_from_well_known_uses_negotiated_version_in_url(self):
+        """After negotiation, API calls use the negotiated version path."""
+        responses.get(
+            "https://example.com/.well-known/tea",
+            json={
+                "schemaVersion": 1,
+                "endpoints": [{"url": "https://api.example.com", "versions": ["0.2.0-beta.2"]}],
+            },
+        )
+        responses.head("https://api.example.com/v0.2.0-beta.2", status=200)
+        responses.get(
+            "https://api.example.com/v0.2.0-beta.2/product/f6a7b8c9-d0e1-2345-fabc-456789012345",
+            json={"uuid": "f6a7b8c9-d0e1-2345-fabc-456789012345", "name": "P", "identifiers": []},
+        )
+        client = TeaClient.from_well_known("example.com")
+        product = client.get_product("f6a7b8c9-d0e1-2345-fabc-456789012345")
+        assert product.name == "P"
+        assert "/v0.2.0-beta.2/" in responses.calls[2].request.url
+        client.close()
+
+    @responses.activate
+    def test_from_well_known_prefers_exact_match(self):
+        """When both exact and compatible versions exist, exact match wins."""
+        responses.get(
+            "https://example.com/.well-known/tea",
+            json={
+                "schemaVersion": 1,
+                "endpoints": [
+                    {"url": "https://api.example.com", "versions": ["0.2.0-beta.2", "0.3.0-beta.2"]},
+                ],
+            },
+        )
+        responses.head("https://api.example.com/v0.3.0-beta.2", status=200)
+        client = TeaClient.from_well_known("example.com")
+        assert client is not None
+        # Should use exact match version
+        assert responses.calls[1].request.url == "https://api.example.com/v0.3.0-beta.2"
+        client.close()
+
+
 class TestEndpointFailover:
     """Multi-endpoint failover in from_well_known."""
 

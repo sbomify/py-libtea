@@ -10,6 +10,8 @@ from typing import Any
 
 from libtea.exceptions import TeaChecksumError
 
+WEAK_HASH_ALGORITHMS = frozenset({"MD5", "SHA-1"})
+
 # Hash algorithm registry: {TEA name: (hashlib name, digest_size)}.
 # When digest_size is None, hashlib.new(name) is used with its default size.
 # When digest_size is set, hashlib.blake2b(digest_size=N) is used instead.

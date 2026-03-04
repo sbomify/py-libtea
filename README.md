@@ -16,16 +16,22 @@ TEA is an open standard for discovering and retrieving software transparency art
 ### Features
 
 - Auto-discovery via `.well-known/tea` and TEI URNs
+- Flexible version negotiation — connects to older server versions within the same major series
 - Products, components, releases, and versioned collections
 - Search by PURL, CPE, or TEI identifier
+- Pagination auto-iterators for search results
+- Bulk parallel fetch for products, releases, and artifacts
 - Common Lifecycle Enumeration (CLE) — ECMA-428 lifecycle events
 - Artifact download with on-the-fly checksum verification (MD5 through BLAKE2b)
+- Optional TTL response caching
 - Endpoint failover with SemVer-compatible version selection
+- SSRF protection — blocks private IPs, cloud metadata endpoints, DNS rebinding
 - Bearer token and HTTP basic auth authentication
 - Bearer token isolation — tokens are never sent to artifact download hosts
+- `TeaClientProtocol` for dependency inversion and test doubles
 - Typed Pydantic v2 models with full camelCase/snake_case conversion
 - Structured exception hierarchy with error context
-- CLI with rich-formatted output and JSON mode
+- CLI with rich-formatted output, JSON mode, and verbose logging
 
 ## Installation
 
@@ -45,7 +51,7 @@ pip install libtea[cli]
 from libtea import TeaClient
 
 # Auto-discover the sbomify TEA server from its .well-known/tea
-with TeaClient.from_well_known("trust.sbomify.com", token="your-bearer-token") as client:
+with TeaClient.from_well_known("trust.sbomify.com") as client:
     # Discover a product by TEI
     results = client.discover(
         "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify"
@@ -63,7 +69,6 @@ Or connect directly to a known endpoint:
 ```python
 client = TeaClient(
     base_url="https://trust.sbomify.com/tea/v0.3.0-beta.2",
-    token="your-bearer-token",
     timeout=30.0,
 )
 ```
@@ -73,7 +78,6 @@ Using `from_well_known`, you can also override the spec version and timeout:
 ```python
 client = TeaClient.from_well_known(
     "trust.sbomify.com",
-    token="your-bearer-token",
     timeout=15.0,
     version="0.3.0-beta.2",  # default
 )
@@ -129,6 +133,38 @@ with TeaClient.from_well_known("trust.sbomify.com") as client:
     )
     print(releases.total_results)
 ```
+
+### Auto-paginated iterators
+
+For iterating over large result sets without manual page management:
+
+```python
+with TeaClient.from_well_known("trust.sbomify.com") as client:
+    # Iterate all matching products (handles pagination automatically)
+    for product in client.iter_products("PURL", "pkg:github/sbomify/sbomify"):
+        print(product.name)
+
+    # Iterate all product releases by identifier
+    for release in client.iter_product_releases("PURL", "pkg:github/sbomify/sbomify"):
+        print(release.version)
+
+    # Iterate all releases for a specific product UUID
+    for release in client.iter_releases_for_product("product-uuid"):
+        print(release.version, release.created_date)
+```
+
+### Bulk parallel fetch
+
+Fetch multiple resources by UUID in parallel:
+
+```python
+with TeaClient.from_well_known("trust.sbomify.com") as client:
+    products = client.get_products(["uuid-1", "uuid-2", "uuid-3"])
+    releases = client.get_product_releases_bulk(["uuid-1", "uuid-2"])
+    artifacts = client.get_artifacts(["uuid-1", "uuid-2"])
+```
+
+Results are returned in the same order as the input UUIDs. Use `max_workers=1` for serial execution.
 
 ### Products and releases
 
@@ -226,19 +262,67 @@ client = TeaClient.from_well_known("trust.sbomify.com", token="your-token")
 client = TeaClient.from_well_known("trust.sbomify.com", basic_auth=("user", "password"))
 ```
 
+### Response caching
+
+Enable optional TTL-based caching to avoid repeated API calls:
+
+```python
+# Cache GET responses for 5 minutes
+client = TeaClient("https://trust.sbomify.com/tea/v0.3.0-beta.2", cache_ttl=300)
+product = client.get_product("uuid")  # HTTP call
+product = client.get_product("uuid")  # served from cache
+
+client.clear_cache()  # manually invalidate
+```
+
+Only JSON API responses are cached — artifact downloads are never cached.
+
+### Private network access
+
+By default, artifact downloads are blocked from private/internal IPs (SSRF protection). For local development:
+
+```python
+client = TeaClient.from_well_known(
+    "trust.local",
+    scheme="http",
+    allow_private_ips=True,  # allows downloads from 127.0.0.1, 10.x, etc.
+)
+```
+
+Scheme validation and cloud metadata endpoint blocking are always enforced.
+
+### Testing with TeaClientProtocol
+
+Use the `TeaClientProtocol` for dependency inversion in consumer code:
+
+```python
+from libtea import TeaClientProtocol
+
+def fetch_sbom(client: TeaClientProtocol, product_uuid: str):
+    """Accepts any object matching the TeaClient interface."""
+    product = client.get_product(product_uuid)
+    return product.name
+```
+
+This allows using mock objects in tests without depending on the concrete `TeaClient` class.
+
 ## CLI
 
 The `tea-cli` command provides a terminal interface for all TEA operations. Install with `pip install libtea[cli]`. See the [full CLI reference](docs/cli.md) for detailed documentation.
 
 ### Global options
 
+These flags can be placed before or after the subcommand name. They appear under each subcommand's `--help` output.
+
 ```
---json       Output raw JSON instead of rich-formatted tables
---debug, -d  Show debug output (HTTP requests, timing)
---version    Show version
+--json             Output raw JSON instead of rich-formatted tables
+--verbose, -v      Show verbose output (libtea debug logs)
+--debug, -d        Show debug output (full HTTP firehose including urllib3)
+--allow-private-ips  Allow artifact downloads from private/internal IPs
+--version          Show version
 ```
 
-All commands accept connection options: `--base-url`, `--domain`, `--token`, `--auth`, `--use-http`, `--port`.
+All commands also accept connection options: `--base-url`, `--domain`, `--token`, `--auth`, `--use-http`, `--port`.
 
 ### Discover
 
@@ -396,7 +480,7 @@ Optional (for CLI): [click](https://click.palletsprojects.com/) >= 8.0, [rich](h
 ## Not yet supported
 
 - Publisher API (spec is consumer-only in beta.2)
-- Async client (httpx migration)
+- Async client (planned for httpx migration)
 
 ## Development
 

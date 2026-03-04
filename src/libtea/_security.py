@@ -19,8 +19,12 @@ _BLOCKED_HOSTNAMES = frozenset(
     {
         "localhost",
         "localhost.localdomain",
+        # GCP metadata service
         "metadata.google.internal",
         "metadata.google.internal.",
+        # Kubernetes in-cluster service discovery
+        "kubernetes.default.svc",
+        "kubernetes.default.svc.",
     }
 )
 
@@ -55,9 +59,8 @@ def _validate_resolved_ips(hostname: str) -> None:
     """
     try:
         addr_infos = socket.getaddrinfo(hostname, None)
-    except socket.gaierror:
-        logger.warning("DNS resolution failed for %s during SSRF check; proceeding with request", hostname)
-        return
+    except socket.gaierror as exc:
+        raise TeaValidationError(f"DNS resolution failed for {hostname!r} during SSRF check: {exc}") from exc
     for _, _, _, _, sockaddr in addr_infos:
         resolved_ip = sockaddr[0]
         try:
@@ -68,8 +71,15 @@ def _validate_resolved_ips(hostname: str) -> None:
             pass
 
 
-def _validate_download_url(url: str) -> None:
-    """Reject download URLs that use non-HTTP schemes or target internal networks."""
+def _validate_download_url(url: str, *, allow_private_ips: bool = False) -> None:
+    """Reject download URLs that use non-HTTP schemes or target internal networks.
+
+    Args:
+        url: URL to validate.
+        allow_private_ips: When ``True``, skip IP-based SSRF checks (private IP,
+            DNS rebinding). Scheme, hostname-presence, and blocked-hostname
+            (cloud metadata, k8s) validation is always enforced.
+    """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise TeaValidationError(f"URL must use http or https scheme, got {parsed.scheme!r}")
@@ -77,8 +87,13 @@ def _validate_download_url(url: str) -> None:
         raise TeaValidationError(f"URL must include a hostname: {url!r}")
 
     hostname = parsed.hostname.lower()
+
+    # Always enforce blocked hostnames (cloud metadata, k8s) even with allow_private_ips
     if hostname in _BLOCKED_HOSTNAMES:
         raise TeaValidationError(f"URL must not target internal hosts: {hostname!r}")
+
+    if allow_private_ips:
+        return
 
     try:
         addr = ipaddress.ip_address(hostname)

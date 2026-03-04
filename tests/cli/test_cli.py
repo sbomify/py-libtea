@@ -10,7 +10,6 @@ click = pytest.importorskip("click", reason="click not installed (install libtea
 
 from click.testing import CliRunner  # noqa: E402
 
-import libtea.cli  # noqa: E402
 from libtea.cli import app  # noqa: E402
 
 runner = CliRunner()
@@ -22,14 +21,6 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 def _strip_ansi(text: str) -> str:
     return _ANSI_RE.sub("", text)
-
-
-@pytest.fixture(autouse=True)
-def _reset_cli_flags():
-    """Reset module-level CLI flags between test invocations."""
-    libtea.cli._json_output = False
-    yield
-    libtea.cli._json_output = False
 
 
 class TestCliEntryPoint:
@@ -796,10 +787,158 @@ class TestCLIDebugFlag:
         assert result.exit_code == 0
 
     def test_debug_flag_shown_in_help(self):
-        result = runner.invoke(app, ["--help"])
+        result = runner.invoke(app, ["get-product", "--help"])
         plain = _strip_ansi(result.output)
         assert "--debug" in plain
         assert "-d" in plain
+
+
+class TestCLIVerboseFlag:
+    """Tests for the --verbose / -v flag."""
+
+    @responses.activate
+    def test_verbose_flag_configures_logging_correctly(self):
+        """--verbose should set libtea to DEBUG and suppress urllib3/requests."""
+        import logging
+
+        # Save original logger levels to restore after test
+        loggers = {name: logging.getLogger(name) for name in ("libtea", "urllib3", "requests")}
+        original_levels = {name: lg.level for name, lg in loggers.items()}
+
+        try:
+            uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+            responses.get(
+                f"{BASE_URL}/product/{uuid}",
+                json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+            )
+            result = runner.invoke(app, ["-v", "--json", "get-product", uuid, "--base-url", BASE_URL])
+            assert result.exit_code == 0
+            # Verify JSON output is valid
+            data = json.loads(result.output)
+            assert data["name"] == "Test Product"
+            # Verify logging levels were configured correctly
+            assert logging.getLogger("libtea").level == logging.DEBUG
+            assert logging.getLogger("urllib3").level == logging.WARNING
+            assert logging.getLogger("requests").level == logging.WARNING
+        finally:
+            for name, level in original_levels.items():
+                logging.getLogger(name).setLevel(level)
+
+    @responses.activate
+    def test_verbose_short_flag(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/product/{uuid}",
+            json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+        )
+        result = runner.invoke(app, ["--verbose", "--json", "get-product", uuid, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+
+    @responses.activate
+    def test_debug_overrides_verbose_suppression(self):
+        """When both -v and -d are used, -d should enable full firehose (urllib3 at DEBUG, not WARNING)."""
+        import logging
+
+        loggers = {name: logging.getLogger(name) for name in ("libtea", "urllib3", "requests")}
+        original_levels = {name: lg.level for name, lg in loggers.items()}
+
+        try:
+            uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+            responses.get(
+                f"{BASE_URL}/product/{uuid}",
+                json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+            )
+            result = runner.invoke(app, ["-v", "-d", "--json", "get-product", uuid, "--base-url", BASE_URL])
+            assert result.exit_code == 0
+            # -d should override -v's suppression: urllib3/requests at DEBUG, not WARNING
+            assert logging.getLogger("urllib3").level == logging.DEBUG
+            assert logging.getLogger("requests").level == logging.DEBUG
+        finally:
+            for name, level in original_levels.items():
+                logging.getLogger(name).setLevel(level)
+
+    @responses.activate
+    def test_group_level_debug_not_overridden_by_subcommand(self):
+        """Group-level -d should not be undone by subcommand shared_options."""
+        import logging
+
+        loggers = {name: logging.getLogger(name) for name in ("libtea", "urllib3", "requests")}
+        original_levels = {name: lg.level for name, lg in loggers.items()}
+
+        try:
+            uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+            responses.get(
+                f"{BASE_URL}/product/{uuid}",
+                json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+            )
+            # -d before subcommand (group-level), no flags on subcommand
+            result = runner.invoke(app, ["-d", "--json", "get-product", uuid, "--base-url", BASE_URL])
+            assert result.exit_code == 0
+            assert logging.getLogger("libtea").level == logging.DEBUG
+            assert logging.getLogger("urllib3").level == logging.DEBUG
+        finally:
+            for name, level in original_levels.items():
+                logging.getLogger(name).setLevel(level)
+
+    @responses.activate
+    def test_group_level_verbose_not_overridden_by_subcommand(self):
+        """Group-level -v should not be undone by subcommand shared_options."""
+        import logging
+
+        loggers = {name: logging.getLogger(name) for name in ("libtea", "urllib3", "requests")}
+        original_levels = {name: lg.level for name, lg in loggers.items()}
+
+        try:
+            uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+            responses.get(
+                f"{BASE_URL}/product/{uuid}",
+                json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+            )
+            # -v before subcommand (group-level), no flags on subcommand
+            result = runner.invoke(app, ["-v", "--json", "get-product", uuid, "--base-url", BASE_URL])
+            assert result.exit_code == 0
+            assert logging.getLogger("libtea").level == logging.DEBUG
+            # -v suppresses urllib3/requests
+            assert logging.getLogger("urllib3").level == logging.WARNING
+        finally:
+            for name, level in original_levels.items():
+                logging.getLogger(name).setLevel(level)
+
+    def test_verbose_flag_shown_in_help(self):
+        result = runner.invoke(app, ["get-product", "--help"])
+        plain = _strip_ansi(result.output)
+        assert "--verbose" in plain
+        assert "-v" in plain
+
+
+class TestCLIAllowPrivateIps:
+    """Tests for the --allow-private-ips flag position flexibility."""
+
+    @responses.activate
+    def test_allow_private_ips_before_subcommand(self):
+        """--allow-private-ips works when placed before the subcommand name."""
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/product/{uuid}",
+            json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+        )
+        result = runner.invoke(app, ["--allow-private-ips", "--json", "get-product", uuid, "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["name"] == "Test Product"
+
+    @responses.activate
+    def test_allow_private_ips_after_subcommand(self):
+        """--allow-private-ips works when placed after the subcommand name."""
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/product/{uuid}",
+            json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+        )
+        result = runner.invoke(app, ["--json", "get-product", uuid, "--allow-private-ips", "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["name"] == "Test Product"
 
 
 class TestCLIDiscoverQuiet:

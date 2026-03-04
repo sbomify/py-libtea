@@ -7,11 +7,15 @@ verification. All HTTP is delegated to :class:`~libtea._http.TeaHttpClient`.
 
 import hmac
 import logging
+import typing
 import warnings
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import TracebackType
-from typing import Self
+from typing import Self, TypeVar
 
+from libtea._hashing import WEAK_HASH_ALGORITHMS
 from libtea._http import TeaHttpClient, probe_endpoint
 from libtea._validation import (
     _validate,
@@ -21,7 +25,7 @@ from libtea._validation import (
     _validate_page_size,
     _validate_path_segment,
 )
-from libtea.discovery import fetch_well_known, select_endpoints
+from libtea.discovery import fetch_well_known, select_best_endpoint, select_endpoints
 from libtea.exceptions import (
     TeaChecksumError,
     TeaConnectionError,
@@ -47,8 +51,7 @@ logger = logging.getLogger("libtea")
 
 TEA_SPEC_VERSION = "0.3.0-beta.2"
 
-
-_WEAK_HASH_ALGORITHMS = frozenset({"MD5", "SHA-1"})
+_T = TypeVar("_T")
 
 
 class TeaClient:
@@ -79,7 +82,10 @@ class TeaClient:
         timeout: float = 30.0,
         max_retries: int = 3,
         backoff_factor: float = 0.5,
+        allow_private_ips: bool = False,
+        cache_ttl: float | None = None,
     ):
+        self._allow_private_ips = allow_private_ips
         self._http = TeaHttpClient(
             base_url=base_url,
             token=token,
@@ -87,6 +93,7 @@ class TeaClient:
             timeout=timeout,
             max_retries=max_retries,
             backoff_factor=backoff_factor,
+            cache_ttl=cache_ttl,
         )
 
     @classmethod
@@ -102,6 +109,8 @@ class TeaClient:
         port: int | None = None,
         max_retries: int = 3,
         backoff_factor: float = 0.5,
+        allow_private_ips: bool = False,
+        cache_ttl: float | None = None,
     ) -> Self:
         """Create a client by discovering the TEA endpoint from a domain's .well-known/tea.
 
@@ -120,6 +129,10 @@ class TeaClient:
             port: Optional port for ``.well-known`` resolution.
             max_retries: Retry count on 5xx (default 3).
             backoff_factor: Backoff multiplier (default 0.5).
+            allow_private_ips: Allow artifact downloads from private/internal IPs
+                (default False). Only affects artifact downloads, not discovery
+                redirect validation which always enforces SSRF protection.
+            cache_ttl: Optional response cache TTL in seconds.
 
         Returns:
             A connected :class:`TeaClient` pointing at the best reachable endpoint.
@@ -129,11 +142,14 @@ class TeaClient:
                 (wraps the last probe failure as ``__cause__``).
         """
         well_known = fetch_well_known(domain, timeout=timeout, scheme=scheme, port=port)
-        candidates = select_endpoints(well_known, version)
+        best = select_best_endpoint(well_known, version)
+        matched_version = best.matched_version
+        # Get all endpoints that advertise the matched version (exact match) for failover
+        candidates = select_endpoints(well_known, matched_version)
 
         errors: list[tuple[str, Exception]] = []
         for endpoint in candidates:
-            base_url = f"{endpoint.url.rstrip('/')}/v{version}"
+            base_url = f"{endpoint.url.rstrip('/')}/v{matched_version}"
             try:
                 probe_endpoint(base_url, timeout=min(timeout, 5.0))
             except (TeaConnectionError, TeaServerError) as exc:
@@ -147,6 +163,8 @@ class TeaClient:
                 timeout=timeout,
                 max_retries=max_retries,
                 backoff_factor=backoff_factor,
+                allow_private_ips=allow_private_ips,
+                cache_ttl=cache_ttl,
             )
 
         if errors:
@@ -479,15 +497,24 @@ class TeaClient:
             TeaValidationError: If download exceeds max_download_bytes.
         """
         if verify_checksums:
-            weak = {cs.algorithm_type.value for cs in verify_checksums} & _WEAK_HASH_ALGORITHMS
+            # Skip checksums with missing algorithm_type or algorithm_value (optional per spec)
+            verify_checksums = [cs for cs in verify_checksums if cs.algorithm_type and cs.algorithm_value]
+            alg_names = {cs.algorithm_type.value for cs in verify_checksums if cs.algorithm_type}
+            weak = alg_names & WEAK_HASH_ALGORITHMS
             if weak:
                 warnings.warn(
                     f"Verifying with weak hash algorithm(s): {', '.join(sorted(weak))}. Prefer SHA-256 or stronger.",
                     stacklevel=2,
                 )
-        algorithms = [cs.algorithm_type.value for cs in verify_checksums] if verify_checksums else None
+        algorithms = (
+            [cs.algorithm_type.value for cs in verify_checksums if cs.algorithm_type] if verify_checksums else None
+        )
         computed = self._http.download_with_hashes(
-            url, dest, algorithms=algorithms, max_download_bytes=max_download_bytes
+            url,
+            dest,
+            algorithms=algorithms,
+            max_download_bytes=max_download_bytes,
+            allow_private_ips=self._allow_private_ips,
         )
 
         if verify_checksums:
@@ -506,6 +533,8 @@ class TeaClient:
             TeaChecksumError: If any checksum does not match.
         """
         for cs in checksums:
+            if cs.algorithm_type is None or cs.algorithm_value is None:
+                continue  # skip incomplete checksums (fields optional per spec)
             alg_name = cs.algorithm_type.value
             expected = cs.algorithm_value.lower()
             if alg_name not in computed:
@@ -532,6 +561,149 @@ class TeaClient:
                     expected=expected,
                     actual=actual,
                 )
+
+    # --- Pagination iterators ---
+
+    @staticmethod
+    def _paginate(fetch_page: typing.Callable[..., typing.Any], page_size: int, **kwargs: typing.Any) -> Iterator[_T]:
+        """Generic paginator: calls *fetch_page* with page_offset/page_size, yields results."""
+        _validate_page_size(page_size)
+        offset = 0
+        while True:
+            page = fetch_page(**kwargs, page_offset=offset, page_size=page_size)
+            yield from page.results
+            offset += len(page.results)
+            if offset >= page.total_results or not page.results:
+                break
+
+    def iter_products(self, id_type: str, id_value: str, *, page_size: int = 100) -> Iterator[Product]:
+        """Iterate over all products matching an identifier, auto-paginating.
+
+        Args:
+            id_type: Identifier type (e.g. ``"PURL"``, ``"CPE"``).
+            id_value: Identifier value to search for.
+            page_size: Number of results per page (default 100).
+
+        Yields:
+            Each matching :class:`Product`.
+        """
+        return self._paginate(self.search_products, page_size, id_type=id_type, id_value=id_value)
+
+    def iter_product_releases(self, id_type: str, id_value: str, *, page_size: int = 100) -> Iterator[ProductRelease]:
+        """Iterate over all product releases matching an identifier, auto-paginating.
+
+        Args:
+            id_type: Identifier type (e.g. ``"PURL"``, ``"CPE"``).
+            id_value: Identifier value to search for.
+            page_size: Number of results per page (default 100).
+
+        Yields:
+            Each matching :class:`ProductRelease`.
+        """
+        return self._paginate(self.search_product_releases, page_size, id_type=id_type, id_value=id_value)
+
+    def iter_releases_for_product(self, uuid: str, *, page_size: int = 100) -> Iterator[ProductRelease]:
+        """Iterate over all releases for a specific product UUID, auto-paginating.
+
+        This is the auto-paginated counterpart of :meth:`get_product_releases`.
+        Compare with :meth:`iter_product_releases` which searches by identifier.
+
+        Args:
+            uuid: Product UUID.
+            page_size: Number of results per page (default 100).
+
+        Yields:
+            Each :class:`ProductRelease` for the product.
+        """
+        return self._paginate(self.get_product_releases, page_size, uuid=uuid)
+
+    # --- Bulk fetch ---
+
+    def get_products(self, uuids: list[str], *, max_workers: int = 5) -> list[Product]:
+        """Fetch multiple products by UUID in parallel.
+
+        Concurrency caveat: workers share a single ``requests.Session`` which
+        is not documented as thread-safe.  This works reliably for typical
+        workloads but may exhibit race conditions under heavy load.  Use
+        ``max_workers=1`` for strictly safe serial execution.  A thread-safe
+        transport is planned for the httpx migration.
+
+        Args:
+            uuids: List of product UUIDs.
+            max_workers: Maximum concurrent threads (default 5).
+
+        Returns:
+            Products in the same order as ``uuids``.
+
+        Raises:
+            TeaError: From the first failing UUID in input order.
+        """
+        return self._bulk_fetch(self.get_product, uuids, max_workers=max_workers)
+
+    def get_product_releases_bulk(self, uuids: list[str], *, max_workers: int = 5) -> list[ProductRelease]:
+        """Fetch multiple product releases by UUID in parallel.
+
+        See :meth:`get_products` for concurrency caveats.
+
+        Args:
+            uuids: List of product release UUIDs.
+            max_workers: Maximum concurrent threads (default 5).
+
+        Returns:
+            Product releases in the same order as ``uuids``.
+
+        Raises:
+            TeaError: From the first failing UUID in input order.
+        """
+        return self._bulk_fetch(self.get_product_release, uuids, max_workers=max_workers)
+
+    def get_artifacts(self, uuids: list[str], *, max_workers: int = 5) -> list[Artifact]:
+        """Fetch multiple artifacts by UUID in parallel.
+
+        See :meth:`get_products` for concurrency caveats.
+
+        Args:
+            uuids: List of artifact UUIDs.
+            max_workers: Maximum concurrent threads (default 5).
+
+        Returns:
+            Artifacts in the same order as ``uuids``.
+
+        Raises:
+            TeaError: From the first failing UUID in input order.
+        """
+        return self._bulk_fetch(self.get_artifact, uuids, max_workers=max_workers)
+
+    @staticmethod
+    def _bulk_fetch(fn: typing.Callable[[str], _T], uuids: list[str], *, max_workers: int = 5) -> list[_T]:
+        """Fetch multiple resources in parallel, preserving input order.
+
+        Note: ``fn`` is typically a bound method that issues HTTP requests via
+        a shared ``requests.Session``. The ``requests`` library does not
+        document ``Session`` as thread-safe, so concurrent use may expose race
+        conditions in connection pooling. A per-thread session or async client
+        is planned for the httpx migration.
+        """
+        if not uuids:
+            return []
+        if max_workers < 1:
+            raise ValueError(f"max_workers must be >= 1, got {max_workers}")
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = [pool.submit(fn, uid) for uid in uuids]
+            try:
+                return [f.result() for f in futures]
+            except Exception:
+                # Cancel pending futures so we don't block waiting for
+                # in-flight work after the first failure.
+                for f in futures:
+                    f.cancel()
+                raise
+
+    # --- Cache ---
+
+    def clear_cache(self) -> None:
+        """Clear the response cache (no-op if caching is disabled)."""
+        self._http.clear_cache()
 
     # --- Lifecycle ---
 
