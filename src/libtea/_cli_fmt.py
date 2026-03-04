@@ -6,9 +6,14 @@ name (``"discover"`` and ``"inspect"`` use command-based dispatch because
 their data is ``list`` which is ambiguous by type alone).
 """
 
+from __future__ import annotations
+
 import json
 from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from libtea.conformance._types import ConformanceResult
 
 from pydantic import BaseModel
 from rich.console import Console
@@ -491,6 +496,44 @@ def _inspect_component_details(comp: dict[str, Any], *, console: Console) -> Non
                 "-",
             )
     console.print(tbl)
+
+
+def format_conformance(result: ConformanceResult, *, verbose: bool = False) -> None:
+    """Format conformance results as a Rich table."""
+    from libtea.conformance._types import CheckStatus
+
+    console = Console()
+    console.print(f"\n[bold]TEA Conformance Report[/bold] — {escape(result.base_url)}")
+    console.print("━" * 60)
+
+    table = Table(show_header=False, box=None, padding=(0, 2))
+    table.add_column("Status", width=6)
+    table.add_column("Check")
+    table.add_column("Message")
+
+    status_style = {
+        CheckStatus.PASS: "[green]PASS[/green]",
+        CheckStatus.FAIL: "[red]FAIL[/red]",
+        CheckStatus.SKIP: "[yellow]SKIP[/yellow]",
+    }
+
+    for check in result.checks:
+        msg = check.message
+        if verbose and check.details and check.status == CheckStatus.FAIL:
+            msg = f"{check.message}\n  {check.details}"
+        table.add_row(
+            status_style.get(check.status, check.status.value),
+            escape(check.name),
+            escape(msg),
+        )
+
+    console.print(table)
+    console.print("━" * 60)
+    console.print(
+        f"Results: [green]{result.passed} passed[/green], "
+        f"[red]{result.failed} failed[/red], "
+        f"[yellow]{result.skipped} skipped[/yellow]"
+    )
 
 
 # --- Dispatch ---

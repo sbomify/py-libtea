@@ -137,6 +137,16 @@ class ErrorType(StrEnum):
     OBJECT_NOT_SHAREABLE = "OBJECT_NOT_SHAREABLE"
 
 
+class ErrorResponse(_TeaModel):
+    """TEA API 404 error response body.
+
+    Per spec, 404 responses return ``{"error": "OBJECT_UNKNOWN"}`` or
+    ``{"error": "OBJECT_NOT_SHAREABLE"}`` with no additional fields.
+    """
+
+    error: ErrorType
+
+
 # --- Shared types ---
 
 
@@ -537,6 +547,7 @@ __all__ = [
     "ComponentRef",
     "ComponentReleaseWithCollection",
     "DiscoveryInfo",
+    "ErrorResponse",
     "Identifier",
     "PaginatedProductReleaseResponse",
     "PaginatedProductResponse",

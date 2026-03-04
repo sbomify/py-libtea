@@ -83,6 +83,65 @@ class TestSearchProducts:
         assert resp.results == ()
 
 
+class TestListProducts:
+    @responses.activate
+    def test_list_products_no_filters(self, client, base_url):
+        responses.get(
+            f"{base_url}/products",
+            json={
+                "timestamp": "2024-03-20T15:30:00Z",
+                "pageStartIndex": 0,
+                "pageSize": 100,
+                "totalResults": 2,
+                "results": [
+                    {
+                        "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                        "name": "Product A",
+                        "identifiers": [],
+                    },
+                    {
+                        "uuid": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+                        "name": "Product B",
+                        "identifiers": [],
+                    },
+                ],
+            },
+        )
+        resp = client.list_products()
+        assert isinstance(resp, PaginatedProductResponse)
+        assert resp.total_results == 2
+        assert len(resp.results) == 2
+        request = responses.calls[0].request
+        assert "idType" not in str(request.url)
+        assert "idValue" not in str(request.url)
+
+    @responses.activate
+    def test_list_products_with_pagination(self, client, base_url):
+        responses.get(
+            f"{base_url}/products",
+            json={
+                "timestamp": "2024-03-20T15:30:00Z",
+                "pageStartIndex": 10,
+                "pageSize": 25,
+                "totalResults": 50,
+                "results": [],
+            },
+        )
+        resp = client.list_products(page_offset=10, page_size=25)
+        request = responses.calls[0].request
+        assert "pageOffset=10" in str(request.url)
+        assert "pageSize=25" in str(request.url)
+        assert resp.page_start_index == 10
+
+    def test_list_products_rejects_invalid_page_size(self, client):
+        with pytest.raises(TeaValidationError):
+            client.list_products(page_size=0)
+
+    def test_list_products_rejects_negative_offset(self, client):
+        with pytest.raises(TeaValidationError):
+            client.list_products(page_offset=-1)
+
+
 class TestSearchProductReleases:
     @responses.activate
     def test_search_product_releases_by_purl(self, client, base_url):
@@ -109,6 +168,59 @@ class TestSearchProductReleases:
         assert resp.results[0].version == "1.0.0"
         request = responses.calls[0].request
         assert "idType=PURL" in str(request.url)
+
+
+class TestListProductReleases:
+    @responses.activate
+    def test_list_product_releases_no_filters(self, client, base_url):
+        responses.get(
+            f"{base_url}/productReleases",
+            json={
+                "timestamp": "2024-03-20T15:30:00Z",
+                "pageStartIndex": 0,
+                "pageSize": 100,
+                "totalResults": 1,
+                "results": [
+                    {
+                        "uuid": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+                        "version": "1.0.0",
+                        "createdDate": "2024-01-01T00:00:00Z",
+                        "components": [{"uuid": "c3d4e5f6-a7b8-9012-cdef-123456789012"}],
+                    }
+                ],
+            },
+        )
+        resp = client.list_product_releases()
+        assert isinstance(resp, PaginatedProductReleaseResponse)
+        assert resp.total_results == 1
+        request = responses.calls[0].request
+        assert "idType" not in str(request.url)
+        assert "idValue" not in str(request.url)
+
+    @responses.activate
+    def test_list_product_releases_with_pagination(self, client, base_url):
+        responses.get(
+            f"{base_url}/productReleases",
+            json={
+                "timestamp": "2024-03-20T15:30:00Z",
+                "pageStartIndex": 5,
+                "pageSize": 50,
+                "totalResults": 100,
+                "results": [],
+            },
+        )
+        client.list_product_releases(page_offset=5, page_size=50)
+        request = responses.calls[0].request
+        assert "pageOffset=5" in str(request.url)
+        assert "pageSize=50" in str(request.url)
+
+    def test_list_product_releases_invalid_page_size(self, client):
+        with pytest.raises(TeaValidationError):
+            client.list_product_releases(page_size=0)
+
+    def test_list_product_releases_invalid_page_offset(self, client):
+        with pytest.raises(TeaValidationError):
+            client.list_product_releases(page_offset=-1)
 
 
 class TestProduct:

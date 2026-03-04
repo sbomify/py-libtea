@@ -46,6 +46,8 @@ class TeaClientProtocol(Protocol):
 
     # --- Products ---
 
+    def list_products(self, *, page_offset: int = 0, page_size: int = 100) -> PaginatedProductResponse: ...
+
     def search_products(
         self, id_type: str, id_value: str, *, page_offset: int = 0, page_size: int = 100
     ) -> PaginatedProductResponse: ...
@@ -57,6 +59,10 @@ class TeaClientProtocol(Protocol):
     ) -> PaginatedProductReleaseResponse: ...
 
     # --- Product Releases ---
+
+    def list_product_releases(
+        self, *, page_offset: int = 0, page_size: int = 100
+    ) -> PaginatedProductReleaseResponse: ...
 
     def search_product_releases(
         self, id_type: str, id_value: str, *, page_offset: int = 0, page_size: int = 100

@@ -1411,3 +1411,30 @@ class TestCliEntryImportError:
         )
         # The import error handling results in SystemExit(1)
         assert result.returncode == 1
+
+
+class TestConformanceCommand:
+    @responses.activate
+    def test_conformance_json_output(self):
+        paginated_empty = {
+            "timestamp": "2024-01-01T00:00:00Z",
+            "pageStartIndex": 0,
+            "pageSize": 10,
+            "totalResults": 0,
+            "results": [],
+        }
+        responses.get("https://tea.example.com/v1/products", json=paginated_empty)
+        responses.get("https://tea.example.com/v1/productReleases", json=paginated_empty)
+        responses.get(
+            "https://tea.example.com/v1/product/00000000-0000-0000-0000-000000000000",
+            status=404,
+            json={"error": "OBJECT_UNKNOWN"},
+        )
+        responses.get(
+            "https://tea.example.com/v1/discovery",
+            status=404,
+            json={"error": "OBJECT_UNKNOWN"},
+        )
+        result = runner.invoke(app, ["conformance", "--base-url", "https://tea.example.com/v1", "--json"])
+        assert result.exit_code in (0, 1)
+        assert "base_url" in result.output or "checks" in result.output

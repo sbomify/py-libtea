@@ -1,6 +1,6 @@
 [project]
 name = "libtea"
-version = "0.3.0"
+version = "0.4.0"
 description = "Python client library for the Transparency Exchange API (TEA)"
 authors = [{ name = "sbomify", email = "hello@sbomify.com" }]
 requires-python = ">=3.11"
@@ -34,14 +34,20 @@ Changelog = "https://github.com/sbomify/py-libtea/releases"
 
 [project.optional-dependencies]
 cli = ["click>=8.0,<9", "rich>=13.0.0"]
+conformance = ["pytest>=8.0.0"]
+server = []
 
 [project.scripts]
 tea-cli = "libtea._cli_entry:main"
+
+[project.entry-points."pytest11"]
+tea-conformance = "libtea.conformance.plugin"
 
 [dependency-groups]
 dev = [
     "pytest>=9.0.0,<10",
     "pytest-cov>=7.0.0,<8",
+    "pytest-timeout>=2.3.0,<3",
     "ruff>=0.15.0,<0.16",
     "pre-commit>=4.5.0,<5",
     "responses>=0.26.0,<1",
@@ -61,7 +67,13 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "--cov=src/libtea --cov-report=term-missing --cov-branch"
+addopts = "--cov=src/libtea --cov-report=term-missing --cov-branch --timeout=30"
+
+[tool.coverage.run]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
 
 [tool.ruff]
 line-length = 120
@@ -88,4 +100,8 @@ disallow_untyped_decorators = false
 
 [[tool.mypy.overrides]]
 module = "libtea._cli_fmt"
+disallow_untyped_decorators = false
+
+[[tool.mypy.overrides]]
+module = "libtea.conformance.*"
 disallow_untyped_decorators = false

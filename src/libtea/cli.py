@@ -719,3 +719,88 @@ def inspect(
                 )
             result.append(entry)
         _output(result, command="inspect")
+
+
+@app.command()
+@click.option("--base-url", required=True, envvar="TEA_BASE_URL", help="TEA server base URL")
+@click.option("--tei", default=None, help="TEI for discovery-driven testing")
+@click.option("--product-uuid", default=None, help="Product UUID for direct testing")
+@click.option("--release-uuid", default=None, help="Product release UUID")
+@click.option("--component-uuid", default=None, help="Component UUID")
+@click.option("--component-release-uuid", default=None, help="Component release UUID")
+@click.option("--artifact-uuid", default=None, help="Artifact UUID")
+@click.option("--timeout", type=click.FloatRange(min=0.1), default=30.0, help="Request timeout in seconds")
+@click.option("--token", envvar="TEA_TOKEN", default=None, help="Bearer token")
+@click.option("--auth", envvar="TEA_AUTH", default=None, help="Basic auth as USER:PASSWORD")
+@click.option("--allow-private-ips", is_flag=True, help="Allow private IPs")
+@click.option("--json", "output_json", is_flag=True, help="Output results as JSON")
+@click.option("-v", "--verbose", is_flag=True, help="Show failure details and increase logging verbosity")
+@click.option("-d", "--debug", is_flag=True, help="Show debug output")
+@click.pass_context
+def conformance(
+    ctx: click.Context,
+    base_url: str,
+    tei: str | None,
+    product_uuid: str | None,
+    release_uuid: str | None,
+    component_uuid: str | None,
+    component_release_uuid: str | None,
+    artifact_uuid: str | None,
+    timeout: float,
+    token: str | None,
+    auth: str | None,
+    allow_private_ips: bool,
+    output_json: bool,
+    verbose: bool,
+    debug: bool,
+) -> None:
+    """Run TEA conformance checks against a server."""
+    ctx.ensure_object(dict)
+    if output_json:
+        ctx.obj["json"] = True
+    verbose = verbose or ctx.obj.get("verbose", False)
+    debug = debug or ctx.obj.get("debug", False)
+    _configure_logging(verbose=verbose, debug=debug)
+    basic_auth = _parse_basic_auth(auth)
+
+    from libtea.conformance import run_conformance
+
+    try:
+        result = run_conformance(
+            base_url,
+            tei=tei,
+            product_uuid=product_uuid,
+            product_release_uuid=release_uuid,
+            component_uuid=component_uuid,
+            component_release_uuid=component_release_uuid,
+            artifact_uuid=artifact_uuid,
+            token=token,
+            basic_auth=basic_auth,
+            timeout=timeout,
+            allow_private_ips=allow_private_ips,
+        )
+    except TeaError as exc:
+        _error(str(exc))
+    except ValueError as exc:
+        _error(str(exc))
+    else:
+        if _is_json_output():
+            import dataclasses
+
+            json.dump(dataclasses.asdict(result), sys.stdout, indent=2, default=str)
+            print()
+        else:
+            try:
+                from libtea._cli_fmt import format_conformance
+            except ImportError:
+                for check in result.checks:
+                    status_label = check.status.value.upper()
+                    msg = check.message
+                    if verbose and check.details and check.status.value == "fail":
+                        msg = f"{check.message}\n    {check.details}"
+                    print(f"  {status_label:4s}  {check.name} — {msg}")
+                print(f"\nResults: {result.passed} passed, {result.failed} failed, {result.skipped} skipped")
+                raise SystemExit(1 if result.failed > 0 else 0)
+            format_conformance(result, verbose=verbose)
+
+        raise SystemExit(1 if result.failed > 0 else 0)
