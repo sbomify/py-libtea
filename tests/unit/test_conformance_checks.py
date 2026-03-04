@@ -1330,27 +1330,21 @@ class TestCheckPaginationFields:
 
 
 class TestCheckCamelCaseFields:
-    def test_pass_with_product_uuid(self):
+    def test_pass_with_collected_uuids(self):
         client = _make_client()
-        ctx = CheckContext(product_uuid=_PRODUCT_UUID)
+        ctx = CheckContext(collected_uuids=[_PRODUCT_UUID])
         result = check_camel_case_fields(client, ctx)
         assert result.status == CheckStatus.PASS
 
-    def test_pass_with_product_release_uuid(self):
-        client = _make_client()
-        ctx = CheckContext(product_release_uuid=_RELEASE_UUID)
-        result = check_camel_case_fields(client, ctx)
-        assert result.status == CheckStatus.PASS
-
-    def test_pass_with_component_uuid(self):
-        client = _make_client()
-        ctx = CheckContext(component_uuid=_COMPONENT_UUID)
-        result = check_camel_case_fields(client, ctx)
-        assert result.status == CheckStatus.PASS
-
-    def test_skip_no_data(self):
+    def test_skip_no_collected_data(self):
         client = _make_client()
         ctx = CheckContext()
+        result = check_camel_case_fields(client, ctx)
+        assert result.status == CheckStatus.SKIP
+
+    def test_skip_with_only_user_seeded_uuid(self):
+        client = _make_client()
+        ctx = CheckContext(product_uuid=_PRODUCT_UUID)
         result = check_camel_case_fields(client, ctx)
         assert result.status == CheckStatus.SKIP
 

@@ -471,23 +471,23 @@ def check_uuid_format(client: TeaClient, ctx: CheckContext) -> CheckResult:
 
 
 def check_pagination_fields(client: TeaClient, ctx: CheckContext) -> CheckResult:
-    """Verify that a paginated product listing can be retrieved successfully."""
+    """Verify that the /products endpoint responds successfully to a paginated request."""
     name = "pagination_fields"
     try:
         client.list_products(page_size=10)
     except TeaError as exc:
         return _fail(name, f"list_products() failed: {exc}", details=str(exc))
-    return _pass(name, "Paginated product listing retrieved successfully")
+    return _pass(name, "Paginated /products request responded successfully")
 
 
 def check_camel_case_fields(client: TeaClient, ctx: CheckContext) -> CheckResult:
     """Confirm server uses camelCase field names (validated by Pydantic parsing)."""
     name = "camel_case_fields"
-    # If we successfully parsed any model with camelCase aliases, the server is
-    # using camelCase. Check if we have any data from prior checks.
-    if ctx.product_uuid or ctx.product_release_uuid or ctx.component_uuid:
+    # Only treat this as confirmed when we have UUIDs that were discovered
+    # during earlier checks (not merely supplied by the user).
+    if ctx.collected_uuids:
         return _pass(name, "camelCase confirmed (Pydantic parsed server data with camelCase aliases)")
-    return _skip(name, "No data available to confirm camelCase fields")
+    return _skip(name, "No discovered data available to confirm camelCase fields")
 
 
 # ---------------------------------------------------------------------------

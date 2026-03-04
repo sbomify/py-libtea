@@ -783,24 +783,24 @@ def conformance(
         _error(str(exc))
     except ValueError as exc:
         _error(str(exc))
-
-    if _is_json_output():
-        import dataclasses
-
-        json.dump(dataclasses.asdict(result), sys.stdout, indent=2, default=str)
-        print()
     else:
-        try:
-            from libtea._cli_fmt import format_conformance
-        except ImportError:
-            for check in result.checks:
-                status_label = check.status.value.upper()
-                msg = check.message
-                if verbose and check.details and check.status.value == "fail":
-                    msg = f"{check.message}\n    {check.details}"
-                print(f"  {status_label:4s}  {check.name} — {msg}")
-            print(f"\nResults: {result.passed} passed, {result.failed} failed, {result.skipped} skipped")
-            raise SystemExit(1 if result.failed > 0 else 0)
-        format_conformance(result, verbose=verbose)
+        if _is_json_output():
+            import dataclasses
 
-    raise SystemExit(1 if result.failed > 0 else 0)
+            json.dump(dataclasses.asdict(result), sys.stdout, indent=2, default=str)
+            print()
+        else:
+            try:
+                from libtea._cli_fmt import format_conformance
+            except ImportError:
+                for check in result.checks:
+                    status_label = check.status.value.upper()
+                    msg = check.message
+                    if verbose and check.details and check.status.value == "fail":
+                        msg = f"{check.message}\n    {check.details}"
+                    print(f"  {status_label:4s}  {check.name} — {msg}")
+                print(f"\nResults: {result.passed} passed, {result.failed} failed, {result.skipped} skipped")
+                raise SystemExit(1 if result.failed > 0 else 0)
+            format_conformance(result, verbose=verbose)
+
+        raise SystemExit(1 if result.failed > 0 else 0)
