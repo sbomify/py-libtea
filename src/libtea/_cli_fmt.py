@@ -498,7 +498,7 @@ def _inspect_component_details(comp: dict[str, Any], *, console: Console) -> Non
     console.print(tbl)
 
 
-def format_conformance(result: ConformanceResult) -> None:
+def format_conformance(result: ConformanceResult, *, verbose: bool = False) -> None:
     """Format conformance results as a Rich table."""
     from libtea.conformance._types import CheckStatus
 
@@ -509,7 +509,7 @@ def format_conformance(result: ConformanceResult) -> None:
     table = Table(show_header=False, box=None, padding=(0, 2))
     table.add_column("Status", width=6)
     table.add_column("Check")
-    table.add_column("Details")
+    table.add_column("Message")
 
     status_style = {
         CheckStatus.PASS: "[green]PASS[/green]",
@@ -518,10 +518,13 @@ def format_conformance(result: ConformanceResult) -> None:
     }
 
     for check in result.checks:
+        msg = check.message
+        if verbose and check.details and check.status == CheckStatus.FAIL:
+            msg = f"{check.message}\n  {check.details}"
         table.add_row(
             status_style.get(check.status, check.status.value),
             escape(check.name),
-            escape(check.message),
+            escape(msg),
         )
 
     console.print(table)

@@ -66,7 +66,14 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "--cov=src/libtea --cov-report=term-missing --cov-branch"
+addopts = "--cov --cov-report=term-missing --cov-branch"
+
+[tool.coverage.run]
+source_pkgs = ["libtea"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
 
 [tool.ruff]
 line-length = 120

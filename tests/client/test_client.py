@@ -214,6 +214,14 @@ class TestListProductReleases:
         assert "pageOffset=5" in str(request.url)
         assert "pageSize=50" in str(request.url)
 
+    def test_list_product_releases_invalid_page_size(self, client):
+        with pytest.raises(TeaValidationError):
+            client.list_product_releases(page_size=0)
+
+    def test_list_product_releases_invalid_page_offset(self, client):
+        with pytest.raises(TeaValidationError):
+            client.list_product_releases(page_offset=-1)
+
 
 class TestProduct:
     @responses.activate

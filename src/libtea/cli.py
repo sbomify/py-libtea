@@ -727,13 +727,14 @@ def inspect(
 @click.option("--product-uuid", default=None, help="Product UUID for direct testing")
 @click.option("--release-uuid", default=None, help="Product release UUID")
 @click.option("--component-uuid", default=None, help="Component UUID")
+@click.option("--component-release-uuid", default=None, help="Component release UUID")
 @click.option("--artifact-uuid", default=None, help="Artifact UUID")
 @click.option("--timeout", type=click.FloatRange(min=0.1), default=30.0, help="Request timeout in seconds")
 @click.option("--token", envvar="TEA_TOKEN", default=None, help="Bearer token")
 @click.option("--auth", envvar="TEA_AUTH", default=None, help="Basic auth as USER:PASSWORD")
 @click.option("--allow-private-ips", is_flag=True, help="Allow private IPs")
 @click.option("--json", "output_json", is_flag=True, help="Output results as JSON")
-@click.option("-v", "--verbose", is_flag=True, help="Show details for failures")
+@click.option("-v", "--verbose", is_flag=True, help="Show failure details and increase logging verbosity")
 @click.option("-d", "--debug", is_flag=True, help="Show debug output")
 @click.pass_context
 def conformance(
@@ -743,6 +744,7 @@ def conformance(
     product_uuid: str | None,
     release_uuid: str | None,
     component_uuid: str | None,
+    component_release_uuid: str | None,
     artifact_uuid: str | None,
     timeout: float,
     token: str | None,
@@ -770,6 +772,7 @@ def conformance(
             product_uuid=product_uuid,
             product_release_uuid=release_uuid,
             component_uuid=component_uuid,
+            component_release_uuid=component_release_uuid,
             artifact_uuid=artifact_uuid,
             token=token,
             basic_auth=basic_auth,
@@ -792,9 +795,12 @@ def conformance(
         except ImportError:
             for check in result.checks:
                 status_label = check.status.value.upper()
-                print(f"  {status_label:4s}  {check.name} — {check.message}")
+                msg = check.message
+                if verbose and check.details and check.status.value == "fail":
+                    msg = f"{check.message}\n    {check.details}"
+                print(f"  {status_label:4s}  {check.name} — {msg}")
             print(f"\nResults: {result.passed} passed, {result.failed} failed, {result.skipped} skipped")
             raise SystemExit(1 if result.failed > 0 else 0)
-        format_conformance(result)
+        format_conformance(result, verbose=verbose)
 
     raise SystemExit(1 if result.failed > 0 else 0)
