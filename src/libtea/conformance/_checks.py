@@ -380,60 +380,44 @@ def check_get_artifact(client: TeaClient, ctx: CheckContext) -> CheckResult:
 # ---------------------------------------------------------------------------
 
 
+def _check_cle_for(
+    client: TeaClient,
+    uuid: str | None,
+    entity: str,
+    getter_name: str,
+) -> CheckResult:
+    """Shared implementation for per-entity CLE checks."""
+    name = f"{entity}_cle"
+    if not uuid:
+        return _skip(name, f"No {entity.replace('_', ' ')} UUID available")
+    getter = getattr(client, getter_name)
+    try:
+        cle = getter(uuid)
+    except TeaNotFoundError:
+        return _skip(name, f"Server does not have CLE for this {entity.replace('_', ' ')}")
+    except TeaError as exc:
+        return _fail(name, f"{getter_name}() failed: {exc}", details=str(exc))
+    return _pass(name, f"Got CLE with {len(cle.events)} event(s)")
+
+
 def check_product_cle(client: TeaClient, ctx: CheckContext) -> CheckResult:
     """Get CLE data for a product."""
-    name = "product_cle"
-    if not ctx.product_uuid:
-        return _skip(name, "No product UUID available")
-    try:
-        cle = client.get_product_cle(ctx.product_uuid)
-    except TeaNotFoundError:
-        return _skip(name, "Server does not have CLE for this product")
-    except TeaError as exc:
-        return _fail(name, f"get_product_cle() failed: {exc}", details=str(exc))
-    return _pass(name, f"Got CLE with {len(cle.events)} event(s)")
+    return _check_cle_for(client, ctx.product_uuid, "product", "get_product_cle")
 
 
 def check_product_release_cle(client: TeaClient, ctx: CheckContext) -> CheckResult:
     """Get CLE data for a product release."""
-    name = "product_release_cle"
-    if not ctx.product_release_uuid:
-        return _skip(name, "No product release UUID available")
-    try:
-        cle = client.get_product_release_cle(ctx.product_release_uuid)
-    except TeaNotFoundError:
-        return _skip(name, "Server does not have CLE for this product release")
-    except TeaError as exc:
-        return _fail(name, f"get_product_release_cle() failed: {exc}", details=str(exc))
-    return _pass(name, f"Got CLE with {len(cle.events)} event(s)")
+    return _check_cle_for(client, ctx.product_release_uuid, "product_release", "get_product_release_cle")
 
 
 def check_component_cle(client: TeaClient, ctx: CheckContext) -> CheckResult:
     """Get CLE data for a component."""
-    name = "component_cle"
-    if not ctx.component_uuid:
-        return _skip(name, "No component UUID available")
-    try:
-        cle = client.get_component_cle(ctx.component_uuid)
-    except TeaNotFoundError:
-        return _skip(name, "Server does not have CLE for this component")
-    except TeaError as exc:
-        return _fail(name, f"get_component_cle() failed: {exc}", details=str(exc))
-    return _pass(name, f"Got CLE with {len(cle.events)} event(s)")
+    return _check_cle_for(client, ctx.component_uuid, "component", "get_component_cle")
 
 
 def check_component_release_cle(client: TeaClient, ctx: CheckContext) -> CheckResult:
     """Get CLE data for a component release."""
-    name = "component_release_cle"
-    if not ctx.component_release_uuid:
-        return _skip(name, "No component release UUID available")
-    try:
-        cle = client.get_component_release_cle(ctx.component_release_uuid)
-    except TeaNotFoundError:
-        return _skip(name, "Server does not have CLE for this component release")
-    except TeaError as exc:
-        return _fail(name, f"get_component_release_cle() failed: {exc}", details=str(exc))
-    return _pass(name, f"Got CLE with {len(cle.events)} event(s)")
+    return _check_cle_for(client, ctx.component_release_uuid, "component_release", "get_component_release_cle")
 
 
 def check_cle_event_ordering(client: TeaClient, ctx: CheckContext) -> CheckResult:
