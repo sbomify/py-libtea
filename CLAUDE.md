@@ -45,9 +45,17 @@ _hashing.py          Checksum hash builders (SHA-*, BLAKE2b-*, MD5)
 discovery.py         TEI parsing, .well-known/tea fetching, SemVer endpoint selection, redirect SSRF protection
 models.py            Pydantic v2 models for all TEA domain objects (frozen, camelCase aliases)
 exceptions.py        Exception hierarchy (all inherit from TeaError)
+server.py            Server-side helpers (tea_datetime_serializer)
 cli.py               click CLI (optional dependency, thin wrapper over TeaClient)
 _cli_fmt.py          Rich output formatters for all CLI commands (tables, panels, escape helpers)
 _cli_entry.py        Entry point wrapper that handles missing CLI extras gracefully
+
+conformance/         Conformance test suite (optional dependency: pytest)
+  __init__.py        Public API: run_conformance, CheckResult, CheckStatus, ConformanceResult
+  _checks.py         25 check functions organized by category, CheckContext shared state
+  _runner.py         Orchestrates checks, collects results into ConformanceResult
+  _types.py          CheckStatus (StrEnum), CheckResult (frozen dataclass), ConformanceResult
+  plugin.py          pytest plugin — --tea-base-url options, parametrized test generation
 ```
 
 **Key design patterns:**
@@ -61,6 +69,8 @@ _cli_entry.py        Entry point wrapper that handles missing CLI extras gracefu
 - `probe_endpoint()` lives in `_http.py` (not `client.py`) to maintain the HTTP layer boundary
 - `_raise_for_status()` uses bounded reads (201 bytes) for error body snippets to avoid memory issues on streaming responses
 - CLI formatters in `_cli_fmt.py` escape all server-controlled strings with `rich.markup.escape()` to prevent Rich markup injection
+- Conformance checks run sequentially; earlier checks populate `CheckContext` with discovered UUIDs for later checks
+- `from __future__ import annotations` is safe in conformance modules (no Pydantic models, only dataclasses)
 
 **Auth**: Bearer token and basic auth are supported. Token and basic_auth are mutually exclusive. HTTP (non-TLS) with credentials is rejected.
 
@@ -90,4 +100,6 @@ Key spec files: `spec/openapi.yaml`, `discovery/readme.md`, `auth/readme.md`
 - `docs/plans/2025-02-25-tea-client-design.md` — v0.1.0 original design
 - `docs/plans/2026-02-25-v0.2.0-design.md` — v0.2.0 (CLE, SemVer, failover, CLI)
 - `docs/plans/2026-02-26-v0.3.0-design.md` — v0.3.0 (httpx migration, async client)
+- `docs/plans/2026-02-28-v0.4.0-design.md` — v0.4.0 (server models, conformance suite)
+- `docs/conformance.md` — Conformance suite usage and check reference
 - `docs/FUTURE.md` — Items blocked on external factors (Publisher API)

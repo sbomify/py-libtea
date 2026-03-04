@@ -32,6 +32,9 @@ TEA is an open standard for discovering and retrieving software transparency art
 - Typed Pydantic v2 models with full camelCase/snake_case conversion
 - Structured exception hierarchy with error context
 - CLI with rich-formatted output, JSON mode, and verbose logging
+- Conformance test suite for validating TEA server compliance (programmatic, CLI, and pytest plugin)
+- Server-side helpers (`tea_datetime_serializer`) for TEA API implementations
+- Unfiltered listing endpoints (`list_products`, `list_product_releases`)
 
 ## Installation
 
@@ -43,6 +46,12 @@ To include the CLI (`tea-cli`):
 
 ```bash
 pip install libtea[cli]
+```
+
+To run conformance tests against a TEA server:
+
+```bash
+pip install libtea[conformance]
 ```
 
 ## Quick start
@@ -131,6 +140,20 @@ with TeaClient.from_well_known("trust.sbomify.com") as client:
         "PURL", "pkg:github/sbomify/sbomify",
         page_offset=0, page_size=100,
     )
+    print(releases.total_results)
+```
+
+### Listing (unfiltered)
+
+```python
+with TeaClient.from_well_known("trust.sbomify.com") as client:
+    # List all products (no identifier filter)
+    products = client.list_products(page_size=50)
+    for product in products.results:
+        print(product.name, product.uuid)
+
+    # List all product releases
+    releases = client.list_product_releases(page_size=50)
     print(releases.total_results)
 ```
 
@@ -416,6 +439,19 @@ tea-cli get-cle <uuid> --entity component --domain trust.sbomify.com
 tea-cli get-cle <uuid> --entity component-release --domain trust.sbomify.com
 ```
 
+### Conformance
+
+```bash
+# Run conformance checks against a TEA server
+tea-cli conformance --base-url https://tea.example.com/v1
+
+# With TEI for discovery-driven testing
+tea-cli conformance --base-url https://tea.example.com/v1 --tei "urn:tei:..."
+
+# JSON output for CI pipelines
+tea-cli conformance --base-url https://tea.example.com/v1 --json
+```
+
 ### Environment variables
 
 | Variable | Description |
@@ -435,6 +471,49 @@ eval "$(_TEA_CLI_COMPLETE=zsh_source tea-cli)"
 
 # Fish (add to ~/.config/fish/completions/tea-cli.fish)
 _TEA_CLI_COMPLETE=fish_source tea-cli | source
+```
+
+## Conformance testing
+
+The conformance suite validates that a TEA server correctly implements the specification. It runs 25 checks covering discovery, products, releases, components, artifacts, CLE, and cross-cutting concerns (UUID format, pagination, camelCase).
+
+### Programmatic
+
+```python
+from libtea.conformance import run_conformance
+
+result = run_conformance(
+    "https://tea.example.com/v1",
+    tei="urn:tei:purl:example.com:pkg:pypi/mylib",
+)
+print(f"{result.passed} passed, {result.failed} failed, {result.skipped} skipped")
+```
+
+### CLI
+
+```bash
+tea-cli conformance --base-url https://tea.example.com/v1 --tei "urn:tei:..."
+tea-cli conformance --base-url https://tea.example.com/v1 --json
+```
+
+### pytest plugin
+
+```bash
+pytest --tea-base-url https://tea.example.com/v1 --tea-tei "urn:tei:..."
+```
+
+The plugin generates one test per conformance check. See the [conformance docs](docs/conformance.md) for the full check reference.
+
+## Server helpers
+
+For TEA server implementations that use libtea models as response schemas:
+
+```python
+from datetime import datetime, timezone
+from libtea.server import tea_datetime_serializer
+
+# Serialize to TEA spec format: "2024-03-20T15:30:00Z"
+tea_datetime_serializer(datetime.now(timezone.utc))
 ```
 
 ## Error handling
@@ -475,12 +554,14 @@ Using a bearer token over plaintext HTTP raises `ValueError` immediately — HTT
 - [Pydantic](https://docs.pydantic.dev/) >= 2.1.0 for data models
 - [semver](https://python-semver.readthedocs.io/) >= 3.0.4 for version selection
 
-Optional (for CLI): [click](https://click.palletsprojects.com/) >= 8.0, [rich](https://rich.readthedocs.io/) >= 13.0.0
+Optional:
+- CLI: [click](https://click.palletsprojects.com/) >= 8.0, [rich](https://rich.readthedocs.io/) >= 13.0.0
+- Conformance: [pytest](https://docs.pytest.org/) >= 8.0.0
 
 ## Not yet supported
 
 - Publisher API (spec is consumer-only in beta.2)
-- Async client (planned for httpx migration)
+- Async client
 
 ## Development
 
