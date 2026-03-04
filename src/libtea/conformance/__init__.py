@@ -15,6 +15,7 @@ Usage (pytest plugin)::
     pytest --tea-base-url https://tea.example.com/v1 --tea-tei "urn:tei:..."
 """
 
+from libtea.conformance._runner import run_conformance
 from libtea.conformance._types import CheckResult, CheckStatus, ConformanceResult
 
 __all__ = ["CheckResult", "CheckStatus", "ConformanceResult", "run_conformance"]
