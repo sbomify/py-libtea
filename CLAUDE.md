@@ -97,9 +97,5 @@ Key spec files: `spec/openapi.yaml`, `discovery/readme.md`, `auth/readme.md`
 
 ## Design Docs
 
-- `docs/plans/2025-02-25-tea-client-design.md` — v0.1.0 original design
-- `docs/plans/2026-02-25-v0.2.0-design.md` — v0.2.0 (CLE, SemVer, failover, CLI)
-- `docs/plans/2026-02-26-v0.3.0-design.md` — v0.3.0 (httpx migration, async client)
-- `docs/plans/2026-02-28-v0.4.0-design.md` — v0.4.0 (server models, conformance suite)
 - `docs/conformance.md` — Conformance suite usage and check reference
 - `docs/FUTURE.md` — Items blocked on external factors (Publisher API)
