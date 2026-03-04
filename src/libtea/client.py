@@ -195,6 +195,24 @@ class TeaClient:
 
     # --- Products ---
 
+    def list_products(self, *, page_offset: int = 0, page_size: int = 100) -> PaginatedProductResponse:
+        """List all products (no identifier filter).
+
+        Args:
+            page_offset: Zero-based page offset (default 0).
+            page_size: Number of results per page (default 100, max 10000).
+
+        Returns:
+            Paginated response containing products.
+        """
+        _validate_page_size(page_size)
+        _validate_page_offset(page_offset)
+        data = self._http.get_json(
+            "/products",
+            params={"pageOffset": page_offset, "pageSize": page_size},
+        )
+        return _validate(PaginatedProductResponse, data)
+
     def search_products(
         self, id_type: str, id_value: str, *, page_offset: int = 0, page_size: int = 100
     ) -> PaginatedProductResponse:
