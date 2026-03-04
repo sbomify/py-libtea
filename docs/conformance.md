@@ -191,7 +191,7 @@ Each check returns one of three statuses:
 | Check | Description |
 |-------|-------------|
 | `uuid_format` | Validate all collected UUIDs match canonical lowercase format |
-| `pagination_fields` | Verify paginated responses contain required fields (`timestamp`, `pageStartIndex`, `pageSize`, `totalResults`) |
+| `pagination_fields` | Verify that a paginated product listing can be retrieved successfully |
 | `camel_case_fields` | Confirm server uses camelCase field names |
 
 ## CI integration

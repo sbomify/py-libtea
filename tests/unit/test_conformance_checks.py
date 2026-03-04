@@ -1243,7 +1243,7 @@ class TestCheckCleEventOrdering:
         ctx = CheckContext()
         result = check_cle_event_ordering(client, ctx)
         assert result.status == CheckStatus.SKIP
-        assert "No CLE data" in result.message
+        assert "No CLE source" in result.message
 
     @responses.activate
     def test_skip_few_events(self):
@@ -1252,7 +1252,16 @@ class TestCheckCleEventOrdering:
         ctx = CheckContext(product_uuid=_PRODUCT_UUID)
         result = check_cle_event_ordering(client, ctx)
         assert result.status == CheckStatus.SKIP
-        assert "fewer than 2" in result.message
+        assert "2+" in result.message
+
+    @responses.activate
+    def test_falls_through_few_events_to_next_source(self):
+        responses.get(f"{BASE_URL}/product/{_PRODUCT_UUID}/cle", json=_CLE_SINGLE_EVENT_JSON)
+        responses.get(f"{BASE_URL}/productRelease/{_RELEASE_UUID}/cle", json=_CLE_JSON)
+        client = _make_client()
+        ctx = CheckContext(product_uuid=_PRODUCT_UUID, product_release_uuid=_RELEASE_UUID)
+        result = check_cle_event_ordering(client, ctx)
+        assert result.status == CheckStatus.PASS
 
     @responses.activate
     def test_falls_through_to_second_source_on_404(self):

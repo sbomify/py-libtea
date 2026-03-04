@@ -423,7 +423,7 @@ def check_component_release_cle(client: TeaClient, ctx: CheckContext) -> CheckRe
 def check_cle_event_ordering(client: TeaClient, ctx: CheckContext) -> CheckResult:
     """Verify CLE events are ordered by id descending."""
     name = "cle_event_ordering"
-    # Try each CLE source in priority order until we find one with events.
+    # Try each CLE source in priority order until we find one with >= 2 events.
     cle = None
     for uuid, getter_name in [
         (ctx.product_uuid, "get_product_cle"),
@@ -435,16 +435,16 @@ def check_cle_event_ordering(client: TeaClient, ctx: CheckContext) -> CheckResul
             continue
         getter = getattr(client, getter_name)
         try:
-            cle = getter(uuid)
-            break
+            candidate = getter(uuid)
         except TeaNotFoundError:
             continue
         except TeaError:
             continue
+        if len(candidate.events) >= 2:
+            cle = candidate
+            break
     if cle is None:
-        return _skip(name, "No CLE data available to check ordering")
-    if len(cle.events) < 2:
-        return _skip(name, "CLE has fewer than 2 events, ordering check not meaningful")
+        return _skip(name, "No CLE source with 2+ events available to check ordering")
     ids = [e.id for e in cle.events]
     if ids == sorted(ids, reverse=True):
         return _pass(name, f"CLE events ordered by id descending ({len(ids)} events)")
