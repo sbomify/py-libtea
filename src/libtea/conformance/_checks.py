@@ -471,13 +471,25 @@ def check_uuid_format(client: TeaClient, ctx: CheckContext) -> CheckResult:
 
 
 def check_pagination_fields(client: TeaClient, ctx: CheckContext) -> CheckResult:
-    """Verify that the /products endpoint responds successfully to a paginated request."""
+    """Verify that the /products listing exposes expected pagination metadata fields."""
     name = "pagination_fields"
     try:
-        client.list_products(page_size=10)
+        result = client.list_products(page_size=10)
     except TeaError as exc:
         return _fail(name, f"list_products() failed: {exc}", details=str(exc))
-    return _pass(name, "Paginated /products request responded successfully")
+
+    issues: list[str] = []
+    if result.page_size != 10:
+        issues.append(f"page_size: requested 10, got {result.page_size!r}")
+    if result.page_start_index < 0:
+        issues.append(f"page_start_index is negative: {result.page_start_index}")
+    if result.total_results < 0:
+        issues.append(f"total_results is negative: {result.total_results}")
+    if not result.timestamp:
+        issues.append("timestamp is empty")
+    if issues:
+        return _fail(name, "Pagination metadata issues", details="; ".join(issues))
+    return _pass(name, "Pagination metadata fields present and valid")
 
 
 def check_camel_case_fields(client: TeaClient, ctx: CheckContext) -> CheckResult:

@@ -1328,6 +1328,16 @@ class TestCheckPaginationFields:
         result = check_pagination_fields(client, ctx)
         assert result.status == CheckStatus.FAIL
 
+    @responses.activate
+    def test_fail_on_page_size_mismatch(self):
+        bad = {**_PAGINATED_PRODUCTS, "pageSize": 5}
+        responses.get(f"{BASE_URL}/products", json=bad)
+        client = _make_client()
+        ctx = CheckContext()
+        result = check_pagination_fields(client, ctx)
+        assert result.status == CheckStatus.FAIL
+        assert "page_size" in result.details
+
 
 class TestCheckCamelCaseFields:
     def test_pass_with_collected_uuids(self):
