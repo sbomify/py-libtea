@@ -1935,8 +1935,11 @@ class TestCLIUXImprovements:
             result = runner.invoke(app, [cmd, "--help"])
             assert "Examples:" in result.output, f"{cmd} --help missing Examples section"
 
+    @responses.activate
     def test_no_input_flag_skips_download_prompt(self, tmp_path):
         """--no-input suppresses the confirmation prompt like --yes."""
+        # Stub discovery to return a connection error deterministically
+        responses.get(f"{BASE_URL}/discovery", body=ConnectionError("stubbed"))
         result = runner.invoke(
             app,
             ["download", "urn:tei:purl:example.com:pkg:pypi/test@1.0", "--no-input", "--base-url", BASE_URL],

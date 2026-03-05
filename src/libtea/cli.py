@@ -124,10 +124,10 @@ def shared_options(fn):  # type: ignore[no-untyped-def]
         verbose = verbose or ctx.obj.get("verbose", False)
         debug = debug or ctx.obj.get("debug", False)
         _configure_logging(verbose=verbose, debug=debug)
-        # If command has a positional `tei` arg, keep it; otherwise use --tei option
+        # Store --tei in context; commands that need it read from kwargs (positional) or ctx.obj
         tei_urn = kwargs.pop("tei_urn", None)
-        if tei_urn and "tei" not in kwargs:
-            kwargs["tei"] = tei_urn
+        if tei_urn:
+            ctx.obj["tei_urn"] = tei_urn
         return ctx.invoke(fn, *args, **kwargs)
 
     return wrapper
@@ -185,6 +185,11 @@ def _build_client(
     When neither --base-url nor --domain is provided, the domain is extracted
     from the TEI URN (if given) and used for .well-known/tea discovery.
     """
+    # Fall back to --tei from shared_options (stored in ctx.obj) when tei is not provided directly
+    if not tei:
+        ctx = click.get_current_context(silent=True)
+        if ctx and ctx.obj:
+            tei = ctx.obj.get("tei_urn")
     if base_url and domain:
         _error("Cannot use both --base-url and --domain")
     if not base_url and not domain:
@@ -268,7 +273,7 @@ def _output(data: Any, *, command: str | None = None) -> None:
                 item.model_dump(mode="json", by_alias=True) if isinstance(item, BaseModel) else item for item in data
             ]
         if output_file:
-            with open(output_file, "w") as f:
+            with open(output_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, default=str)
                 f.write("\n")
         else:
@@ -282,7 +287,7 @@ def _output(data: Any, *, command: str | None = None) -> None:
         from rich.console import Console
 
         if output_file:
-            with open(output_file, "w") as f:
+            with open(output_file, "w", encoding="utf-8") as f:
                 console = Console(file=f, no_color=no_color)
                 format_output(data, command=command, console=console)
         elif no_color:
@@ -808,10 +813,14 @@ def _deduplicate_filename(filename: str, seen: set[str]) -> str:
     if filename not in seen:
         seen.add(filename)
         return filename
-    base, dot, ext = filename.partition(".")
+    # Split on last dot so multi-dot stems (e.g. report.v1.json) keep internal dots
+    if "." in filename:
+        base, _, ext = filename.rpartition(".")
+    else:
+        base, ext = filename, ""
     counter = 1
     while True:
-        candidate = f"{base}-{counter}.{ext}" if dot else f"{base}-{counter}"
+        candidate = f"{base}-{counter}.{ext}" if ext else f"{base}-{counter}"
         if candidate not in seen:
             seen.add(candidate)
             return candidate
@@ -848,7 +857,8 @@ def _download_from_tei(
                 checksums = [cs for cs in fmt.checksums if cs.algorithm_type and cs.algorithm_value]
                 attempted += 1
                 if dry_run:
-                    print(f"Would download: {filename} → {dest_path}", file=sys.stderr)
+                    if not quiet:
+                        print(f"Would download: {filename} → {dest_path}", file=sys.stderr)
                     downloaded += 1
                     continue
                 try:
