@@ -1438,3 +1438,629 @@ class TestConformanceCommand:
         result = runner.invoke(app, ["conformance", "--base-url", "https://tea.example.com/v1", "--json"])
         assert result.exit_code in (0, 1)
         assert "base_url" in result.output or "checks" in result.output
+
+
+class TestDownloadTeiMode:
+    """Tests for the TEI URN discover-and-download mode of the download command."""
+
+    @responses.activate
+    def test_tei_mode_downloads_artifacts(self, tmp_path):
+        """TEI source triggers discover → collection → download flow."""
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        pr_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        artifact_url = "https://cdn.example.com/sbom.cdx.json"
+        responses.get(
+            f"{BASE_URL}/discovery",
+            json=[
+                {
+                    "productReleaseUuid": pr_uuid,
+                    "servers": [{"rootUrl": BASE_URL, "versions": ["1.0.0"]}],
+                }
+            ],
+        )
+        responses.get(
+            f"{BASE_URL}/productRelease/{pr_uuid}/collection/latest",
+            json={
+                "uuid": pr_uuid,
+                "version": 1,
+                "artifacts": [
+                    {
+                        "uuid": "art-uuid-1",
+                        "name": "SBOM",
+                        "type": "BOM",
+                        "formats": [
+                            {
+                                "mediaType": "application/vnd.cyclonedx+json",
+                                "url": artifact_url,
+                                "checksums": [],
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+        responses.get(artifact_url, body=b'{"bomFormat": "CycloneDX"}')
+        dest = tmp_path / "output"
+        result = runner.invoke(app, ["download", tei, str(dest), "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        assert (dest / "sbom.cdx.json").exists()
+        assert "Downloaded sbom.cdx.json" in result.output
+
+    @responses.activate
+    def test_tei_mode_no_discovery_results(self):
+        """TEI with no discovery results exits with error."""
+        tei = "urn:tei:purl:example.com:pkg:pypi/nonexistent@1.0"
+        responses.get(f"{BASE_URL}/discovery", json=[])
+        result = runner.invoke(app, ["download", tei, "-y", "--base-url", BASE_URL])
+        assert result.exit_code == 1
+        assert "No results found" in result.output
+
+    @responses.activate
+    def test_tei_mode_artifact_download_failure_warns(self, tmp_path):
+        """Failed artifact download warns but doesn't abort."""
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        pr_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        good_url = "https://cdn.example.com/good.json"
+        bad_url = "https://cdn.example.com/bad.json"
+        responses.get(
+            f"{BASE_URL}/discovery",
+            json=[
+                {
+                    "productReleaseUuid": pr_uuid,
+                    "servers": [{"rootUrl": BASE_URL, "versions": ["1.0.0"]}],
+                }
+            ],
+        )
+        responses.get(
+            f"{BASE_URL}/productRelease/{pr_uuid}/collection/latest",
+            json={
+                "uuid": pr_uuid,
+                "version": 1,
+                "artifacts": [
+                    {
+                        "name": "BadArt",
+                        "formats": [{"url": bad_url, "checksums": []}],
+                    },
+                    {
+                        "name": "GoodArt",
+                        "formats": [{"url": good_url, "checksums": []}],
+                    },
+                ],
+            },
+        )
+        responses.get(bad_url, status=500)
+        responses.get(good_url, body=b"OK")
+        dest = tmp_path / "output"
+        result = runner.invoke(app, ["download", tei, str(dest), "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        assert "Warning: failed to download bad.json" in result.output
+        assert (dest / "good.json").exists()
+
+    @responses.activate
+    def test_tei_mode_all_downloads_fail(self, tmp_path):
+        """If all artifact downloads fail, exit with error."""
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        pr_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        artifact_url = "https://cdn.example.com/sbom.json"
+        responses.get(
+            f"{BASE_URL}/discovery",
+            json=[
+                {
+                    "productReleaseUuid": pr_uuid,
+                    "servers": [{"rootUrl": BASE_URL, "versions": ["1.0.0"]}],
+                }
+            ],
+        )
+        responses.get(
+            f"{BASE_URL}/productRelease/{pr_uuid}/collection/latest",
+            json={
+                "uuid": pr_uuid,
+                "version": 1,
+                "artifacts": [{"name": "SBOM", "formats": [{"url": artifact_url, "checksums": []}]}],
+            },
+        )
+        responses.get(artifact_url, status=500)
+        dest = tmp_path / "output"
+        result = runner.invoke(app, ["download", tei, str(dest), "--base-url", BASE_URL])
+        assert result.exit_code == 1
+        assert "All 1 artifact download(s) failed" in result.output
+
+    @responses.activate
+    def test_url_mode_still_works(self, tmp_path):
+        """Direct URL mode is unchanged."""
+        artifact_url = "https://cdn.example.com/sbom.json"
+        responses.get(artifact_url, body=b'{"bomFormat": "CycloneDX"}')
+        dest = tmp_path / "sbom.json"
+        result = runner.invoke(app, ["download", artifact_url, str(dest), "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        assert dest.exists()
+
+    @responses.activate
+    def test_tei_mode_prompts_when_dest_omitted(self):
+        """Omitting DEST in TEI mode prompts for confirmation."""
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        responses.get(f"{BASE_URL}/discovery", json=[])
+        # Answer 'y' to the prompt
+        result = runner.invoke(app, ["download", tei, "--base-url", BASE_URL], input="y\n")
+        assert result.exit_code == 1
+        assert "Download artifacts into current directory" in result.output
+        assert "No results found" in result.output
+
+    @responses.activate
+    def test_tei_mode_prompt_abort(self):
+        """Answering 'n' to the prompt aborts the download."""
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        responses.get(f"{BASE_URL}/discovery", json=[])
+        result = runner.invoke(app, ["download", tei, "--base-url", BASE_URL], input="n\n")
+        assert result.exit_code == 1
+        assert "Aborted" in result.output
+
+    @responses.activate
+    def test_tei_mode_yes_flag_skips_prompt(self):
+        """The -y flag skips the confirmation prompt."""
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        responses.get(f"{BASE_URL}/discovery", json=[])
+        result = runner.invoke(app, ["download", tei, "-y", "--base-url", BASE_URL])
+        assert result.exit_code == 1
+        assert "Download artifacts into current directory" not in result.output
+        assert "No results found" in result.output
+
+    def test_url_mode_requires_dest(self):
+        """URL mode without DEST shows an error."""
+        result = runner.invoke(app, ["download", "https://cdn.example.com/sbom.json", "--base-url", BASE_URL])
+        assert result.exit_code == 1
+        assert "DEST is required" in result.output
+
+    @responses.activate
+    def test_tei_mode_skips_formats_without_url(self, tmp_path):
+        """Formats with no URL are silently skipped."""
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        pr_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        good_url = "https://cdn.example.com/sbom.json"
+        responses.get(
+            f"{BASE_URL}/discovery",
+            json=[
+                {
+                    "productReleaseUuid": pr_uuid,
+                    "servers": [{"rootUrl": BASE_URL, "versions": ["1.0.0"]}],
+                }
+            ],
+        )
+        responses.get(
+            f"{BASE_URL}/productRelease/{pr_uuid}/collection/latest",
+            json={
+                "uuid": pr_uuid,
+                "version": 1,
+                "artifacts": [
+                    {
+                        "name": "SBOM",
+                        "formats": [
+                            {"mediaType": "application/xml", "checksums": []},
+                            {"url": good_url, "checksums": []},
+                        ],
+                    }
+                ],
+            },
+        )
+        responses.get(good_url, body=b"OK")
+        dest = tmp_path / "output"
+        result = runner.invoke(app, ["download", tei, str(dest), "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        assert (dest / "sbom.json").exists()
+
+    def test_tei_mode_rejects_checksum_flag(self):
+        """--checksum is rejected in TEI mode."""
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        result = runner.invoke(app, ["download", tei, "/tmp/out", "--checksum", "SHA-256:abc", "--base-url", BASE_URL])
+        assert result.exit_code == 1
+        assert "--checksum is not supported in TEI mode" in result.output
+
+    @responses.activate
+    def test_tei_mode_checksum_verification(self, tmp_path):
+        """Checksums from server metadata are verified in TEI mode."""
+        import hashlib
+
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        pr_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        content = b'{"bomFormat": "CycloneDX"}'
+        sha256 = hashlib.sha256(content).hexdigest()
+        artifact_url = "https://cdn.example.com/sbom.cdx.json"
+        responses.get(
+            f"{BASE_URL}/discovery",
+            json=[{"productReleaseUuid": pr_uuid, "servers": [{"rootUrl": BASE_URL, "versions": ["1.0.0"]}]}],
+        )
+        responses.get(
+            f"{BASE_URL}/productRelease/{pr_uuid}/collection/latest",
+            json={
+                "uuid": pr_uuid,
+                "version": 1,
+                "artifacts": [
+                    {
+                        "name": "SBOM",
+                        "formats": [
+                            {
+                                "url": artifact_url,
+                                "checksums": [{"algType": "SHA-256", "algValue": sha256}],
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+        responses.get(artifact_url, body=content)
+        dest = tmp_path / "output"
+        result = runner.invoke(app, ["download", tei, str(dest), "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        assert "(checksum OK)" in result.output
+
+    @responses.activate
+    def test_tei_mode_checksum_failure_shown_without_error_prefix(self, tmp_path):
+        """Checksum mismatch uses 'Checksum FAILED' prefix (no misleading 'Error:' prefix)."""
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        pr_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        artifact_url = "https://cdn.example.com/sbom.cdx.json"
+        responses.get(
+            f"{BASE_URL}/discovery",
+            json=[{"productReleaseUuid": pr_uuid, "servers": [{"rootUrl": BASE_URL, "versions": ["1.0.0"]}]}],
+        )
+        responses.get(
+            f"{BASE_URL}/productRelease/{pr_uuid}/collection/latest",
+            json={
+                "uuid": pr_uuid,
+                "version": 1,
+                "artifacts": [
+                    {
+                        "name": "SBOM",
+                        "formats": [
+                            {
+                                "url": artifact_url,
+                                "checksums": [{"algType": "SHA-256", "algValue": "0000bad"}],
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+        responses.get(artifact_url, body=b"content")
+        dest = tmp_path / "output"
+        result = runner.invoke(app, ["download", tei, str(dest), "--base-url", BASE_URL])
+        assert result.exit_code == 1
+        assert "Checksum FAILED" in result.output
+        assert "Error: checksum" not in result.output
+
+    @responses.activate
+    def test_tei_mode_empty_artifacts_in_collection(self, tmp_path):
+        """Collection with empty artifacts list shows 'no downloadable URLs' error."""
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        pr_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        responses.get(
+            f"{BASE_URL}/discovery",
+            json=[{"productReleaseUuid": pr_uuid, "servers": [{"rootUrl": BASE_URL, "versions": ["1.0.0"]}]}],
+        )
+        responses.get(
+            f"{BASE_URL}/productRelease/{pr_uuid}/collection/latest",
+            json={"uuid": pr_uuid, "version": 1, "artifacts": []},
+        )
+        dest = tmp_path / "output"
+        result = runner.invoke(app, ["download", tei, str(dest), "--base-url", BASE_URL])
+        assert result.exit_code == 1
+        assert "No downloadable artifact URLs found" in result.output
+
+    @responses.activate
+    def test_tei_mode_multiple_discoveries(self, tmp_path):
+        """TEI resolving to multiple product releases downloads from all."""
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        pr1 = "a1b2c3d4-0000-0000-0000-000000000001"
+        pr2 = "a1b2c3d4-0000-0000-0000-000000000002"
+        url1 = "https://cdn.example.com/sbom1.json"
+        url2 = "https://cdn.example.com/sbom2.json"
+        responses.get(
+            f"{BASE_URL}/discovery",
+            json=[
+                {"productReleaseUuid": pr1, "servers": [{"rootUrl": BASE_URL, "versions": ["1.0.0"]}]},
+                {"productReleaseUuid": pr2, "servers": [{"rootUrl": BASE_URL, "versions": ["1.0.0"]}]},
+            ],
+        )
+        responses.get(
+            f"{BASE_URL}/productRelease/{pr1}/collection/latest",
+            json={"uuid": pr1, "version": 1, "artifacts": [{"name": "A", "formats": [{"url": url1, "checksums": []}]}]},
+        )
+        responses.get(
+            f"{BASE_URL}/productRelease/{pr2}/collection/latest",
+            json={"uuid": pr2, "version": 1, "artifacts": [{"name": "B", "formats": [{"url": url2, "checksums": []}]}]},
+        )
+        responses.get(url1, body=b"one")
+        responses.get(url2, body=b"two")
+        dest = tmp_path / "output"
+        result = runner.invoke(app, ["download", tei, str(dest), "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        assert (dest / "sbom1.json").exists()
+        assert (dest / "sbom2.json").exists()
+
+    @responses.activate
+    def test_tei_mode_filename_collision_deduplicates(self, tmp_path):
+        """Duplicate filenames get a numeric suffix to avoid overwriting."""
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        pr_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        url1 = "https://cdn1.example.com/sbom.json"
+        url2 = "https://cdn2.example.com/sbom.json"
+        responses.get(
+            f"{BASE_URL}/discovery",
+            json=[{"productReleaseUuid": pr_uuid, "servers": [{"rootUrl": BASE_URL, "versions": ["1.0.0"]}]}],
+        )
+        responses.get(
+            f"{BASE_URL}/productRelease/{pr_uuid}/collection/latest",
+            json={
+                "uuid": pr_uuid,
+                "version": 1,
+                "artifacts": [
+                    {"name": "A", "formats": [{"url": url1, "checksums": []}]},
+                    {"name": "B", "formats": [{"url": url2, "checksums": []}]},
+                ],
+            },
+        )
+        responses.get(url1, body=b"first")
+        responses.get(url2, body=b"second")
+        dest = tmp_path / "output"
+        result = runner.invoke(app, ["download", tei, str(dest), "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        assert (dest / "sbom.json").exists()
+        assert (dest / "sbom-1.json").exists()
+        assert (dest / "sbom.json").read_bytes() == b"first"
+        assert (dest / "sbom-1.json").read_bytes() == b"second"
+
+
+class TestArtifactFilename:
+    """Tests for _artifact_filename derivation logic."""
+
+    def test_filename_from_url(self):
+        from libtea.cli import _artifact_filename
+        from libtea.models import Artifact, ArtifactFormat
+
+        fmt = ArtifactFormat(url="https://cdn.example.com/path/to/sbom.cdx.json")
+        art = Artifact(name="SBOM")
+        assert _artifact_filename(fmt, art, 0) == "sbom.cdx.json"
+
+    def test_filename_fallback_to_artifact_name(self):
+        from libtea.cli import _artifact_filename
+        from libtea.models import Artifact, ArtifactFormat
+
+        fmt = ArtifactFormat(media_type="application/json")
+        art = Artifact(name="my-sbom")
+        assert _artifact_filename(fmt, art, 0) == "my-sbom.json"
+
+    def test_filename_fallback_no_name(self):
+        from libtea.cli import _artifact_filename
+        from libtea.models import Artifact, ArtifactFormat
+
+        fmt = ArtifactFormat(media_type="application/vnd.cyclonedx+json")
+        art = Artifact()
+        assert _artifact_filename(fmt, art, 3) == "artifact-3.cdx.json"
+
+    def test_filename_url_without_extension_falls_back(self):
+        """URLs ending in generic segments like /download use artifact name instead."""
+        from libtea.cli import _artifact_filename
+        from libtea.models import Artifact, ArtifactFormat
+
+        fmt = ArtifactFormat(url="https://cdn.example.com/artifacts/uuid/download", media_type="application/json")
+        art = Artifact(name="my-sbom")
+        assert _artifact_filename(fmt, art, 0) == "my-sbom.json"
+
+    def test_filename_unknown_media_type(self):
+        from libtea.cli import _artifact_filename
+        from libtea.models import Artifact, ArtifactFormat
+
+        fmt = ArtifactFormat(media_type="application/octet-stream")
+        art = Artifact(name="blob")
+        assert _artifact_filename(fmt, art, 0) == "blob"
+
+    def test_filename_path_traversal_sanitized(self):
+        """Malicious artifact names with path traversal are sanitized."""
+        from libtea.cli import _artifact_filename
+        from libtea.models import Artifact, ArtifactFormat
+
+        fmt = ArtifactFormat(media_type="application/json")
+        art = Artifact(name="../../etc/passwd")
+        assert _artifact_filename(fmt, art, 0) == "passwd.json"
+
+    def test_filename_absolute_path_sanitized(self):
+        """Absolute path in artifact name is sanitized to basename."""
+        from libtea.cli import _artifact_filename
+        from libtea.models import Artifact, ArtifactFormat
+
+        fmt = ArtifactFormat(media_type="application/json")
+        art = Artifact(name="/etc/cron.d/malicious")
+        assert _artifact_filename(fmt, art, 0) == "malicious.json"
+
+    def test_ext_from_media_type(self):
+        from libtea.cli import _ext_from_media_type
+
+        assert _ext_from_media_type("application/json") == ".json"
+        assert _ext_from_media_type("application/xml") == ".xml"
+        assert _ext_from_media_type("text/xml") == ".xml"
+        assert _ext_from_media_type("application/spdx+json") == ".spdx.json"
+        assert _ext_from_media_type("application/vnd.cyclonedx+json") == ".cdx.json"
+        assert _ext_from_media_type("application/vnd.cyclonedx+xml") == ".cdx.xml"
+        assert _ext_from_media_type("application/octet-stream") == ""
+        assert _ext_from_media_type(None) == ""
+
+    def test_deduplicate_filename(self):
+        from libtea.cli import _deduplicate_filename
+
+        seen: set[str] = set()
+        assert _deduplicate_filename("sbom.json", seen) == "sbom.json"
+        assert _deduplicate_filename("sbom.json", seen) == "sbom-1.json"
+        assert _deduplicate_filename("sbom.json", seen) == "sbom-2.json"
+        assert _deduplicate_filename("other.xml", seen) == "other.xml"
+
+    def test_sanitize_filename(self):
+        from libtea.cli import _sanitize_filename
+
+        assert _sanitize_filename("normal.json") == "normal.json"
+        assert _sanitize_filename("../../etc/passwd") == "passwd"
+        assert _sanitize_filename("/etc/shadow") == "shadow"
+        assert _sanitize_filename("..") == ""
+        assert _sanitize_filename(".") == ""
+
+
+class TestCLIUXImprovements:
+    """Tests for CLI UX improvements (examples, flags, help text)."""
+
+    def test_top_level_help_shows_quick_start(self):
+        result = runner.invoke(app, ["--help"])
+        assert result.exit_code == 0
+        assert "Quick start:" in result.output
+        assert "TEA_BASE_URL" in result.output
+        assert "TEA_TOKEN" in result.output
+        assert "Exit codes:" in result.output
+
+    def test_command_help_shows_examples(self):
+        for cmd in [
+            "discover",
+            "download",
+            "inspect",
+            "get-product",
+            "get-release",
+            "get-collection",
+            "get-product-releases",
+            "get-component",
+            "get-component-releases",
+            "list-collections",
+            "get-cle",
+            "get-artifact",
+            "search-products",
+            "search-releases",
+            "conformance",
+        ]:
+            result = runner.invoke(app, [cmd, "--help"])
+            assert "Examples:" in result.output, f"{cmd} --help missing Examples section"
+
+    def test_no_input_flag_skips_download_prompt(self, tmp_path):
+        """--no-input suppresses the confirmation prompt like --yes."""
+        result = runner.invoke(
+            app,
+            ["download", "urn:tei:purl:example.com:pkg:pypi/test@1.0", "--no-input", "--base-url", BASE_URL],
+        )
+        # Will fail with connection error, but should NOT prompt
+        assert result.exit_code == 1
+        assert "Download artifacts into current directory" not in result.output
+
+    @responses.activate
+    def test_dry_run_shows_would_download(self, tmp_path):
+        """--dry-run lists artifacts without actually downloading."""
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        pr_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        artifact_url = "https://cdn.example.com/sbom.cdx.json"
+        responses.get(
+            f"{BASE_URL}/discovery",
+            json=[{"productReleaseUuid": pr_uuid, "servers": [{"rootUrl": BASE_URL, "versions": ["1.0.0"]}]}],
+        )
+        responses.get(
+            f"{BASE_URL}/productRelease/{pr_uuid}/collection/latest",
+            json={
+                "uuid": pr_uuid,
+                "version": 1,
+                "artifacts": [
+                    {"name": "SBOM", "formats": [{"url": artifact_url, "checksums": []}]},
+                ],
+            },
+        )
+        dest = tmp_path / "output"
+        result = runner.invoke(app, ["download", tei, str(dest), "--dry-run", "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        assert "Would download:" in result.output
+        assert "sbom.cdx.json" in result.output
+        assert not dest.exists()
+
+    def test_dry_run_rejected_in_url_mode(self):
+        """--dry-run is only valid in TEI mode."""
+        result = runner.invoke(
+            app,
+            ["download", "https://example.com/sbom.json", "out.json", "--dry-run", "--base-url", BASE_URL],
+        )
+        assert result.exit_code == 1
+        assert "--dry-run is only supported in TEI mode" in result.output
+
+    @responses.activate
+    def test_quiet_suppresses_download_progress(self, tmp_path):
+        """--quiet suppresses 'Downloaded ...' messages but still succeeds."""
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        pr_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        artifact_url = "https://cdn.example.com/sbom.json"
+        responses.get(
+            f"{BASE_URL}/discovery",
+            json=[{"productReleaseUuid": pr_uuid, "servers": [{"rootUrl": BASE_URL, "versions": ["1.0.0"]}]}],
+        )
+        responses.get(
+            f"{BASE_URL}/productRelease/{pr_uuid}/collection/latest",
+            json={
+                "uuid": pr_uuid,
+                "version": 1,
+                "artifacts": [
+                    {"name": "SBOM", "formats": [{"url": artifact_url, "checksums": []}]},
+                ],
+            },
+        )
+        responses.get(artifact_url, body=b"content")
+        dest = tmp_path / "output"
+        result = runner.invoke(app, ["download", tei, str(dest), "--quiet", "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        assert "Downloaded" not in result.output
+
+    @responses.activate
+    def test_no_color_flag(self, tmp_path):
+        """--no-color writes output without ANSI escape codes to file."""
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/product/{uuid}",
+            json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+        )
+        # Write Rich output to file with --no-color to verify ANSI stripping
+        out_file = tmp_path / "no_color.txt"
+        result = runner.invoke(
+            app, ["get-product", uuid, "--base-url", BASE_URL, "--no-color", "--output", str(out_file)]
+        )
+        assert result.exit_code == 0
+        content = out_file.read_text()
+        assert "Test Product" in content
+        assert "\x1b[" not in content
+
+    @responses.activate
+    def test_output_flag_writes_to_file(self, tmp_path):
+        """--output writes JSON to a file."""
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/product/{uuid}",
+            json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+        )
+        out_file = tmp_path / "result.json"
+        result = runner.invoke(app, ["--json", "get-product", uuid, "--base-url", BASE_URL, "--output", str(out_file)])
+        assert result.exit_code == 0
+        data = json.loads(out_file.read_text())
+        assert data["name"] == "Test Product"
+
+    @responses.activate
+    def test_output_flag_writes_rich_to_file(self, tmp_path):
+        """--output without --json writes Rich output to file."""
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/product/{uuid}",
+            json={"uuid": uuid, "name": "Test Product", "identifiers": []},
+        )
+        out_file = tmp_path / "result.txt"
+        result = runner.invoke(app, ["get-product", uuid, "--base-url", BASE_URL, "--output", str(out_file)])
+        assert result.exit_code == 0
+        content = out_file.read_text()
+        assert "Test Product" in content
+        assert "\x1b[" not in content
+
+    @responses.activate
+    def test_quiet_suppresses_url_mode_download_message(self, tmp_path):
+        """--quiet suppresses 'Downloaded to ...' in URL mode."""
+        url = f"{BASE_URL}/artifacts/abc/download"
+        responses.get(url, body=b"content")
+        dest = tmp_path / "out.json"
+        result = runner.invoke(app, ["download", url, str(dest), "--quiet", "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        assert "Downloaded to" not in result.output
+        assert dest.read_bytes() == b"content"

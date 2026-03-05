@@ -498,11 +498,11 @@ def _inspect_component_details(comp: dict[str, Any], *, console: Console) -> Non
     console.print(tbl)
 
 
-def format_conformance(result: ConformanceResult, *, verbose: bool = False) -> None:
+def format_conformance(result: ConformanceResult, *, verbose: bool = False, console: Console | None = None) -> None:
     """Format conformance results as a Rich table."""
     from libtea.conformance._types import CheckStatus
 
-    console = Console()
+    console = console or Console()
     console.print(f"\n[bold]TEA Conformance Report[/bold] — {escape(result.base_url)}")
     console.print("━" * 60)
 

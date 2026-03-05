@@ -3,7 +3,7 @@
 Provides the ``tea-cli`` command backed by click. Each subcommand maps
 to a :class:`~libtea.client.TeaClient` method and outputs rich-formatted
 tables and panels by default (or JSON when ``--json`` is specified).
-All commands accept ``--base-url`` / ``--domain`` for server selection,
+All commands accept ``--base-url`` / ``--domain`` / ``--tei`` for server selection,
 and ``--token`` / ``--auth`` for authentication.
 """
 
@@ -15,14 +15,17 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, NoReturn
+from urllib.parse import urlparse
 
 import click
 from pydantic import BaseModel
 
 from libtea.client import TEA_SPEC_VERSION, TeaClient
 from libtea.discovery import parse_tei
-from libtea.exceptions import TeaDiscoveryError, TeaError
+from libtea.exceptions import TeaAuthenticationError, TeaChecksumError, TeaConnectionError, TeaDiscoveryError, TeaError
 from libtea.models import (
+    Artifact,
+    ArtifactFormat,
     Checksum,
     ChecksumAlgorithm,
     ComponentReleaseWithCollection,
@@ -59,6 +62,17 @@ def shared_options(fn):  # type: ignore[no-untyped-def]
     the subcommand name).
     """
 
+    @click.option(
+        "-o",
+        "--output",
+        "output_file",
+        type=click.Path(dir_okay=False, resolve_path=True),
+        default=None,
+        help="Write output to file instead of stdout",
+    )
+    @click.option("--no-color", is_flag=True, help="Disable colored output")
+    @click.option("--no-input", is_flag=True, help="Never prompt for input (for scripts and CI)")
+    @click.option("--tei", "tei_urn", default=None, help="TEI URN for domain auto-discovery")
     @click.option("--port", type=int, default=None, help="Port for well-known resolution")
     @click.option("--use-http", is_flag=True, help="Use HTTP instead of HTTPS for discovery")
     @click.option("--timeout", type=click.FloatRange(min=0.1), default=30.0, help="Request timeout in seconds")
@@ -95,12 +109,25 @@ def shared_options(fn):  # type: ignore[no-untyped-def]
         ctx.ensure_object(dict)
         if output_json:
             ctx.obj["json"] = True
+        no_input = kwargs.pop("no_input", False)
+        if no_input:
+            ctx.obj["no_input"] = True
+        no_color = kwargs.pop("no_color", False)
+        if no_color:
+            ctx.obj["no_color"] = True
+        output_file = kwargs.pop("output_file", None)
+        if output_file:
+            ctx.obj["output_file"] = output_file
         # Merge group-level flags with subcommand-level flags
         if ctx.obj.get("allow_private_ips"):
             kwargs["allow_private_ips"] = True
         verbose = verbose or ctx.obj.get("verbose", False)
         debug = debug or ctx.obj.get("debug", False)
         _configure_logging(verbose=verbose, debug=debug)
+        # If command has a positional `tei` arg, keep it; otherwise use --tei option
+        tei_urn = kwargs.pop("tei_urn", None)
+        if tei_urn and "tei" not in kwargs:
+            kwargs["tei"] = tei_urn
         return ctx.invoke(fn, *args, **kwargs)
 
     return wrapper
@@ -218,12 +245,21 @@ def _is_json_output() -> bool:
     return bool(ctx and ctx.obj and ctx.obj.get("json"))
 
 
+def _get_output_options() -> tuple[str | None, bool]:
+    """Return (output_file, no_color) from the current Click context."""
+    ctx = click.get_current_context(silent=True)
+    if ctx and ctx.obj:
+        return ctx.obj.get("output_file"), ctx.obj.get("no_color", False)
+    return None, False
+
+
 def _output(data: Any, *, command: str | None = None) -> None:
     """Output ``data`` as JSON (when ``--json``) or rich-formatted tables/panels.
 
     In JSON mode, Pydantic models are serialized via ``model_dump(mode="json",
     by_alias=True)`` to produce camelCase keys matching the TEA API wire format.
     """
+    output_file, no_color = _get_output_options()
     if _is_json_output():
         if isinstance(data, BaseModel):
             data = data.model_dump(mode="json", by_alias=True)
@@ -231,14 +267,29 @@ def _output(data: Any, *, command: str | None = None) -> None:
             data = [
                 item.model_dump(mode="json", by_alias=True) if isinstance(item, BaseModel) else item for item in data
             ]
-        json.dump(data, sys.stdout, indent=2, default=str)
-        print()
+        if output_file:
+            with open(output_file, "w") as f:
+                json.dump(data, f, indent=2, default=str)
+                f.write("\n")
+        else:
+            json.dump(data, sys.stdout, indent=2, default=str)
+            print()
     else:
         try:
             from libtea._cli_fmt import format_output
         except ImportError:
             _error("Rich output requires the 'rich' package. Install with: pip install 'libtea[cli]'")
-        format_output(data, command=command)
+        from rich.console import Console
+
+        if output_file:
+            with open(output_file, "w") as f:
+                console = Console(file=f, no_color=no_color)
+                format_output(data, command=command, console=console)
+        elif no_color:
+            console = Console(no_color=True)
+            format_output(data, command=command, console=console)
+        else:
+            format_output(data, command=command)
 
 
 def _error(message: str) -> NoReturn:
@@ -253,7 +304,29 @@ def _error(message: str) -> NoReturn:
 # --- Main group ---
 
 
-@click.group(help="TEA (Transparency Exchange API) CLI client.")
+@click.group(
+    help="""TEA (Transparency Exchange API) CLI client.
+
+\b
+Quick start:
+  tea-cli inspect 'urn:tei:purl:example.com:pkg:pypi/requests@2.31.0'
+  tea-cli download 'urn:tei:purl:example.com:pkg:pypi/requests@2.31.0' ./sboms/
+
+\b
+Environment variables:
+  TEA_BASE_URL   TEA server base URL
+  TEA_TOKEN      Bearer token for authentication
+  TEA_AUTH       Basic auth as USER:PASSWORD
+
+\b
+Exit codes:
+  0   Success
+  1   Error (connection, auth, not found, etc.)
+  2   Usage error (missing arguments)
+
+\b
+Use 'tea-cli COMMAND --help' for more information on a command.""",
+)
 @click.version_option(
     package_name="libtea",
     prog_name="tea-cli",
@@ -297,7 +370,13 @@ def discover(
     port: int | None,
     allow_private_ips: bool,
 ) -> None:
-    """Resolve a TEI to product release UUID(s)."""
+    """Resolve a TEI to product release UUID(s).
+
+    \b
+    Examples:
+      tea-cli discover 'urn:tei:purl:example.com:pkg:pypi/requests@2.31.0' --domain example.com
+      tea-cli discover 'urn:tei:purl:example.com:pkg:pypi/requests@2.31.0' --quiet
+    """
     with _client_session(
         base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
     ) as client:
@@ -328,10 +407,17 @@ def search_products(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
+    tei: str | None = None,
 ) -> None:
-    """Search for products by identifier."""
+    """Search for products by identifier.
+
+    \b
+    Examples:
+      tea-cli search-products --id-type PURL --id-value 'pkg:pypi/requests' --domain example.com
+      tea-cli search-products --id-type CPE --id-value 'cpe:2.3:a:*:requests:*' --base-url https://tea.example.com
+    """
     with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
     ) as client:
         result = client.search_products(id_type, id_value, page_offset=page_offset, page_size=page_size)
     _output(result)
@@ -356,10 +442,17 @@ def search_releases(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
+    tei: str | None = None,
 ) -> None:
-    """Search for product releases by identifier."""
+    """Search for product releases by identifier.
+
+    \b
+    Examples:
+      tea-cli search-releases --id-type PURL --id-value 'pkg:pypi/requests' --domain example.com
+      tea-cli search-releases --id-type TEI --id-value 'urn:tei:purl:example.com:pkg:pypi/requests@2.31.0' --json
+    """
     with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
     ) as client:
         result = client.search_product_releases(id_type, id_value, page_offset=page_offset, page_size=page_size)
     _output(result)
@@ -378,10 +471,17 @@ def get_product(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
+    tei: str | None = None,
 ) -> None:
-    """Get a product by UUID."""
+    """Get a product by UUID.
+
+    \b
+    Examples:
+      tea-cli get-product 550e8400-e29b-41d4-a716-446655440000 --base-url https://tea.example.com
+      tea-cli get-product 550e8400-e29b-41d4-a716-446655440000 --json
+    """
     with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
     ) as client:
         result = client.get_product(uuid)
     _output(result)
@@ -402,10 +502,17 @@ def get_release(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
+    tei: str | None = None,
 ) -> None:
-    """Get a product or component release by UUID."""
+    """Get a product or component release by UUID.
+
+    \b
+    Examples:
+      tea-cli get-release 550e8400-e29b-41d4-a716-446655440000 --base-url https://tea.example.com
+      tea-cli get-release 550e8400-e29b-41d4-a716-446655440000 --component --json
+    """
     with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
     ) as client:
         result: ProductRelease | ComponentReleaseWithCollection
         if component:
@@ -432,10 +539,17 @@ def get_collection(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
+    tei: str | None = None,
 ) -> None:
-    """Get a collection (latest or by version)."""
+    """Get a collection (latest or by version).
+
+    \b
+    Examples:
+      tea-cli get-collection 550e8400-e29b-41d4-a716-446655440000 --base-url https://tea.example.com
+      tea-cli get-collection 550e8400-e29b-41d4-a716-446655440000 --version 3 --component
+    """
     with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
     ) as client:
         if component:
             if version is not None:
@@ -467,10 +581,17 @@ def get_product_releases(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
+    tei: str | None = None,
 ) -> None:
-    """List releases for a product UUID."""
+    """List releases for a product UUID.
+
+    \b
+    Examples:
+      tea-cli get-product-releases 550e8400-e29b-41d4-a716-446655440000 --base-url https://tea.example.com
+      tea-cli get-product-releases 550e8400-e29b-41d4-a716-446655440000 --page-size 10 --json
+    """
     with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
     ) as client:
         result = client.get_product_releases(uuid, page_offset=page_offset, page_size=page_size)
     _output(result)
@@ -489,10 +610,17 @@ def get_component(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
+    tei: str | None = None,
 ) -> None:
-    """Get a component by UUID."""
+    """Get a component by UUID.
+
+    \b
+    Examples:
+      tea-cli get-component 550e8400-e29b-41d4-a716-446655440000 --base-url https://tea.example.com
+      tea-cli get-component 550e8400-e29b-41d4-a716-446655440000 --json
+    """
     with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
     ) as client:
         result = client.get_component(uuid)
     _output(result)
@@ -511,10 +639,17 @@ def get_component_releases(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
+    tei: str | None = None,
 ) -> None:
-    """List releases for a component UUID."""
+    """List releases for a component UUID.
+
+    \b
+    Examples:
+      tea-cli get-component-releases 550e8400-e29b-41d4-a716-446655440000 --base-url https://tea.example.com
+      tea-cli get-component-releases 550e8400-e29b-41d4-a716-446655440000 --json
+    """
     with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
     ) as client:
         result = client.get_component_releases(uuid)
     _output(result, command="releases")
@@ -535,10 +670,17 @@ def list_collections(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
+    tei: str | None = None,
 ) -> None:
-    """List all collection versions for a release UUID."""
+    """List all collection versions for a release UUID.
+
+    \b
+    Examples:
+      tea-cli list-collections 550e8400-e29b-41d4-a716-446655440000 --base-url https://tea.example.com
+      tea-cli list-collections 550e8400-e29b-41d4-a716-446655440000 --component --json
+    """
     with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
     ) as client:
         if component:
             result = client.get_component_release_collections(uuid)
@@ -567,8 +709,15 @@ def get_cle(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
+    tei: str | None = None,
 ) -> None:
-    """Get Common Lifecycle Enumeration (CLE) for an entity."""
+    """Get Common Lifecycle Enumeration (CLE) for an entity.
+
+    \b
+    Examples:
+      tea-cli get-cle 550e8400-e29b-41d4-a716-446655440000 --base-url https://tea.example.com
+      tea-cli get-cle 550e8400-e29b-41d4-a716-446655440000 --entity component-release --json
+    """
     entity_methods = {
         "product": "get_product_cle",
         "product-release": "get_product_release_cle",
@@ -576,7 +725,7 @@ def get_cle(
         "component-release": "get_component_release_cle",
     }
     with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
     ) as client:
         result = getattr(client, entity_methods[entity])(uuid)
     _output(result)
@@ -595,26 +744,156 @@ def get_artifact(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
+    tei: str | None = None,
 ) -> None:
-    """Get artifact metadata by UUID."""
+    """Get artifact metadata by UUID.
+
+    \b
+    Examples:
+      tea-cli get-artifact 550e8400-e29b-41d4-a716-446655440000 --base-url https://tea.example.com
+      tea-cli get-artifact 550e8400-e29b-41d4-a716-446655440000 --json
+    """
     with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
     ) as client:
         result = client.get_artifact(uuid)
     _output(result)
 
 
+_MEDIA_TYPE_EXTENSIONS: dict[str, str] = {
+    "application/json": ".json",
+    "application/xml": ".xml",
+    "text/xml": ".xml",
+    "application/spdx+json": ".spdx.json",
+    "application/vnd.cyclonedx+json": ".cdx.json",
+    "application/vnd.cyclonedx+xml": ".cdx.xml",
+}
+
+
+def _ext_from_media_type(media_type: str | None) -> str:
+    """Map a media type to a file extension, or empty string if unknown."""
+    if media_type:
+        ext = _MEDIA_TYPE_EXTENSIONS.get(media_type)
+        if ext is None:
+            logger.debug("No file extension mapping for media type: %s", media_type)
+            return ""
+        return ext
+    return ""
+
+
+def _sanitize_filename(name: str) -> str:
+    """Strip path separators and traversal from a filename to prevent directory escape."""
+    # Take only the final component, stripping any directory traversal
+    name = Path(name).name
+    if not name or name in (".", ".."):
+        return ""
+    return name
+
+
+def _artifact_filename(fmt: ArtifactFormat, artifact: Artifact, index: int) -> str:
+    """Derive a filename for a downloaded artifact format."""
+    if fmt.url:
+        basename = Path(urlparse(fmt.url).path).name
+        # Only use URL basename if it looks like a real filename (has an extension).
+        # Skips generic path segments like "download" or "latest".
+        if basename and "." in basename:
+            return _sanitize_filename(basename) or f"artifact-{index}"
+    name = artifact.name or f"artifact-{index}"
+    ext = _ext_from_media_type(fmt.media_type)
+    return _sanitize_filename(f"{name}{ext}") or f"artifact-{index}"
+
+
+def _deduplicate_filename(filename: str, seen: set[str]) -> str:
+    """Append a numeric suffix if filename already exists in seen set."""
+    if filename not in seen:
+        seen.add(filename)
+        return filename
+    base, dot, ext = filename.partition(".")
+    counter = 1
+    while True:
+        candidate = f"{base}-{counter}.{ext}" if dot else f"{base}-{counter}"
+        if candidate not in seen:
+            seen.add(candidate)
+            return candidate
+        counter += 1
+
+
+def _download_from_tei(
+    client: TeaClient,
+    tei: str,
+    dest_dir: Path,
+    max_download_bytes: int | None,
+    *,
+    quiet: bool = False,
+    dry_run: bool = False,
+) -> None:
+    """Discover a TEI and download all artifacts into dest_dir."""
+    discoveries = client.discover(tei)
+    if not discoveries:
+        _error(f"No results found for TEI: {tei}")
+    if not dry_run:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+    downloaded = 0
+    attempted = 0
+    seen_filenames: set[str] = set()
+    for disc in discoveries:
+        collection = client.get_product_release_collection_latest(disc.product_release_uuid)
+        for art_idx, artifact in enumerate(collection.artifacts):
+            for fmt in artifact.formats:
+                if not fmt.url:
+                    continue
+                filename = _artifact_filename(fmt, artifact, art_idx)
+                filename = _deduplicate_filename(filename, seen_filenames)
+                dest_path = dest_dir / filename
+                checksums = [cs for cs in fmt.checksums if cs.algorithm_type and cs.algorithm_value]
+                attempted += 1
+                if dry_run:
+                    print(f"Would download: {filename} → {dest_path}", file=sys.stderr)
+                    downloaded += 1
+                    continue
+                try:
+                    client.download_artifact(
+                        fmt.url,
+                        dest_path,
+                        verify_checksums=checksums or None,
+                        max_download_bytes=max_download_bytes,
+                    )
+                    if not quiet:
+                        checksum_note = " (checksum OK)" if checksums else ""
+                        print(f"Downloaded {filename}{checksum_note}", file=sys.stderr)
+                    downloaded += 1
+                except TeaChecksumError as exc:
+                    print(f"Checksum FAILED for {filename}: {exc}", file=sys.stderr)
+                except (TeaAuthenticationError, TeaConnectionError) as exc:
+                    _error(str(exc))
+                except TeaError as exc:
+                    print(f"Warning: failed to download {filename}: {exc}", file=sys.stderr)
+                except OSError as exc:
+                    print(f"Warning: I/O error downloading {filename}: {exc}", file=sys.stderr)
+    if downloaded == 0:
+        if attempted == 0:
+            _error("No downloadable artifact URLs found in the collection(s)")
+        else:
+            _error(f"All {attempted} artifact download(s) failed")
+
+
 @app.command()
-@click.argument("url")
-@click.argument("dest", type=click.Path())
-@click.option("--checksum", multiple=True, help="Checksum as ALG:VALUE (repeatable)")
+@click.argument("source")
+@click.argument("dest", type=click.Path(), required=False, default=None)
+@click.option("--checksum", multiple=True, help="Checksum as ALG:VALUE (repeatable, URL mode only)")
 @click.option("--max-download-bytes", type=click.IntRange(min=1), default=None, help="Maximum download size in bytes")
+@click.option("-y", "--yes", is_flag=True, help="Skip confirmation prompt for TEI download into current directory")
+@click.option("-n", "--dry-run", is_flag=True, help="Show what would be downloaded without downloading (TEI mode only)")
+@click.option("-q", "--quiet", is_flag=True, help="Suppress progress output (errors still shown)")
 @shared_options
 def download(
-    url: str,
-    dest: str,
+    source: str,
+    dest: str | None,
     checksum: tuple[str, ...],
     max_download_bytes: int | None,
+    yes: bool,
+    dry_run: bool,
+    quiet: bool,
     base_url: str | None,
     token: str | None,
     auth: str | None,
@@ -623,8 +902,48 @@ def download(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
+    tei: str | None = None,
 ) -> None:
-    """Download an artifact file with optional checksum verification."""
+    """Fetch artifact(s) from a URL or TEI URN.
+
+    SOURCE is a direct artifact URL or a TEI URN (urn:tei:...).
+
+    \b
+    URL mode:   download <url> <destination-file>
+    TEI mode:   download <tei> [destination-directory]
+
+    In TEI mode, if DEST is omitted you will be prompted before downloading
+    into the current directory (use -y to skip the prompt).
+
+    \b
+    Examples:
+      tea-cli download 'urn:tei:purl:example.com:pkg:pypi/requests@2.31.0' ./sboms/
+      tea-cli download https://tea.example.com/artifacts/abc/download output.json --checksum SHA-256:abcdef...
+    """
+    if source.startswith("urn:tei:"):
+        if checksum:
+            _error("--checksum is not supported in TEI mode (checksums come from server metadata)")
+        if dest is None:
+            cwd = Path.cwd()
+            ctx = click.get_current_context()
+            no_input = ctx.obj.get("no_input", False) if ctx.obj else False
+            if not yes and not no_input and not dry_run:
+                click.confirm(f"Download artifacts into current directory ({cwd})?", abort=True)
+            dest = "."
+        try:
+            with _client_session(
+                base_url, token, domain, timeout, use_http, port, auth, tei=source, allow_private_ips=allow_private_ips
+            ) as client:
+                _download_from_tei(client, source, Path(dest), max_download_bytes, quiet=quiet, dry_run=dry_run)
+        except OSError as exc:
+            _error(f"I/O error: {exc}")
+        return
+
+    # URL mode: existing direct download behavior
+    if dry_run:
+        _error("--dry-run is only supported in TEI mode (urn:tei:... source)")
+    if dest is None:
+        _error("DEST is required when downloading from a URL")
     checksums = None
     if checksum:
         checksums = []
@@ -644,12 +963,13 @@ def download(
 
     try:
         with _client_session(
-            base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+            base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
         ) as client:
             result = client.download_artifact(
-                url, Path(dest), verify_checksums=checksums, max_download_bytes=max_download_bytes
+                source, Path(dest), verify_checksums=checksums, max_download_bytes=max_download_bytes
             )
-        print(f"Downloaded to {result}", file=sys.stderr)
+        if not quiet:
+            print(f"Downloaded to {result}", file=sys.stderr)
     except OSError as exc:
         _error(f"I/O error: {exc}")
 
@@ -672,7 +992,13 @@ def inspect(
     port: int | None,
     allow_private_ips: bool,
 ) -> None:
-    """Full flow: TEI -> discovery -> releases -> artifacts."""
+    """Full flow: TEI -> discovery -> releases -> artifacts.
+
+    \b
+    Examples:
+      tea-cli inspect 'urn:tei:purl:example.com:pkg:pypi/requests@2.31.0' --domain example.com
+      tea-cli inspect 'urn:tei:purl:example.com:pkg:pypi/requests@2.31.0' --json
+    """
     with _client_session(
         base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
     ) as client:
@@ -754,7 +1080,13 @@ def conformance(
     verbose: bool,
     debug: bool,
 ) -> None:
-    """Run TEA conformance checks against a server."""
+    """Run TEA conformance checks against a server.
+
+    \b
+    Examples:
+      tea-cli conformance --base-url https://tea.example.com --tei 'urn:tei:purl:example.com:pkg:pypi/requests@2.31.0'
+      tea-cli conformance --base-url https://tea.example.com --verbose
+    """
     ctx.ensure_object(dict)
     if output_json:
         ctx.obj["json"] = True
