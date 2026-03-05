@@ -1,0 +1,32 @@
+name: Upload SBOM
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  upload-sbom:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Upload SBOM
+        uses: sbomify/sbomify-action@master
+        env:
+          TOKEN: ${{ secrets.SBOMIFY_TOKEN }}
+          COMPONENT_ID: 'Xt5ZkVk3DSST'
+          COMPONENT_NAME: 'py-libtea'
+          COMPONENT_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || format('{0}-{1}', github.ref_name, github.sha) }}
+          LOCK_FILE: 'uv.lock'
+          AUGMENT: true
+          ENRICH: true
+          OUTPUT_FILE: sbom.cdx.json
+
+      - name: Attest SBOM
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1
+        with:
+          subject-path: '${{ github.workspace }}/sbom.cdx.json'

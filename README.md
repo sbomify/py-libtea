@@ -4,6 +4,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/libtea.svg)](https://pypi.org/project/libtea/)
 [![Python](https://img.shields.io/pypi/pyversions/libtea.svg)](https://pypi.org/project/libtea/)
 [![License](https://img.shields.io/github/license/sbomify/py-libtea.svg)](https://github.com/sbomify/py-libtea/blob/master/LICENSE)
+[![sbomified](https://sbomify.com/assets/images/logo/badge.svg)](https://trust.sbomify.com/component/py-libtea/)
 
 Python client library for the [Transparency Exchange API (TEA)](https://transparency.exchange/) v0.3.0-beta.2.
 
