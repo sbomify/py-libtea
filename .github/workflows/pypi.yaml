@@ -21,6 +21,20 @@ jobs:
 
       - uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b # v7.3.0
 
+      - name: Generate SBOM (PEP 770)
+        uses: sbomify/sbomify-action@master
+        env:
+          TOKEN: ${{ secrets.SBOMIFY_STAGE_TOKEN }}
+          API_BASE_URL: 'https://stage.sbomify.com'
+          COMPONENT_ID: 'rw6sHZjLbrDb'
+          COMPONENT_NAME: 'libtea'
+          LOCK_FILE: uv.lock
+          SBOM_FORMAT: cyclonedx
+          OUTPUT_FILE: libtea.cdx.json
+          AUGMENT: "true"
+          ENRICH: "true"
+          UPLOAD: "false"
+
       - name: Determine version
         id: version
         run: |
@@ -52,6 +66,19 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b # v7.3.0
+
+      - name: Generate SBOM (PEP 770)
+        uses: sbomify/sbomify-action@master
+        env:
+          TOKEN: ${{ secrets.SBOMIFY_TOKEN }}
+          COMPONENT_ID: 'Xt5ZkVk3DSST'
+          COMPONENT_NAME: 'libtea'
+          LOCK_FILE: uv.lock
+          SBOM_FORMAT: cyclonedx
+          OUTPUT_FILE: libtea.cdx.json
+          AUGMENT: "true"
+          ENRICH: "true"
+          UPLOAD: "false"
 
       - name: Run tests
         run: |

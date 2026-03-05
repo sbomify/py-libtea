@@ -59,9 +59,13 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/libtea"]
+sbom-files = ["libtea.cdx.json"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/libtea", "libtea.cdx.json", "pyproject.toml", "README.md", "LICENSE"]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.28.0"]
 build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
