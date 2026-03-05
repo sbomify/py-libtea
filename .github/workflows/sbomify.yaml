@@ -22,7 +22,7 @@ jobs:
         env:
           TOKEN: ${{ secrets.SBOMIFY_STAGE_TOKEN }}
           API_BASE_URL: 'https://stage.sbomify.com'
-          COMPONENT_ID: 'Xt5ZkVk3DSST'
+          COMPONENT_ID: 'rw6sHZjLbrDb'
           COMPONENT_NAME: 'py-libtea'
           COMPONENT_VERSION: ${{ format('{0}-{1}', github.ref_name, github.sha) }}
           LOCK_FILE: 'uv.lock'
