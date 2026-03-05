@@ -273,9 +273,12 @@ def _output(data: Any, *, command: str | None = None) -> None:
                 item.model_dump(mode="json", by_alias=True) if isinstance(item, BaseModel) else item for item in data
             ]
         if output_file:
-            with open(output_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, default=str)
-                f.write("\n")
+            try:
+                with open(output_file, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, default=str)
+                    f.write("\n")
+            except OSError as exc:
+                _error(f"Cannot write to {output_file}: {exc}")
         else:
             json.dump(data, sys.stdout, indent=2, default=str)
             print()
@@ -287,9 +290,12 @@ def _output(data: Any, *, command: str | None = None) -> None:
         from rich.console import Console
 
         if output_file:
-            with open(output_file, "w", encoding="utf-8") as f:
-                console = Console(file=f, no_color=no_color)
-                format_output(data, command=command, console=console)
+            try:
+                with open(output_file, "w", encoding="utf-8") as f:
+                    console = Console(file=f, no_color=no_color)
+                    format_output(data, command=command, console=console)
+            except OSError as exc:
+                _error(f"Cannot write to {output_file}: {exc}")
         elif no_color:
             console = Console(no_color=True)
             format_output(data, command=command, console=console)
@@ -341,8 +347,24 @@ Use 'tea-cli COMMAND --help' for more information on a command.""",
 @click.option("-v", "--verbose", is_flag=True, hidden=True)
 @click.option("-d", "--debug", is_flag=True, hidden=True)
 @click.option("--allow-private-ips", is_flag=True, hidden=True)
+@click.option("--no-color", is_flag=True, hidden=True)
+@click.option("--no-input", is_flag=True, hidden=True)
+@click.option(
+    "-o", "--output", "output_file", type=click.Path(dir_okay=False, resolve_path=True), default=None, hidden=True
+)
+@click.option("--tei", "tei_urn", default=None, hidden=True)
 @click.pass_context
-def app(ctx: click.Context, output_json: bool, verbose: bool, debug: bool, allow_private_ips: bool) -> None:
+def app(
+    ctx: click.Context,
+    output_json: bool,
+    verbose: bool,
+    debug: bool,
+    allow_private_ips: bool,
+    no_color: bool,
+    no_input: bool,
+    output_file: str | None,
+    tei_urn: str | None,
+) -> None:
     """TEA (Transparency Exchange API) CLI client."""
     ctx.ensure_object(dict)
     if output_json:
@@ -353,6 +375,14 @@ def app(ctx: click.Context, output_json: bool, verbose: bool, debug: bool, allow
         ctx.obj["verbose"] = True
     if debug:
         ctx.obj["debug"] = True
+    if no_color:
+        ctx.obj["no_color"] = True
+    if no_input:
+        ctx.obj["no_input"] = True
+    if output_file:
+        ctx.obj["output_file"] = output_file
+    if tei_urn:
+        ctx.obj["tei_urn"] = tei_urn
     _configure_logging(verbose=verbose, debug=debug)
 
 
@@ -1072,6 +1102,15 @@ def inspect(
 @click.option("--json", "output_json", is_flag=True, help="Output results as JSON")
 @click.option("-v", "--verbose", is_flag=True, help="Show failure details and increase logging verbosity")
 @click.option("-d", "--debug", is_flag=True, help="Show debug output")
+@click.option("--no-color", is_flag=True, help="Disable colored output")
+@click.option(
+    "-o",
+    "--output",
+    "output_file",
+    type=click.Path(dir_okay=False, resolve_path=True),
+    default=None,
+    help="Write output to file instead of stdout",
+)
 @click.pass_context
 def conformance(
     ctx: click.Context,
@@ -1089,6 +1128,8 @@ def conformance(
     output_json: bool,
     verbose: bool,
     debug: bool,
+    no_color: bool,
+    output_file: str | None,
 ) -> None:
     """Run TEA conformance checks against a server.
 
@@ -1100,6 +1141,12 @@ def conformance(
     ctx.ensure_object(dict)
     if output_json:
         ctx.obj["json"] = True
+    if no_color:
+        ctx.obj["no_color"] = True
+    if output_file:
+        ctx.obj["output_file"] = output_file
+    no_color = no_color or ctx.obj.get("no_color", False)
+    output_file = output_file or ctx.obj.get("output_file")
     verbose = verbose or ctx.obj.get("verbose", False)
     debug = debug or ctx.obj.get("debug", False)
     _configure_logging(verbose=verbose, debug=debug)
@@ -1129,8 +1176,17 @@ def conformance(
         if _is_json_output():
             import dataclasses
 
-            json.dump(dataclasses.asdict(result), sys.stdout, indent=2, default=str)
-            print()
+            data = dataclasses.asdict(result)
+            if output_file:
+                try:
+                    with open(output_file, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=2, default=str)
+                        f.write("\n")
+                except OSError as exc:
+                    _error(f"Cannot write to {output_file}: {exc}")
+            else:
+                json.dump(data, sys.stdout, indent=2, default=str)
+                print()
         else:
             try:
                 from libtea._cli_fmt import format_conformance
@@ -1143,6 +1199,22 @@ def conformance(
                     print(f"  {status_label:4s}  {check.name} — {msg}")
                 print(f"\nResults: {result.passed} passed, {result.failed} failed, {result.skipped} skipped")
                 raise SystemExit(1 if result.failed > 0 else 0)
-            format_conformance(result, verbose=verbose)
+
+            if output_file:
+                try:
+                    from rich.console import Console
+
+                    with open(output_file, "w", encoding="utf-8") as f:
+                        console = Console(file=f, no_color=no_color)
+                        format_conformance(result, verbose=verbose, console=console)
+                except OSError as exc:
+                    _error(f"Cannot write to {output_file}: {exc}")
+            elif no_color:
+                from rich.console import Console
+
+                console = Console(no_color=True)
+                format_conformance(result, verbose=verbose, console=console)
+            else:
+                format_conformance(result, verbose=verbose)
 
         raise SystemExit(1 if result.failed > 0 else 0)
