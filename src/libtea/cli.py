@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 from libtea.client import TEA_SPEC_VERSION, TeaClient
 from libtea.discovery import parse_tei
-from libtea.exceptions import TeaAuthenticationError, TeaChecksumError, TeaConnectionError, TeaDiscoveryError, TeaError
+from libtea.exceptions import TeaChecksumError, TeaDiscoveryError, TeaError
 from libtea.models import (
     Artifact,
     ArtifactFormat,
@@ -73,7 +73,12 @@ def shared_options(fn):  # type: ignore[no-untyped-def]
     )
     @click.option("--no-color", is_flag=True, help="Disable colored output")
     @click.option("--no-input", is_flag=True, help="Never prompt for input (for scripts and CI)")
-    @click.option("--tei", "tei_urn", default=None, help="TEI URN for domain auto-discovery")
+    @click.option(
+        "--tei",
+        "tei_urn",
+        default=None,
+        help="TEI URN for base-url/domain auto-discovery (for commands without a TEI positional argument)",
+    )
     @click.option("--port", type=int, default=None, help="Port for well-known resolution")
     @click.option("--use-http", is_flag=True, help="Use HTTP instead of HTTPS for discovery")
     @click.option("--timeout", type=click.FloatRange(min=0.1), default=30.0, help="Request timeout in seconds")
@@ -921,8 +926,6 @@ def _download_from_tei(
                     downloaded += 1
                 except TeaChecksumError as exc:
                     print(f"Checksum FAILED for {filename}: {exc}", file=sys.stderr)
-                except (TeaAuthenticationError, TeaConnectionError) as exc:
-                    print(f"Warning: failed to download {filename}: {exc}", file=sys.stderr)
                 except TeaError as exc:
                     print(f"Warning: failed to download {filename}: {exc}", file=sys.stderr)
                 except OSError as exc:
@@ -980,6 +983,8 @@ def download(
     if source.startswith("urn:tei:"):
         if checksum:
             _error("--checksum is not supported in TEI mode (checksums come from server metadata)")
+        if destination is not None and Path(destination).is_file():
+            _error(f"DESTINATION must be a directory in TEI mode, not a file: {destination}")
         if destination is None:
             cwd = Path.cwd()
             ctx = click.get_current_context()
@@ -1001,6 +1006,9 @@ def download(
         _error("--dry-run is only supported in TEI mode (urn:tei:... source)")
     if destination is None:
         _error("DESTINATION is required when downloading from a URL")
+    dest_path = Path(destination)
+    if dest_path.is_dir():
+        _error(f"DESTINATION must be a file path in URL mode, not a directory: {destination}")
     checksums = None
     if checksum:
         checksums = []
@@ -1023,7 +1031,7 @@ def download(
             base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
         ) as client:
             result = client.download_artifact(
-                source, Path(destination), verify_checksums=checksums, max_download_bytes=max_download_bytes
+                source, dest_path, verify_checksums=checksums, max_download_bytes=max_download_bytes
             )
         if not quiet:
             print(f"Downloaded to {result}", file=sys.stderr)
