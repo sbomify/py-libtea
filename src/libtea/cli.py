@@ -132,6 +132,8 @@ def shared_options(fn):  # type: ignore[no-untyped-def]
         _configure_logging(verbose=verbose, debug=debug)
         # Store --tei in context; commands that need it read from kwargs (positional) or ctx.obj
         tei_urn = kwargs.pop("tei_urn", None)
+        if tei_urn and "tei" in kwargs:
+            raise click.UsageError("This command takes TEI as a positional argument; use that instead of --tei")
         if tei_urn:
             ctx.obj["tei_urn"] = tei_urn
         return ctx.invoke(fn, *args, **kwargs)
