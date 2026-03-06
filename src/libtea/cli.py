@@ -69,7 +69,7 @@ def shared_options(fn):  # type: ignore[no-untyped-def]
         "output_file",
         type=click.Path(dir_okay=False, resolve_path=True),
         default=None,
-        help="Write formatted output to file instead of stdout (not used by 'download', which uses DEST)",
+        help="Write formatted output to file instead of stdout (not used by 'download', which uses DESTINATION)",
     )
     @click.option("--no-color", is_flag=True, help="Disable colored output")
     @click.option("--no-input", is_flag=True, help="Never prompt for input (for scripts and CI)")
@@ -936,7 +936,7 @@ def _download_from_tei(
 
 @app.command()
 @click.argument("source")
-@click.argument("dest", type=click.Path(), required=False, default=None)
+@click.argument("destination", type=click.Path(), required=False, default=None)
 @click.option("--checksum", multiple=True, help="Checksum as ALG:VALUE (repeatable, URL mode only)")
 @click.option("--max-download-bytes", type=click.IntRange(min=1), default=None, help="Maximum download size in bytes")
 @click.option("-y", "--yes", is_flag=True, help="Skip confirmation prompt for TEI download into current directory")
@@ -945,7 +945,7 @@ def _download_from_tei(
 @shared_options
 def download(
     source: str,
-    dest: str | None,
+    destination: str | None,
     checksum: tuple[str, ...],
     max_download_bytes: int | None,
     yes: bool,
@@ -969,7 +969,7 @@ def download(
     URL mode:   download <url> <destination-file>
     TEI mode:   download <tei> [destination-directory]
 
-    In TEI mode, if DEST is omitted you will be prompted before downloading
+    In TEI mode, if DESTINATION is omitted you will be prompted before downloading
     into the current directory (use -y to skip the prompt).
 
     \b
@@ -980,18 +980,18 @@ def download(
     if source.startswith("urn:tei:"):
         if checksum:
             _error("--checksum is not supported in TEI mode (checksums come from server metadata)")
-        if dest is None:
+        if destination is None:
             cwd = Path.cwd()
             ctx = click.get_current_context()
             no_input = ctx.obj.get("no_input", False) if ctx.obj else False
             if not yes and not no_input and not dry_run:
                 click.confirm(f"Download artifacts into current directory ({cwd})?", abort=True)
-            dest = "."
+            destination = "."
         try:
             with _client_session(
                 base_url, token, domain, timeout, use_http, port, auth, tei=source, allow_private_ips=allow_private_ips
             ) as client:
-                _download_from_tei(client, source, Path(dest), max_download_bytes, quiet=quiet, dry_run=dry_run)
+                _download_from_tei(client, source, Path(destination), max_download_bytes, quiet=quiet, dry_run=dry_run)
         except OSError as exc:
             _error(f"I/O error: {exc}")
         return
@@ -999,8 +999,8 @@ def download(
     # URL mode: existing direct download behavior
     if dry_run:
         _error("--dry-run is only supported in TEI mode (urn:tei:... source)")
-    if dest is None:
-        _error("DEST is required when downloading from a URL")
+    if destination is None:
+        _error("DESTINATION is required when downloading from a URL")
     checksums = None
     if checksum:
         checksums = []
@@ -1023,7 +1023,7 @@ def download(
             base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
         ) as client:
             result = client.download_artifact(
-                source, Path(dest), verify_checksums=checksums, max_download_bytes=max_download_bytes
+                source, Path(destination), verify_checksums=checksums, max_download_bytes=max_download_bytes
             )
         if not quiet:
             print(f"Downloaded to {result}", file=sys.stderr)
@@ -1162,6 +1162,7 @@ def conformance(
         ctx.obj["no_color"] = True
     if output_file:
         ctx.obj["output_file"] = output_file
+    tei = tei or ctx.obj.get("tei_urn")
     no_color = no_color or ctx.obj.get("no_color", False)
     output_file = output_file or ctx.obj.get("output_file")
     verbose = verbose or ctx.obj.get("verbose", False)

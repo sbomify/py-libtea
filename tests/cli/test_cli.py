@@ -1620,7 +1620,7 @@ class TestDownloadTeiMode:
         """URL mode without DEST shows an error."""
         result = runner.invoke(app, ["download", "https://cdn.example.com/sbom.json", "--base-url", BASE_URL])
         assert result.exit_code == 1
-        assert "DEST is required" in _all_output(result)
+        assert "DESTINATION is required" in _all_output(result)
 
     @responses.activate
     def test_tei_mode_skips_formats_without_url(self, tmp_path):
