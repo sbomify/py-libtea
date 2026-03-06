@@ -9,13 +9,13 @@ for authentication.
 """
 
 import functools
-import inspect as _inspect
 import json
 import logging
 import re
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
+from inspect import signature as _signature
 from pathlib import Path
 from typing import Any, NoReturn
 from urllib.parse import urlparse
@@ -67,7 +67,7 @@ def shared_options(fn):  # type: ignore[no-untyped-def]
     """
 
     # Only add --tei for commands that don't already have a positional tei argument
-    has_positional_tei = "tei" in _inspect.signature(fn).parameters
+    has_positional_tei = "tei" in _signature(fn).parameters
 
     # Build options list (applied bottom-up, so first in list = outermost in help)
     options = [
@@ -79,7 +79,9 @@ def shared_options(fn):  # type: ignore[no-untyped-def]
             default=None,
             help="Write formatted output to file instead of stdout (not used by 'download', which uses DESTINATION)",
         ),
-        click.option("--no-color", is_flag=True, help="Disable colored output"),
+        click.option(
+            "--no-color", is_flag=True, envvar="NO_COLOR", help="Disable colored output (also respects NO_COLOR env)"
+        ),
         click.option("--no-input", is_flag=True, help="Never prompt for input (for scripts and CI)"),
     ]
     if not has_positional_tei:
@@ -282,6 +284,39 @@ def _get_output_options() -> tuple[str | None, bool]:
     return None, False
 
 
+def _write_json(data: Any, output_file: str | None) -> None:
+    """Write JSON ``data`` to *output_file* or stdout."""
+    if output_file:
+        try:
+            with open(output_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, default=str)
+                f.write("\n")
+        except OSError as exc:
+            _error(f"Cannot write to {output_file}: {exc}")
+    else:
+        json.dump(data, sys.stdout, indent=2, default=str)
+        print()
+
+
+def _write_rich(render_fn: Any, output_file: str | None, no_color: bool) -> None:
+    """Route Rich output through *render_fn* to *output_file* or stdout.
+
+    *render_fn* is called with an optional ``console`` keyword argument.
+    """
+    from rich.console import Console
+
+    if output_file:
+        try:
+            with open(output_file, "w", encoding="utf-8") as f:
+                render_fn(console=Console(file=f, no_color=no_color))
+        except OSError as exc:
+            _error(f"Cannot write to {output_file}: {exc}")
+    elif no_color:
+        render_fn(console=Console(no_color=True))
+    else:
+        render_fn()
+
+
 def _output(data: Any, *, command: str | None = None) -> None:
     """Output ``data`` as JSON (when ``--json``) or rich-formatted tables/panels.
 
@@ -296,35 +331,14 @@ def _output(data: Any, *, command: str | None = None) -> None:
             data = [
                 item.model_dump(mode="json", by_alias=True) if isinstance(item, BaseModel) else item for item in data
             ]
-        if output_file:
-            try:
-                with open(output_file, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2, default=str)
-                    f.write("\n")
-            except OSError as exc:
-                _error(f"Cannot write to {output_file}: {exc}")
-        else:
-            json.dump(data, sys.stdout, indent=2, default=str)
-            print()
+        _write_json(data, output_file)
     else:
         try:
             from libtea._cli_fmt import format_output
         except ImportError:
             _error("Rich output requires the 'rich' package. Install with: pip install 'libtea[cli]'")
-        from rich.console import Console
 
-        if output_file:
-            try:
-                with open(output_file, "w", encoding="utf-8") as f:
-                    console = Console(file=f, no_color=no_color)
-                    format_output(data, command=command, console=console)
-            except OSError as exc:
-                _error(f"Cannot write to {output_file}: {exc}")
-        elif no_color:
-            console = Console(no_color=True)
-            format_output(data, command=command, console=console)
-        else:
-            format_output(data, command=command)
+        _write_rich(lambda console=None: format_output(data, command=command, console=console), output_file, no_color)
 
 
 def _error(message: str) -> NoReturn:
@@ -838,13 +852,13 @@ def _sanitize_filename(name: str) -> str:
     """Strip path separators, traversal, and control characters from a filename.
 
     Produces cross-platform safe filenames by replacing characters invalid on
-    Windows (``:``, ``*``, ``?``, ``"``, ``<``, ``>``, ``|``) with ``_``,
+    Windows (``:``, ``*``, ``?``, ``"``, ``<``, ``>``, ``|``, ``\\``) with ``_``,
     stripping trailing dots/spaces, and rejecting reserved device names.
     """
     # Remove NUL and ASCII control characters (invalid in filenames on most platforms)
     name = "".join(ch for ch in name if (32 <= ord(ch) < 127) or (ord(ch) >= 128))
-    # Replace characters invalid on Windows filesystems
-    name = re.sub(r'[:<>"|?*]', "_", name)
+    # Replace characters invalid on Windows filesystems (includes backslash for cross-platform safety)
+    name = re.sub(r'[:<>"|?*\\]', "_", name)
     # Take only the final component, stripping any directory traversal
     try:
         name = Path(name).name
@@ -906,13 +920,13 @@ def _deduplicate_filename(filename: str, seen: set[str]) -> str:
             ext = f".{simple_ext}"
         else:
             base, ext = filename, ""
-    counter = 1
-    while True:
+    for counter in range(1, 10_001):
         candidate = f"{base}-{counter}{ext}" if ext else f"{base}-{counter}"
         if candidate not in seen:
             seen.add(candidate)
             return candidate
-        counter += 1
+    msg = f"Too many filename collisions (>10000) for '{filename}'"
+    raise RuntimeError(msg)
 
 
 def _download_from_tei(
@@ -1249,17 +1263,7 @@ def conformance(
         if _is_json_output():
             import dataclasses
 
-            data = dataclasses.asdict(result)
-            if output_file:
-                try:
-                    with open(output_file, "w", encoding="utf-8") as f:
-                        json.dump(data, f, indent=2, default=str)
-                        f.write("\n")
-                except OSError as exc:
-                    _error(f"Cannot write to {output_file}: {exc}")
-            else:
-                json.dump(data, sys.stdout, indent=2, default=str)
-                print()
+            _write_json(dataclasses.asdict(result), output_file)
         else:
             try:
                 from libtea._cli_fmt import format_conformance
@@ -1283,21 +1287,10 @@ def conformance(
                     print(text, end="")
                 raise SystemExit(1 if result.failed > 0 else 0)
 
-            if output_file:
-                try:
-                    from rich.console import Console
-
-                    with open(output_file, "w", encoding="utf-8") as f:
-                        console = Console(file=f, no_color=no_color)
-                        format_conformance(result, verbose=verbose, console=console)
-                except OSError as exc:
-                    _error(f"Cannot write to {output_file}: {exc}")
-            elif no_color:
-                from rich.console import Console
-
-                console = Console(no_color=True)
-                format_conformance(result, verbose=verbose, console=console)
-            else:
-                format_conformance(result, verbose=verbose)
+            _write_rich(
+                lambda console=None: format_conformance(result, verbose=verbose, console=console),
+                output_file,
+                no_color,
+            )
 
         raise SystemExit(1 if result.failed > 0 else 0)

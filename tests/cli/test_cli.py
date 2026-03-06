@@ -337,11 +337,7 @@ class TestCLICommands:
     def test_error_output_goes_to_stderr(self):
         result = runner.invoke(app, ["get-product", "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"])
         assert result.exit_code == 1
-        if hasattr(result, "stderr") and result.stderr:
-            assert "Error:" in result.stderr
-        else:
-            # Fallback for Click versions that mix stdout/stderr or leave stderr empty
-            assert "Error:" in _all_output(result)
+        assert "Error:" in _all_output(result)
 
 
 class TestCLIErrorPaths:
@@ -1919,6 +1915,59 @@ class TestArtifactFilename:
         assert _sanitize_filename("..") == ""
         assert _sanitize_filename(".") == ""
 
+    def test_sanitize_windows_reserved_names(self):
+        from libtea.cli import _sanitize_filename
+
+        assert _sanitize_filename("CON") == "_CON"
+        assert _sanitize_filename("NUL.txt") == "_NUL.txt"
+        assert _sanitize_filename("com1.json") == "_com1.json"
+        assert _sanitize_filename("LPT3") == "_LPT3"
+        # Non-reserved stems are not prefixed
+        assert _sanitize_filename("CONSOLE.json") == "CONSOLE.json"
+
+    def test_sanitize_windows_invalid_chars(self):
+        from libtea.cli import _sanitize_filename
+
+        assert _sanitize_filename("file<name>.json") == "file_name_.json"
+        assert _sanitize_filename('a:b|c"d') == "a_b_c_d"
+        assert _sanitize_filename("q?mark*star") == "q_mark_star"
+
+    def test_sanitize_backslash(self):
+        from libtea.cli import _sanitize_filename
+
+        assert _sanitize_filename("foo\\bar.json") == "foo_bar.json"
+
+    def test_sanitize_control_characters(self):
+        from libtea.cli import _sanitize_filename
+
+        assert _sanitize_filename("file\x00name.json") == "filename.json"
+        assert _sanitize_filename("\x01\x02\x03test") == "test"
+        # Unicode (>=128) should be preserved
+        assert _sanitize_filename("rapport\u00e9.json") == "rapport\u00e9.json"
+
+    def test_sanitize_trailing_dots_and_spaces(self):
+        from libtea.cli import _sanitize_filename
+
+        assert _sanitize_filename("file.json...") == "file.json"
+        assert _sanitize_filename("file   ") == "file"
+        assert _sanitize_filename("...") == ""
+
+    def test_deduplicate_compound_extension(self):
+        from libtea.cli import _deduplicate_filename
+
+        seen: set[str] = set()
+        assert _deduplicate_filename("sbom.cdx.json", seen) == "sbom.cdx.json"
+        assert _deduplicate_filename("sbom.cdx.json", seen) == "sbom-1.cdx.json"
+        assert _deduplicate_filename("report.spdx.json", seen) == "report.spdx.json"
+        assert _deduplicate_filename("report.spdx.json", seen) == "report-1.spdx.json"
+
+    def test_deduplicate_no_extension(self):
+        from libtea.cli import _deduplicate_filename
+
+        seen: set[str] = set()
+        assert _deduplicate_filename("blob", seen) == "blob"
+        assert _deduplicate_filename("blob", seen) == "blob-1"
+
 
 class TestCLIUXImprovements:
     """Tests for CLI UX improvements (examples, flags, help text)."""
@@ -2075,6 +2124,57 @@ class TestCLIUXImprovements:
         content = out_file.read_text()
         assert "Test Product" in content
         assert "\x1b[" not in content
+
+    def test_tei_option_absent_on_positional_tei_commands(self):
+        """Commands with positional TEI should NOT show --tei in help."""
+        for cmd in ["discover", "inspect"]:
+            result = runner.invoke(app, [cmd, "--help"])
+            assert result.exit_code == 0
+            plain = _strip_ansi(result.output)
+            assert "--tei" not in plain, f"{cmd} should not have --tei option"
+
+    def test_tei_option_present_on_non_positional_commands(self):
+        """Commands without positional TEI should show --tei in help."""
+        for cmd in ["get-product", "get-release", "get-collection", "get-artifact", "download"]:
+            result = runner.invoke(app, [cmd, "--help"])
+            assert result.exit_code == 0
+            plain = _strip_ansi(result.output)
+            assert "--tei" in plain, f"{cmd} should have --tei option"
+
+    def test_download_rejects_output_flag(self, tmp_path):
+        """--output is rejected for download command."""
+        dest = tmp_path / "sbom.json"
+        result = runner.invoke(
+            app,
+            [
+                "download",
+                "https://cdn.example.com/f",
+                str(dest),
+                "--output",
+                str(tmp_path / "out.json"),
+                "--base-url",
+                BASE_URL,
+            ],
+        )
+        assert result.exit_code == 2
+        assert "--output is not supported" in _all_output(result)
+
+    def test_tei_mode_rejects_file_as_destination(self, tmp_path):
+        """TEI mode rejects a file as DESTINATION (must be a directory)."""
+        existing_file = tmp_path / "existing.txt"
+        existing_file.write_text("x")
+        tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
+        result = runner.invoke(app, ["download", tei, str(existing_file), "--base-url", BASE_URL])
+        assert result.exit_code == 2
+        assert "must be a directory" in _all_output(result)
+
+    def test_url_mode_rejects_directory_as_destination(self, tmp_path):
+        """URL mode rejects a directory as DESTINATION (must be a file)."""
+        result = runner.invoke(
+            app, ["download", "https://cdn.example.com/sbom.json", str(tmp_path), "--base-url", BASE_URL]
+        )
+        assert result.exit_code == 2
+        assert "must be a file path" in _all_output(result)
 
     @responses.activate
     def test_quiet_suppresses_url_mode_download_message(self, tmp_path):
