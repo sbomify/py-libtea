@@ -21,3 +21,16 @@ Items that depend on external factors or are deferred indefinitely. These are **
 **TEA spec tracking:** [CycloneDX/transparency-exchange-api](https://github.com/CycloneDX/transparency-exchange-api)
 
 **Action:** When the Publisher API reaches beta (stable naming, stable schema), create a versioned design doc in `docs/plans/` and schedule for the next minor release.
+
+---
+
+## CLI Internal Cleanup
+
+**Blocked on:** Nothing — these are low-priority tech debt items identified during the CLI UX review (PR #10). They are not user-facing and do not affect correctness.
+
+| Item | Notes |
+|------|-------|
+| Consolidate repetitive 8-param command signatures | Every command repeats `base_url, token, auth, domain, timeout, use_http, port, allow_private_ips`. Could bundle into a connection config dataclass in `ctx.obj` and have `_build_client` read from it directly. |
+| Unify wrapper parameter handling in `shared_options` | Older flags (`output_json`, `verbose`, `debug`) use explicit wrapper params; newer flags (`no_input`, `no_color`, `output_file`) use `kwargs.pop()`. Pick one pattern. |
+
+**Action:** Address opportunistically during the next CLI feature addition.
