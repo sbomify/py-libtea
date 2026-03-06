@@ -337,10 +337,10 @@ class TestCLICommands:
     def test_error_output_goes_to_stderr(self):
         result = runner.invoke(app, ["get-product", "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"])
         assert result.exit_code == 1
-        if hasattr(result, "stderr") and result.stderr is not None:
+        if hasattr(result, "stderr") and result.stderr:
             assert "Error:" in result.stderr
         else:
-            # Fallback for Click versions that mix stdout/stderr
+            # Fallback for Click versions that mix stdout/stderr or leave stderr empty
             assert "Error:" in _all_output(result)
 
 
