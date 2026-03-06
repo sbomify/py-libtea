@@ -891,8 +891,11 @@ def _download_from_tei(
     *,
     quiet: bool = False,
     dry_run: bool = False,
-) -> None:
-    """Discover a TEI and download all artifacts into dest_dir."""
+) -> bool:
+    """Discover a TEI and download all artifacts into dest_dir.
+
+    Returns True if all attempted downloads succeeded, False if any failed.
+    """
     discoveries = client.discover(tei)
     if not discoveries:
         _error(f"No results found for TEI: {tei}")
@@ -939,6 +942,7 @@ def _download_from_tei(
             _error("No downloadable artifact URLs found in the collection(s)")
         else:
             _error(f"All {attempted} artifact download(s) failed")
+    return downloaded == attempted
 
 
 @app.command()
@@ -984,6 +988,11 @@ def download(
       tea-cli download 'urn:tei:purl:example.com:pkg:pypi/requests@2.31.0' ./sboms/
       tea-cli download https://tea.example.com/artifacts/abc/download output.json --checksum SHA-256:abcdef...
     """
+    ctx = click.get_current_context()
+    output_file = ctx.obj.get("output_file") if ctx.obj else None
+    if output_file:
+        raise click.UsageError("--output is not supported by 'download'; use DESTINATION to specify the output path")
+
     if source.startswith("urn:tei:"):
         if checksum:
             raise click.UsageError("--checksum is not supported in TEI mode (checksums come from server metadata)")
@@ -991,7 +1000,6 @@ def download(
             raise click.UsageError(f"DESTINATION must be a directory in TEI mode, not a file: {destination}")
         if destination is None:
             cwd = Path.cwd()
-            ctx = click.get_current_context()
             no_input = ctx.obj.get("no_input", False) if ctx.obj else False
             if not yes and not no_input and not dry_run:
                 click.confirm(f"Download artifacts into current directory ({cwd})?", abort=True)
@@ -1000,9 +1008,13 @@ def download(
             with _client_session(
                 base_url, token, domain, timeout, use_http, port, auth, tei=source, allow_private_ips=allow_private_ips
             ) as client:
-                _download_from_tei(client, source, Path(destination), max_download_bytes, quiet=quiet, dry_run=dry_run)
+                all_ok = _download_from_tei(
+                    client, source, Path(destination), max_download_bytes, quiet=quiet, dry_run=dry_run
+                )
         except OSError as exc:
             _error(f"I/O error: {exc}")
+        if not all_ok:
+            raise SystemExit(1)
         return
 
     # URL mode: existing direct download behavior
