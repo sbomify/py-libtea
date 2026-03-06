@@ -15,6 +15,15 @@ from libtea.cli import app  # noqa: E402
 
 runner = CliRunner()
 
+
+def _all_output(result):
+    """Combine stdout and stderr for assertions, covering all Click versions."""
+    out = result.output or ""
+    if hasattr(result, "stderr") and result.stderr:
+        out += result.stderr
+    return out
+
+
 BASE_URL = "https://api.example.com/tea/v1"
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -1485,7 +1494,7 @@ class TestDownloadTeiMode:
         result = runner.invoke(app, ["download", tei, str(dest), "--base-url", BASE_URL])
         assert result.exit_code == 0
         assert (dest / "sbom.cdx.json").exists()
-        assert "Downloaded sbom.cdx.json" in result.output
+        assert "Downloaded sbom.cdx.json" in _all_output(result)
 
     @responses.activate
     def test_tei_mode_no_discovery_results(self):
@@ -1693,7 +1702,7 @@ class TestDownloadTeiMode:
         dest = tmp_path / "output"
         result = runner.invoke(app, ["download", tei, str(dest), "--base-url", BASE_URL])
         assert result.exit_code == 0
-        assert "(checksum OK)" in result.output
+        assert "(checksum OK)" in _all_output(result)
 
     @responses.activate
     def test_tei_mode_checksum_failure_shown_without_error_prefix(self, tmp_path):
@@ -1727,8 +1736,9 @@ class TestDownloadTeiMode:
         dest = tmp_path / "output"
         result = runner.invoke(app, ["download", tei, str(dest), "--base-url", BASE_URL])
         assert result.exit_code == 1
-        assert "Checksum FAILED" in result.output
-        assert "Error: checksum" not in result.output
+        combined = _all_output(result)
+        assert "Checksum FAILED" in combined
+        assert "Error: checksum" not in combined
 
     @responses.activate
     def test_tei_mode_empty_artifacts_in_collection(self, tmp_path):
@@ -1973,8 +1983,9 @@ class TestCLIUXImprovements:
         dest = tmp_path / "output"
         result = runner.invoke(app, ["download", tei, str(dest), "--dry-run", "--base-url", BASE_URL])
         assert result.exit_code == 0
-        assert "Would download:" in result.output
-        assert "sbom.cdx.json" in result.output
+        combined = _all_output(result)
+        assert "Would download:" in combined
+        assert "sbom.cdx.json" in combined
         assert not dest.exists()
 
     def test_dry_run_rejected_in_url_mode(self):
@@ -2010,7 +2021,7 @@ class TestCLIUXImprovements:
         dest = tmp_path / "output"
         result = runner.invoke(app, ["download", tei, str(dest), "--quiet", "--base-url", BASE_URL])
         assert result.exit_code == 0
-        assert "Downloaded" not in result.output
+        assert "Downloaded" not in _all_output(result)
 
     @responses.activate
     def test_no_color_flag(self, tmp_path):
@@ -2067,5 +2078,5 @@ class TestCLIUXImprovements:
         dest = tmp_path / "out.json"
         result = runner.invoke(app, ["download", url, str(dest), "--quiet", "--base-url", BASE_URL])
         assert result.exit_code == 0
-        assert "Downloaded to" not in result.output
+        assert "Downloaded to" not in _all_output(result)
         assert dest.read_bytes() == b"content"
