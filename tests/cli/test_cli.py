@@ -337,7 +337,7 @@ class TestCLICommands:
     def test_error_output_goes_to_stderr(self):
         result = runner.invoke(app, ["get-product", "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"])
         assert result.exit_code == 1
-        assert "Error:" in result.output
+        assert "Error:" in _all_output(result)
 
 
 class TestCLIErrorPaths:
@@ -438,7 +438,7 @@ class TestCLIAuthOptions:
             ],
         )
         assert result.exit_code == 1
-        assert "plaintext HTTP" in _strip_ansi(result.output)
+        assert "plaintext HTTP" in _strip_ansi(_all_output(result))
 
 
 class TestCLIInspectOptions:
@@ -1258,7 +1258,7 @@ class TestNewCommands:
         uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
         result = runner.invoke(app, ["get-cle", uuid, "--entity", "invalid", "--base-url", BASE_URL])
         assert result.exit_code == 2
-        assert "Invalid value for '--entity'" in result.output
+        assert "Invalid value for '--entity'" in _all_output(result)
 
     @responses.activate
     def test_get_cle_default_entity_is_product_release(self):
@@ -1447,7 +1447,8 @@ class TestConformanceCommand:
         )
         result = runner.invoke(app, ["conformance", "--base-url", "https://tea.example.com/v1", "--json"])
         assert result.exit_code in (0, 1)
-        assert "base_url" in result.output or "checks" in result.output
+        combined = _all_output(result)
+        assert "base_url" in combined or "checks" in combined
 
 
 class TestDownloadTeiMode:
@@ -1503,7 +1504,7 @@ class TestDownloadTeiMode:
         responses.get(f"{BASE_URL}/discovery", json=[])
         result = runner.invoke(app, ["download", tei, "-y", "--base-url", BASE_URL])
         assert result.exit_code == 1
-        assert "No results found" in result.output
+        assert "No results found" in _all_output(result)
 
     @responses.activate
     def test_tei_mode_artifact_download_failure_warns(self, tmp_path):
@@ -1543,7 +1544,7 @@ class TestDownloadTeiMode:
         dest = tmp_path / "output"
         result = runner.invoke(app, ["download", tei, str(dest), "--base-url", BASE_URL])
         assert result.exit_code == 0
-        assert "Warning: failed to download bad.json" in result.output
+        assert "Warning: failed to download bad.json" in _all_output(result)
         assert (dest / "good.json").exists()
 
     @responses.activate
@@ -1573,7 +1574,7 @@ class TestDownloadTeiMode:
         dest = tmp_path / "output"
         result = runner.invoke(app, ["download", tei, str(dest), "--base-url", BASE_URL])
         assert result.exit_code == 1
-        assert "All 1 artifact download(s) failed" in result.output
+        assert "All 1 artifact download(s) failed" in _all_output(result)
 
     @responses.activate
     def test_url_mode_still_works(self, tmp_path):
@@ -1593,8 +1594,8 @@ class TestDownloadTeiMode:
         # Answer 'y' to the prompt
         result = runner.invoke(app, ["download", tei, "--base-url", BASE_URL], input="y\n")
         assert result.exit_code == 1
-        assert "Download artifacts into current directory" in result.output
-        assert "No results found" in result.output
+        assert "Download artifacts into current directory" in _all_output(result)
+        assert "No results found" in _all_output(result)
 
     @responses.activate
     def test_tei_mode_prompt_abort(self):
@@ -1603,7 +1604,7 @@ class TestDownloadTeiMode:
         responses.get(f"{BASE_URL}/discovery", json=[])
         result = runner.invoke(app, ["download", tei, "--base-url", BASE_URL], input="n\n")
         assert result.exit_code == 1
-        assert "Aborted" in result.output
+        assert "Aborted" in _all_output(result)
 
     @responses.activate
     def test_tei_mode_yes_flag_skips_prompt(self):
@@ -1612,14 +1613,14 @@ class TestDownloadTeiMode:
         responses.get(f"{BASE_URL}/discovery", json=[])
         result = runner.invoke(app, ["download", tei, "-y", "--base-url", BASE_URL])
         assert result.exit_code == 1
-        assert "Download artifacts into current directory" not in result.output
-        assert "No results found" in result.output
+        assert "Download artifacts into current directory" not in _all_output(result)
+        assert "No results found" in _all_output(result)
 
     def test_url_mode_requires_dest(self):
         """URL mode without DEST shows an error."""
         result = runner.invoke(app, ["download", "https://cdn.example.com/sbom.json", "--base-url", BASE_URL])
         assert result.exit_code == 1
-        assert "DEST is required" in result.output
+        assert "DEST is required" in _all_output(result)
 
     @responses.activate
     def test_tei_mode_skips_formats_without_url(self, tmp_path):
@@ -1664,7 +1665,7 @@ class TestDownloadTeiMode:
         dest = tmp_path / "out"
         result = runner.invoke(app, ["download", tei, str(dest), "--checksum", "SHA-256:abc", "--base-url", BASE_URL])
         assert result.exit_code == 1
-        assert "--checksum is not supported in TEI mode" in result.output
+        assert "--checksum is not supported in TEI mode" in _all_output(result)
 
     @responses.activate
     def test_tei_mode_checksum_verification(self, tmp_path):
@@ -1756,7 +1757,7 @@ class TestDownloadTeiMode:
         dest = tmp_path / "output"
         result = runner.invoke(app, ["download", tei, str(dest), "--base-url", BASE_URL])
         assert result.exit_code == 1
-        assert "No downloadable artifact URLs found" in result.output
+        assert "No downloadable artifact URLs found" in _all_output(result)
 
     @responses.activate
     def test_tei_mode_multiple_discoveries(self, tmp_path):
@@ -1958,7 +1959,7 @@ class TestCLIUXImprovements:
         )
         # Will fail with connection error, but should NOT prompt
         assert result.exit_code == 1
-        assert "Download artifacts into current directory" not in result.output
+        assert "Download artifacts into current directory" not in _all_output(result)
 
     @responses.activate
     def test_dry_run_shows_would_download(self, tmp_path):
@@ -1995,7 +1996,7 @@ class TestCLIUXImprovements:
             ["download", "https://example.com/sbom.json", "out.json", "--dry-run", "--base-url", BASE_URL],
         )
         assert result.exit_code == 1
-        assert "--dry-run is only supported in TEI mode" in result.output
+        assert "--dry-run is only supported in TEI mode" in _all_output(result)
 
     @responses.activate
     def test_quiet_suppresses_download_progress(self, tmp_path):
