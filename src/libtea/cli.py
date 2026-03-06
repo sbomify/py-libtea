@@ -825,9 +825,14 @@ def _ext_from_media_type(media_type: str | None) -> str:
 
 
 def _sanitize_filename(name: str) -> str:
-    """Strip path separators and traversal from a filename to prevent directory escape."""
+    """Strip path separators, traversal, and control characters from a filename."""
+    # Remove NUL and ASCII control characters (invalid in filenames on most platforms)
+    name = "".join(ch for ch in name if (32 <= ord(ch) < 127) or (ord(ch) >= 128))
     # Take only the final component, stripping any directory traversal
-    name = Path(name).name
+    try:
+        name = Path(name).name
+    except (TypeError, ValueError):
+        return ""
     if not name or name in (".", ".."):
         return ""
     return name
