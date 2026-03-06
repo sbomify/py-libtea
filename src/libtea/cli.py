@@ -9,8 +9,10 @@ for authentication.
 """
 
 import functools
+import inspect as _inspect
 import json
 import logging
+import re
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -59,48 +61,60 @@ def shared_options(fn):  # type: ignore[no-untyped-def]
     """Apply connection options and global flags to a command function.
 
     Global flags (``--json``, ``--verbose``, ``--debug``, ``--allow-private-ips``,
-    ``--no-color``, ``--no-input``, ``--output``, ``--tei``) are applied per-command
+    ``--no-color``, ``--no-input``, ``--output``) are applied per-command
     so they work in any position (before or after the subcommand name).
+    ``--tei`` is added only for commands that don't already accept a positional TEI argument.
     """
 
-    @click.option(
-        "-o",
-        "--output",
-        "output_file",
-        type=click.Path(dir_okay=False, resolve_path=True),
-        default=None,
-        help="Write formatted output to file instead of stdout (not used by 'download', which uses DESTINATION)",
+    # Only add --tei for commands that don't already have a positional tei argument
+    has_positional_tei = "tei" in _inspect.signature(fn).parameters
+
+    # Build options list (applied bottom-up, so first in list = outermost in help)
+    options = [
+        click.option(
+            "-o",
+            "--output",
+            "output_file",
+            type=click.Path(dir_okay=False, resolve_path=True),
+            default=None,
+            help="Write formatted output to file instead of stdout (not used by 'download', which uses DESTINATION)",
+        ),
+        click.option("--no-color", is_flag=True, help="Disable colored output"),
+        click.option("--no-input", is_flag=True, help="Never prompt for input (for scripts and CI)"),
+    ]
+    if not has_positional_tei:
+        options.append(
+            click.option("--tei", "tei_urn", default=None, help="TEI URN for base-url/domain auto-discovery")
+        )
+    options.extend(
+        [
+            click.option("--port", type=int, default=None, help="Port for well-known resolution"),
+            click.option("--use-http", is_flag=True, help="Use HTTP instead of HTTPS for discovery"),
+            click.option("--timeout", type=click.FloatRange(min=0.1), default=30.0, help="Request timeout in seconds"),
+            click.option("--domain", default=None, help="Discover server from domain's .well-known/tea"),
+            click.option(
+                "--auth", envvar="TEA_AUTH", default=None, help="Basic auth as USER:PASSWORD (prefer TEA_AUTH env var)"
+            ),
+            click.option(
+                "--token",
+                envvar="TEA_TOKEN",
+                default=None,
+                help="Bearer token (prefer TEA_TOKEN env var to avoid shell history exposure)",
+            ),
+            click.option("--base-url", envvar="TEA_BASE_URL", default=None, help="TEA server base URL"),
+            click.option(
+                "--allow-private-ips",
+                is_flag=True,
+                help="Allow artifact downloads from private/internal IPs (relaxes SSRF checks for downloads only)",
+            ),
+            click.option(
+                "--json", "output_json", is_flag=True, help="Output raw JSON instead of rich-formatted tables"
+            ),
+            click.option("-v", "--verbose", is_flag=True, help="Show verbose output (libtea debug logs)"),
+            click.option("-d", "--debug", is_flag=True, help="Show debug output (HTTP requests, timing)"),
+        ]
     )
-    @click.option("--no-color", is_flag=True, help="Disable colored output")
-    @click.option("--no-input", is_flag=True, help="Never prompt for input (for scripts and CI)")
-    @click.option(
-        "--tei",
-        "tei_urn",
-        default=None,
-        help="TEI URN for base-url/domain auto-discovery (for commands without a TEI positional argument)",
-    )
-    @click.option("--port", type=int, default=None, help="Port for well-known resolution")
-    @click.option("--use-http", is_flag=True, help="Use HTTP instead of HTTPS for discovery")
-    @click.option("--timeout", type=click.FloatRange(min=0.1), default=30.0, help="Request timeout in seconds")
-    @click.option("--domain", default=None, help="Discover server from domain's .well-known/tea")
-    @click.option(
-        "--auth", envvar="TEA_AUTH", default=None, help="Basic auth as USER:PASSWORD (prefer TEA_AUTH env var)"
-    )
-    @click.option(
-        "--token",
-        envvar="TEA_TOKEN",
-        default=None,
-        help="Bearer token (prefer TEA_TOKEN env var to avoid shell history exposure)",
-    )
-    @click.option("--base-url", envvar="TEA_BASE_URL", default=None, help="TEA server base URL")
-    @click.option(
-        "--allow-private-ips",
-        is_flag=True,
-        help="Allow artifact downloads from private/internal IPs (relaxes SSRF checks for downloads only)",
-    )
-    @click.option("--json", "output_json", is_flag=True, help="Output raw JSON instead of rich-formatted tables")
-    @click.option("-v", "--verbose", is_flag=True, help="Show verbose output (libtea debug logs)")
-    @click.option("-d", "--debug", is_flag=True, help="Show debug output (HTTP requests, timing)")
+
     @functools.wraps(fn)
     @click.pass_context
     def wrapper(
@@ -132,11 +146,13 @@ def shared_options(fn):  # type: ignore[no-untyped-def]
         _configure_logging(verbose=verbose, debug=debug)
         # Store --tei in context; commands that need it read from kwargs (positional) or ctx.obj
         tei_urn = kwargs.pop("tei_urn", None)
-        if tei_urn and "tei" in kwargs:
-            raise click.UsageError("This command takes TEI as a positional argument; use that instead of --tei")
         if tei_urn:
             ctx.obj["tei_urn"] = tei_urn
         return ctx.invoke(fn, *args, **kwargs)
+
+    # Apply options — last applied appears first in --help (like stacked decorators)
+    for opt in options:
+        wrapper = opt(wrapper)
 
     return wrapper
 
@@ -450,7 +466,6 @@ def search_products(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
-    tei: str | None = None,
 ) -> None:
     """Search for products by identifier.
 
@@ -460,7 +475,7 @@ def search_products(
       tea-cli search-products --id-type CPE --id-value 'cpe:2.3:a:*:requests:*' --base-url https://tea.example.com
     """
     with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
     ) as client:
         result = client.search_products(id_type, id_value, page_offset=page_offset, page_size=page_size)
     _output(result)
@@ -485,7 +500,6 @@ def search_releases(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
-    tei: str | None = None,
 ) -> None:
     """Search for product releases by identifier.
 
@@ -495,7 +509,7 @@ def search_releases(
       tea-cli search-releases --id-type TEI --id-value 'urn:tei:purl:example.com:pkg:pypi/requests@2.31.0' --json
     """
     with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
     ) as client:
         result = client.search_product_releases(id_type, id_value, page_offset=page_offset, page_size=page_size)
     _output(result)
@@ -514,7 +528,6 @@ def get_product(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
-    tei: str | None = None,
 ) -> None:
     """Get a product by UUID.
 
@@ -524,7 +537,7 @@ def get_product(
       tea-cli get-product 550e8400-e29b-41d4-a716-446655440000 --json
     """
     with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
     ) as client:
         result = client.get_product(uuid)
     _output(result)
@@ -545,7 +558,6 @@ def get_release(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
-    tei: str | None = None,
 ) -> None:
     """Get a product or component release by UUID.
 
@@ -555,7 +567,7 @@ def get_release(
       tea-cli get-release 550e8400-e29b-41d4-a716-446655440000 --component --json
     """
     with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
     ) as client:
         result: ProductRelease | ComponentReleaseWithCollection
         if component:
@@ -582,7 +594,6 @@ def get_collection(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
-    tei: str | None = None,
 ) -> None:
     """Get a collection (latest or by version).
 
@@ -592,7 +603,7 @@ def get_collection(
       tea-cli get-collection 550e8400-e29b-41d4-a716-446655440000 --version 3 --component
     """
     with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
     ) as client:
         if component:
             if version is not None:
@@ -624,7 +635,6 @@ def get_product_releases(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
-    tei: str | None = None,
 ) -> None:
     """List releases for a product UUID.
 
@@ -634,7 +644,7 @@ def get_product_releases(
       tea-cli get-product-releases 550e8400-e29b-41d4-a716-446655440000 --page-size 10 --json
     """
     with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
     ) as client:
         result = client.get_product_releases(uuid, page_offset=page_offset, page_size=page_size)
     _output(result)
@@ -653,7 +663,6 @@ def get_component(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
-    tei: str | None = None,
 ) -> None:
     """Get a component by UUID.
 
@@ -663,7 +672,7 @@ def get_component(
       tea-cli get-component 550e8400-e29b-41d4-a716-446655440000 --json
     """
     with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
     ) as client:
         result = client.get_component(uuid)
     _output(result)
@@ -682,7 +691,6 @@ def get_component_releases(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
-    tei: str | None = None,
 ) -> None:
     """List releases for a component UUID.
 
@@ -692,7 +700,7 @@ def get_component_releases(
       tea-cli get-component-releases 550e8400-e29b-41d4-a716-446655440000 --json
     """
     with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
     ) as client:
         result = client.get_component_releases(uuid)
     _output(result, command="releases")
@@ -713,7 +721,6 @@ def list_collections(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
-    tei: str | None = None,
 ) -> None:
     """List all collection versions for a release UUID.
 
@@ -723,7 +730,7 @@ def list_collections(
       tea-cli list-collections 550e8400-e29b-41d4-a716-446655440000 --component --json
     """
     with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
     ) as client:
         if component:
             result = client.get_component_release_collections(uuid)
@@ -752,7 +759,6 @@ def get_cle(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
-    tei: str | None = None,
 ) -> None:
     """Get Common Lifecycle Enumeration (CLE) for an entity.
 
@@ -768,7 +774,7 @@ def get_cle(
         "component-release": "get_component_release_cle",
     }
     with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
     ) as client:
         result = getattr(client, entity_methods[entity])(uuid)
     _output(result)
@@ -787,7 +793,6 @@ def get_artifact(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
-    tei: str | None = None,
 ) -> None:
     """Get artifact metadata by UUID.
 
@@ -797,7 +802,7 @@ def get_artifact(
       tea-cli get-artifact 550e8400-e29b-41d4-a716-446655440000 --json
     """
     with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
     ) as client:
         result = client.get_artifact(uuid)
     _output(result)
@@ -824,10 +829,22 @@ def _ext_from_media_type(media_type: str | None) -> str:
     return ""
 
 
+_WINDOWS_RESERVED_NAMES = frozenset(
+    ["CON", "PRN", "AUX", "NUL"] + [f"COM{i}" for i in range(1, 10)] + [f"LPT{i}" for i in range(1, 10)]
+)
+
+
 def _sanitize_filename(name: str) -> str:
-    """Strip path separators, traversal, and control characters from a filename."""
+    """Strip path separators, traversal, and control characters from a filename.
+
+    Produces cross-platform safe filenames by replacing characters invalid on
+    Windows (``:``, ``*``, ``?``, ``"``, ``<``, ``>``, ``|``) with ``_``,
+    stripping trailing dots/spaces, and rejecting reserved device names.
+    """
     # Remove NUL and ASCII control characters (invalid in filenames on most platforms)
     name = "".join(ch for ch in name if (32 <= ord(ch) < 127) or (ord(ch) >= 128))
+    # Replace characters invalid on Windows filesystems
+    name = re.sub(r'[:<>"|?*]', "_", name)
     # Take only the final component, stripping any directory traversal
     try:
         name = Path(name).name
@@ -835,6 +852,14 @@ def _sanitize_filename(name: str) -> str:
         return ""
     if not name or name in (".", ".."):
         return ""
+    # Strip trailing dots and spaces (invalid on Windows)
+    name = name.rstrip(". ")
+    if not name:
+        return ""
+    # Reject Windows reserved device names (e.g. CON, NUL, COM1)
+    stem = name.split(".")[0].upper()
+    if stem in _WINDOWS_RESERVED_NAMES:
+        name = f"_{name}"
     return name
 
 
@@ -977,7 +1002,6 @@ def download(
     use_http: bool,
     port: int | None,
     allow_private_ips: bool,
-    tei: str | None = None,
 ) -> None:
     """Fetch artifact(s) from a URL or TEI URN.
 
@@ -1051,7 +1075,7 @@ def download(
 
     try:
         with _client_session(
-            base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
+            base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
         ) as client:
             result = client.download_artifact(
                 source, dest_path, verify_checksums=checksums, max_download_bytes=max_download_bytes
