@@ -844,20 +844,24 @@ def _artifact_filename(fmt: ArtifactFormat, artifact: Artifact, index: int) -> s
     return _sanitize_filename(f"{name}{ext}") or f"artifact-{index}"
 
 
+_COMPOUND_EXTS: tuple[str, ...] = tuple(
+    sorted(
+        (ext for ext in _MEDIA_TYPE_EXTENSIONS.values() if ext.count(".") >= 2),
+        key=len,
+        reverse=True,
+    )
+)
+
+
 def _deduplicate_filename(filename: str, seen: set[str]) -> str:
     """Append a numeric suffix if filename already exists in seen set."""
     if filename not in seen:
         seen.add(filename)
         return filename
     # Preserve known compound extensions (e.g. ".cdx.json", ".spdx.json")
-    compound_exts = sorted(
-        (ext for ext in _MEDIA_TYPE_EXTENSIONS.values() if ext.count(".") >= 2),
-        key=len,
-        reverse=True,
-    )
     base = filename
     ext = ""
-    for compound in compound_exts:
+    for compound in _COMPOUND_EXTS:
         if filename.endswith(compound):
             base = filename[: -len(compound)]
             ext = compound
