@@ -986,9 +986,9 @@ def download(
     """
     if source.startswith("urn:tei:"):
         if checksum:
-            _error("--checksum is not supported in TEI mode (checksums come from server metadata)")
+            raise click.UsageError("--checksum is not supported in TEI mode (checksums come from server metadata)")
         if destination is not None and Path(destination).is_file():
-            _error(f"DESTINATION must be a directory in TEI mode, not a file: {destination}")
+            raise click.UsageError(f"DESTINATION must be a directory in TEI mode, not a file: {destination}")
         if destination is None:
             cwd = Path.cwd()
             ctx = click.get_current_context()
@@ -1007,12 +1007,12 @@ def download(
 
     # URL mode: existing direct download behavior
     if dry_run:
-        _error("--dry-run is only supported in TEI mode (urn:tei:... source)")
+        raise click.UsageError("--dry-run is only supported in TEI mode (urn:tei:... source)")
     if destination is None:
-        _error("DESTINATION is required when downloading from a URL")
+        raise click.UsageError("DESTINATION is required when downloading from a URL")
     dest_path = Path(destination)
     if dest_path.is_dir():
-        _error(f"DESTINATION must be a file path in URL mode, not a directory: {destination}")
+        raise click.UsageError(f"DESTINATION must be a file path in URL mode, not a directory: {destination}")
     checksums = None
     if checksum:
         checksums = []

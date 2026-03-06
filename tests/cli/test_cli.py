@@ -1619,7 +1619,7 @@ class TestDownloadTeiMode:
     def test_url_mode_requires_dest(self):
         """URL mode without DEST shows an error."""
         result = runner.invoke(app, ["download", "https://cdn.example.com/sbom.json", "--base-url", BASE_URL])
-        assert result.exit_code == 1
+        assert result.exit_code == 2
         assert "DESTINATION is required" in _all_output(result)
 
     @responses.activate
@@ -1664,7 +1664,7 @@ class TestDownloadTeiMode:
         tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
         dest = tmp_path / "out"
         result = runner.invoke(app, ["download", tei, str(dest), "--checksum", "SHA-256:abc", "--base-url", BASE_URL])
-        assert result.exit_code == 1
+        assert result.exit_code == 2
         assert "--checksum is not supported in TEI mode" in _all_output(result)
 
     @responses.activate
@@ -1946,6 +1946,7 @@ class TestCLIUXImprovements:
             "conformance",
         ]:
             result = runner.invoke(app, [cmd, "--help"])
+            assert result.exit_code == 0, f"{cmd} --help exited with {result.exit_code}"
             assert "Examples:" in result.output, f"{cmd} --help missing Examples section"
 
     @responses.activate
@@ -1995,7 +1996,7 @@ class TestCLIUXImprovements:
             app,
             ["download", "https://example.com/sbom.json", "out.json", "--dry-run", "--base-url", BASE_URL],
         )
-        assert result.exit_code == 1
+        assert result.exit_code == 2
         assert "--dry-run is only supported in TEI mode" in _all_output(result)
 
     @responses.activate
