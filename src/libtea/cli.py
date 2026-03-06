@@ -3,8 +3,9 @@
 Provides the ``tea-cli`` command backed by click. Each subcommand maps
 to a :class:`~libtea.client.TeaClient` method and outputs rich-formatted
 tables and panels by default (or JSON when ``--json`` is specified).
-All commands accept ``--base-url`` / ``--domain`` / ``--tei`` for server selection,
-and ``--token`` / ``--auth`` for authentication.
+Most commands accept ``--base-url`` / ``--domain`` / ``--tei`` for server selection
+(some, such as ``conformance``, may omit ``--domain``), and ``--token`` / ``--auth``
+for authentication.
 """
 
 import functools
@@ -57,9 +58,9 @@ def _configure_logging(*, verbose: bool, debug: bool) -> None:
 def shared_options(fn):  # type: ignore[no-untyped-def]
     """Apply connection options and global flags to a command function.
 
-    Global flags (``--json``, ``--verbose``, ``--debug``, ``--allow-private-ips``)
-    are applied per-command so they work in any position (before or after
-    the subcommand name).
+    Global flags (``--json``, ``--verbose``, ``--debug``, ``--allow-private-ips``,
+    ``--no-color``, ``--no-input``, ``--output``, ``--tei``) are applied per-command
+    so they work in any position (before or after the subcommand name).
     """
 
     @click.option(

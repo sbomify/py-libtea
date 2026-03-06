@@ -1649,10 +1649,11 @@ class TestDownloadTeiMode:
         assert result.exit_code == 0
         assert (dest / "sbom.json").exists()
 
-    def test_tei_mode_rejects_checksum_flag(self):
+    def test_tei_mode_rejects_checksum_flag(self, tmp_path):
         """--checksum is rejected in TEI mode."""
         tei = "urn:tei:purl:example.com:pkg:pypi/test@1.0"
-        result = runner.invoke(app, ["download", tei, "/tmp/out", "--checksum", "SHA-256:abc", "--base-url", BASE_URL])
+        dest = tmp_path / "out"
+        result = runner.invoke(app, ["download", tei, str(dest), "--checksum", "SHA-256:abc", "--base-url", BASE_URL])
         assert result.exit_code == 1
         assert "--checksum is not supported in TEI mode" in result.output
 
