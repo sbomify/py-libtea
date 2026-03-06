@@ -844,14 +844,30 @@ def _deduplicate_filename(filename: str, seen: set[str]) -> str:
     if filename not in seen:
         seen.add(filename)
         return filename
-    # Split on last dot so multi-dot stems (e.g. report.v1.json) keep internal dots
-    if "." in filename:
-        base, _, ext = filename.rpartition(".")
+    # Preserve known compound extensions (e.g. ".cdx.json", ".spdx.json")
+    compound_exts = sorted(
+        (ext for ext in _MEDIA_TYPE_EXTENSIONS.values() if ext.count(".") >= 2),
+        key=len,
+        reverse=True,
+    )
+    base = filename
+    ext = ""
+    for compound in compound_exts:
+        if filename.endswith(compound):
+            base = filename[: -len(compound)]
+            ext = compound
+            break
     else:
-        base, ext = filename, ""
+        # Fallback: split on last dot
+        if "." in filename:
+            stem, _, simple_ext = filename.rpartition(".")
+            base = stem
+            ext = f".{simple_ext}"
+        else:
+            base, ext = filename, ""
     counter = 1
     while True:
-        candidate = f"{base}-{counter}.{ext}" if ext else f"{base}-{counter}"
+        candidate = f"{base}-{counter}{ext}" if ext else f"{base}-{counter}"
         if candidate not in seen:
             seen.add(candidate)
             return candidate
