@@ -68,7 +68,7 @@ def shared_options(fn):  # type: ignore[no-untyped-def]
         "output_file",
         type=click.Path(dir_okay=False, resolve_path=True),
         default=None,
-        help="Write output to file instead of stdout",
+        help="Write formatted output to file instead of stdout (not used by 'download', which uses DEST)",
     )
     @click.option("--no-color", is_flag=True, help="Disable colored output")
     @click.option("--no-input", is_flag=True, help="Never prompt for input (for scripts and CI)")
@@ -332,8 +332,8 @@ Environment variables:
 \b
 Exit codes:
   0   Success
-  1   Error (connection, auth, not found, etc.)
-  2   Usage error (missing arguments)
+  1   Runtime error (connection, auth, not found, etc.)
+  2   Usage error (bad syntax, handled by Click)
 
 \b
 Use 'tea-cli COMMAND --help' for more information on a command.""",
