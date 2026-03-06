@@ -4,6 +4,7 @@ import json
 import re
 
 import pytest
+import requests
 import responses
 
 click = pytest.importorskip("click", reason="click not installed (install libtea[cli])")
@@ -1939,7 +1940,7 @@ class TestCLIUXImprovements:
     def test_no_input_flag_skips_download_prompt(self, tmp_path):
         """--no-input suppresses the confirmation prompt like --yes."""
         # Stub discovery to return a connection error deterministically
-        responses.get(f"{BASE_URL}/discovery", body=ConnectionError("stubbed"))
+        responses.get(f"{BASE_URL}/discovery", body=requests.ConnectionError("stubbed"))
         result = runner.invoke(
             app,
             ["download", "urn:tei:purl:example.com:pkg:pypi/test@1.0", "--no-input", "--base-url", BASE_URL],

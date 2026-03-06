@@ -905,7 +905,7 @@ def _download_from_tei(
                 except TeaChecksumError as exc:
                     print(f"Checksum FAILED for {filename}: {exc}", file=sys.stderr)
                 except (TeaAuthenticationError, TeaConnectionError) as exc:
-                    _error(str(exc))
+                    print(f"Warning: failed to download {filename}: {exc}", file=sys.stderr)
                 except TeaError as exc:
                     print(f"Warning: failed to download {filename}: {exc}", file=sys.stderr)
                 except OSError as exc:
@@ -1191,13 +1191,23 @@ def conformance(
             try:
                 from libtea._cli_fmt import format_conformance
             except ImportError:
+                lines = []
                 for check in result.checks:
                     status_label = check.status.value.upper()
                     msg = check.message
                     if verbose and check.details and check.status.value == "fail":
                         msg = f"{check.message}\n    {check.details}"
-                    print(f"  {status_label:4s}  {check.name} — {msg}")
-                print(f"\nResults: {result.passed} passed, {result.failed} failed, {result.skipped} skipped")
+                    lines.append(f"  {status_label:4s}  {check.name} — {msg}")
+                lines.append(f"\nResults: {result.passed} passed, {result.failed} failed, {result.skipped} skipped")
+                text = "\n".join(lines) + "\n"
+                if output_file:
+                    try:
+                        with open(output_file, "w", encoding="utf-8") as f:
+                            f.write(text)
+                    except OSError as exc:
+                        _error(f"Cannot write to {output_file}: {exc}")
+                else:
+                    print(text, end="")
                 raise SystemExit(1 if result.failed > 0 else 0)
 
             if output_file:
