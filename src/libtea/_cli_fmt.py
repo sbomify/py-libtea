@@ -84,7 +84,7 @@ def _distributions_table(distributions: Sequence[ReleaseDistribution], *, consol
     if not distributions:
         return
     tbl = Table(title="Distributions")
-    tbl.add_column("Type")
+    tbl.add_column("ID / Type")
     tbl.add_column("Description")
     tbl.add_column("URL")
     tbl.add_column("Signature URL")
@@ -93,9 +93,9 @@ def _distributions_table(distributions: Sequence[ReleaseDistribution], *, consol
         checksums = (
             ", ".join(f"{_opt(cs.algorithm_type)}:{(_opt(cs.algorithm_value))[:12]}..." for cs in d.checksums) or "-"
         )
-        tbl.add_row(
-            _esc(d.distribution_type), _esc(d.description), _esc(d.url), _esc(d.signature_url), escape(checksums)
-        )
+        # Prefer v0.4.0 distribution_id, fall back to legacy distribution_type
+        id_or_type = d.distribution_id or d.distribution_type
+        tbl.add_row(_esc(id_or_type), _esc(d.description), _esc(d.url), _esc(d.signature_url), escape(checksums))
     console.print(tbl)
 
 
@@ -111,7 +111,8 @@ def _artifacts_table(artifacts: Sequence[Artifact], *, console: Console) -> None
     tbl.add_column("Formats")
     for a in artifacts:
         fmt_str = ", ".join(f.media_type or "?" for f in a.formats) or "-"
-        applies = ", ".join(a.distribution_types) if a.distribution_types else "-"
+        # Prefer v0.4.0 distribution_ids, fall back to legacy distribution_types
+        applies = ", ".join(a.distribution_ids or a.distribution_types or []) or "-"
         tbl.add_row(_esc(a.uuid), _esc(a.name), _esc(a.type), escape(applies), escape(fmt_str))
     console.print(tbl)
 
@@ -443,8 +444,10 @@ def _inspect_component_details(comp: dict[str, Any], *, console: Console) -> Non
             checksums = (
                 ", ".join(f"{cs.get('algType', '?')}:{cs.get('algValue', '')[:12]}..." for cs in checksums_list) or "-"
             )
+            # Prefer v0.4.0 distributionId, fall back to legacy distributionType
+            id_or_type = d.get("distributionId") or d.get("distributionType")
             tbl.add_row(
-                _esc(d.get("distributionType")),
+                _esc(id_or_type),
                 _esc(d.get("description")),
                 _esc(d.get("url")),
                 _esc(d.get("signatureUrl")),
@@ -470,7 +473,8 @@ def _inspect_component_details(comp: dict[str, Any], *, console: Console) -> Non
     tbl.add_column("URL")
     tbl.add_column("Signature URL")
     for art in artifacts:
-        applies = ", ".join(art.get("distributionTypes") or []) or "-"
+        # Prefer v0.4.0 distributionIds, fall back to legacy distributionTypes
+        applies = ", ".join(art.get("distributionIds") or art.get("distributionTypes") or []) or "-"
         formats = art.get("formats", [])
         if formats:
             for fmt in formats:

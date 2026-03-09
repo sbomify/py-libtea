@@ -20,6 +20,8 @@ Items that depend on external factors or are deferred indefinitely. These are **
 
 **TEA spec tracking:** [CycloneDX/transparency-exchange-api](https://github.com/CycloneDX/transparency-exchange-api)
 
+**Additional note for Publisher API:** When serializing models back to the server, use `model_dump(exclude_none=True)` to avoid sending deprecated fields (`distribution_type`, `distribution_types`) that v0.4.0 servers may reject.
+
 **Action:** When the Publisher API reaches beta (stable naming, stable schema), create a versioned design doc in `docs/plans/` and schedule for the next minor release.
 
 ---
@@ -34,3 +36,16 @@ Items that depend on external factors or are deferred indefinitely. These are **
 | Unify wrapper parameter handling in `shared_options` | Older flags (`output_json`, `verbose`, `debug`) use explicit wrapper params; newer flags (`no_input`, `no_color`, `output_file`) use `kwargs.pop()`. Pick one pattern. |
 
 **Action:** Address opportunistically during the next CLI feature addition.
+
+---
+
+## Spec v0.4.0 Follow-ups
+
+**Blocked on:** Nothing — these are low-priority items from the v0.4.0 alignment review (PR #11).
+
+| Item | Notes |
+|------|-------|
+| Deprecation warnings for legacy fields | `distribution_type` and `distribution_types` are spec-deprecated in v0.4.0. Consider adding `DeprecationWarning` via `@model_validator(mode="after")` when only old fields are populated. |
+| Conformance checks for v0.4.0 required fields | `Artifact.uuid` and `ReleaseDistribution.distribution_id` are now required per spec. Add conformance checks that verify presence on v0.4.0 servers (gated behind version check). |
+
+**Action:** Address when a v0.4.0 server is available for testing.

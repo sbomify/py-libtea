@@ -444,6 +444,29 @@ class TestSpecV040Fields:
         assert dist.distribution_type == "binary"
         assert dist.distribution_id is None
 
+    def test_artifact_distribution_ids_empty_array(self):
+        """Empty distributionIds array should parse to empty tuple, not None."""
+        art = Artifact.model_validate({"uuid": "abc", "distributionIds": [], "formats": []})
+        assert art.distribution_ids == ()
+
+    def test_artifact_coexistence_old_and_new_fields(self):
+        """A server sending both old and new fields should preserve both."""
+        art = Artifact.model_validate(
+            {"uuid": "abc", "distributionIds": ["id-1"], "distributionTypes": ["binary"], "formats": []}
+        )
+        assert art.distribution_ids == ("id-1",)
+        assert art.distribution_types == ("binary",)
+
+    def test_release_distribution_coexistence_old_and_new(self):
+        """Both distributionId and distributionType present — both preserved."""
+        from libtea.models import ReleaseDistribution
+
+        dist = ReleaseDistribution.model_validate(
+            {"distributionId": "d-1", "distributionType": "binary", "description": "both fields"}
+        )
+        assert dist.distribution_id == "d-1"
+        assert dist.distribution_type == "binary"
+
 
 class TestDiscovery:
     @responses.activate

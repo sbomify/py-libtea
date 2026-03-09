@@ -642,6 +642,56 @@ class TestArtifactFormatDetails:
         output = _capture(fmt_collection, data)
         assert "zip, tar.gz" in output
 
+    def test_artifacts_table_prefers_distribution_ids(self):
+        """v0.4.0: distribution_ids should be displayed when present."""
+        data = Collection(
+            uuid=UUID,
+            version=1,
+            artifacts=[
+                Artifact(
+                    uuid=UUID,
+                    name="Build SBOM",
+                    type="BOM",
+                    distribution_ids=["dist-1", "dist-2"],
+                    formats=[ArtifactFormat(media_type="application/xml", url="https://example.com/sbom.xml")],
+                )
+            ],
+        )
+        output = _capture(fmt_collection, data)
+        assert "dist-1, dist-2" in output
+
+    def test_distributions_table_prefers_distribution_id(self):
+        """v0.4.0: distribution_id should be displayed when present."""
+        data = ComponentReleaseWithCollection(
+            release=Release(
+                uuid=UUID,
+                version="1.0.0",
+                created_date="2024-01-01T00:00:00Z",
+                distributions=[
+                    ReleaseDistribution(distribution_id="dist-abc", description="Primary"),
+                ],
+            ),
+            latest_collection=Collection(uuid=UUID, version=1, artifacts=[]),
+        )
+        output = _capture(fmt_component_release, data)
+        assert "dist-abc" in output
+
+    def test_distributions_table_falls_back_to_type(self):
+        """Legacy servers: distribution_type shown when distribution_id absent."""
+        data = ComponentReleaseWithCollection(
+            release=Release(
+                uuid=UUID,
+                version="1.0.0",
+                created_date="2024-01-01T00:00:00Z",
+                distributions=[
+                    ReleaseDistribution(distribution_type="tar.gz", description="Legacy"),
+                ],
+            ),
+            latest_collection=Collection(uuid=UUID, version=1, artifacts=[]),
+        )
+        output = _capture(fmt_component_release, data)
+        assert "tar.gz" in output
+
     def test_inspect_artifact_shows_description_and_signature(self):
         """Inspect output should show description and signatureUrl for artifact formats."""
         data = [
