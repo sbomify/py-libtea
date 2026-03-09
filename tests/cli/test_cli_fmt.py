@@ -300,7 +300,7 @@ class TestFmtInspect:
                 "discovery": {
                     "productReleaseUuid": UUID,
                     "servers": [
-                        {"rootUrl": "https://tea.example.com", "versions": ["0.3.0-beta.2"], "priority": 1.0},
+                        {"rootUrl": "https://tea.example.com", "versions": ["0.4.0"], "priority": 1.0},
                     ],
                 },
                 "productRelease": {"uuid": UUID, "version": "1.0.0", "createdDate": "2024-01-01T00:00:00Z"},
@@ -312,7 +312,7 @@ class TestFmtInspect:
         output = _capture(fmt_inspect, data)
         assert "Discovery Servers" in output
         assert "tea.example.com" in output
-        assert "0.3.0-beta.2" in output
+        assert "0.4.0" in output
         assert "Product Release" in output
         assert UUID in output
         assert "Components" in output

@@ -365,13 +365,13 @@ class TestCLIDiscoveryPath:
             "https://example.com/.well-known/tea",
             json={
                 "schemaVersion": 1,
-                "endpoints": [{"url": "https://api.example.com", "versions": ["0.3.0-beta.2"]}],
+                "endpoints": [{"url": "https://api.example.com", "versions": ["0.4.0"]}],
             },
         )
-        responses.head("https://api.example.com/v0.3.0-beta.2", status=200)
+        responses.head("https://api.example.com/v0.4.0", status=200)
         uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
         responses.get(
-            "https://api.example.com/v0.3.0-beta.2/product/" + uuid,
+            "https://api.example.com/v0.4.0/product/" + uuid,
             json={"uuid": uuid, "name": "Test Product", "identifiers": []},
         )
         result = runner.invoke(app, ["--json", "get-product", uuid, "--domain", "example.com"])
@@ -385,13 +385,13 @@ class TestCLIDiscoveryPath:
             "http://example.com/.well-known/tea",
             json={
                 "schemaVersion": 1,
-                "endpoints": [{"url": "http://api.example.com", "versions": ["0.3.0-beta.2"]}],
+                "endpoints": [{"url": "http://api.example.com", "versions": ["0.4.0"]}],
             },
         )
-        responses.head("http://api.example.com/v0.3.0-beta.2", status=200)
+        responses.head("http://api.example.com/v0.4.0", status=200)
         uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
         responses.get(
-            "http://api.example.com/v0.3.0-beta.2/product/" + uuid,
+            "http://api.example.com/v0.4.0/product/" + uuid,
             json={"uuid": uuid, "name": "Test Product", "identifiers": []},
         )
         result = runner.invoke(app, ["get-product", uuid, "--domain", "example.com", "--use-http"])
@@ -697,12 +697,12 @@ class TestCLITeiAutoDiscovery:
             "https://example.com/.well-known/tea",
             json={
                 "schemaVersion": 1,
-                "endpoints": [{"url": "https://api.example.com", "versions": ["0.3.0-beta.2"]}],
+                "endpoints": [{"url": "https://api.example.com", "versions": ["0.4.0"]}],
             },
         )
-        responses.head("https://api.example.com/v0.3.0-beta.2", status=200)
+        responses.head("https://api.example.com/v0.4.0", status=200)
         responses.get(
-            "https://api.example.com/v0.3.0-beta.2/discovery",
+            "https://api.example.com/v0.4.0/discovery",
             json=[
                 {
                     "productReleaseUuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",

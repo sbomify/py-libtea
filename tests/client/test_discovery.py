@@ -460,10 +460,10 @@ class TestSelectEndpoint:
         """Pre-release versions match exactly."""
         wk = self._make_well_known(
             [
-                {"url": "https://api.example.com", "versions": ["0.3.0-beta.2"]},
+                {"url": "https://api.example.com", "versions": ["0.4.0"]},
             ]
         )
-        ep = select_endpoint(wk, "0.3.0-beta.2")
+        ep = select_endpoint(wk, "0.4.0")
         assert ep.url == "https://api.example.com"
 
     def test_semver_prerelease_does_not_match_release(self):
@@ -637,12 +637,12 @@ class TestIsCompatibleVersion:
         assert not _is_compatible_version(self._v("1.2.0"), self._v("1.3.0"))
 
     def test_prerelease_compatibility(self):
-        """0.3.0-beta.2 client can downgrade to 0.2.0-beta.2 server."""
-        assert _is_compatible_version(self._v("0.3.0-beta.2"), self._v("0.2.0-beta.2"))
+        """0.4.0 client can downgrade to 0.2.0-beta.2 server."""
+        assert _is_compatible_version(self._v("0.4.0"), self._v("0.2.0-beta.2"))
 
     def test_prerelease_same_minor(self):
-        """0.3.0-beta.2 client compatible with 0.3.0-beta.1 server."""
-        assert _is_compatible_version(self._v("0.3.0-beta.2"), self._v("0.3.0-beta.1"))
+        """0.4.0 client compatible with 0.3.0-beta.1 server."""
+        assert _is_compatible_version(self._v("0.4.0"), self._v("0.3.0-beta.1"))
 
     def test_post_1_patch_level_client_higher(self):
         """Post-1.0: client 1.2.1 can connect to server 1.2.0."""
@@ -666,16 +666,16 @@ class TestSelectBestEndpoint:
 
     def test_exact_match_preferred(self):
         """When exact match exists, use it."""
-        wk = self._make_well_known([{"url": "https://api.example.com", "versions": ["0.3.0-beta.2"]}])
-        result = select_best_endpoint(wk, "0.3.0-beta.2")
+        wk = self._make_well_known([{"url": "https://api.example.com", "versions": ["0.4.0"]}])
+        result = select_best_endpoint(wk, "0.4.0")
         assert isinstance(result, VersionedEndpoint)
-        assert result.matched_version == "0.3.0-beta.2"
+        assert result.matched_version == "0.4.0"
         assert result.endpoint.url == "https://api.example.com"
 
     def test_negotiates_to_lower_version(self):
-        """Client 0.3.0-beta.2 negotiates to server 0.2.0-beta.2."""
+        """Client 0.4.0 negotiates to server 0.2.0-beta.2."""
         wk = self._make_well_known([{"url": "https://api.example.com", "versions": ["0.2.0-beta.2"]}])
-        result = select_best_endpoint(wk, "0.3.0-beta.2")
+        result = select_best_endpoint(wk, "0.4.0")
         assert result.matched_version == "0.2.0-beta.2"
 
     def test_rejects_higher_server_version(self):
@@ -692,7 +692,7 @@ class TestSelectBestEndpoint:
                 {"url": "https://new.example.com", "versions": ["0.2.0-beta.2"]},
             ]
         )
-        result = select_best_endpoint(wk, "0.3.0-beta.2")
+        result = select_best_endpoint(wk, "0.4.0")
         assert result.matched_version == "0.2.0-beta.2"
         assert result.endpoint.url == "https://new.example.com"
 
@@ -704,7 +704,7 @@ class TestSelectBestEndpoint:
     def test_no_compatible_version_raises(self):
         wk = self._make_well_known([{"url": "https://api.example.com", "versions": ["2.0.0"]}])
         with pytest.raises(TeaDiscoveryError, match="No .*endpoint found"):
-            select_best_endpoint(wk, "0.3.0-beta.2")
+            select_best_endpoint(wk, "0.4.0")
 
     def test_malformed_version_strings_skipped(self):
         """Endpoints with invalid version strings are silently skipped."""
@@ -714,7 +714,7 @@ class TestSelectBestEndpoint:
                 {"url": "https://ok.example.com", "versions": ["0.2.0"]},
             ]
         )
-        result = select_best_endpoint(wk, "0.3.0-beta.2")
+        result = select_best_endpoint(wk, "0.4.0")
         assert result.endpoint.url == "https://ok.example.com"
 
     def test_compatible_priority_tiebreaker(self):
@@ -725,7 +725,7 @@ class TestSelectBestEndpoint:
                 {"url": "https://high.example.com", "versions": ["0.2.0"], "priority": 0.9},
             ]
         )
-        result = select_best_endpoint(wk, "0.3.0-beta.2")
+        result = select_best_endpoint(wk, "0.4.0")
         assert result.endpoint.url == "https://high.example.com"
 
     def test_picks_highest_compatible_version_per_endpoint(self):
@@ -736,7 +736,7 @@ class TestSelectBestEndpoint:
                 {"url": "https://api.example.com", "versions": ["0.1.0", "0.2.0", "0.1.5"]},
             ]
         )
-        result = select_best_endpoint(wk, "0.3.0-beta.2")
+        result = select_best_endpoint(wk, "0.4.0")
         assert result.matched_version == "0.2.0"
 
     def test_negotiation_emits_warning(self):
@@ -746,5 +746,5 @@ class TestSelectBestEndpoint:
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            select_best_endpoint(wk, "0.3.0-beta.2")
+            select_best_endpoint(wk, "0.4.0")
         assert any("negotiated to server version" in str(warning.message) for warning in w)

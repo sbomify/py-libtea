@@ -196,8 +196,14 @@ class Checksum(_TeaModel):
 
 
 class ReleaseDistribution(_TeaModel):
-    """A distribution format for a component release (e.g. binary, source)."""
+    """A distribution format for a component release (e.g. binary, source).
 
+    As of spec v0.4.0, ``distribution_id`` is required and ``distribution_type``
+    has been removed.  For backward compatibility with older servers that still
+    send ``distributionType``, the field is kept as optional.
+    """
+
+    distribution_id: str | None = None
     distribution_type: str | None = None
     description: str | None = None
     identifiers: tuple[Identifier, ...] = ()
@@ -227,12 +233,15 @@ class ArtifactFormat(_TeaModel):
 class Artifact(_TeaModel):
     """A security-related artifact (e.g. SBOM, VEX, attestation) with available formats.
 
-    Per spec, no fields are required.
+    As of spec v0.4.0, ``uuid`` is required and ``distribution_ids`` replaces
+    ``distribution_types``.  Both fields are kept for backward compatibility
+    with older servers.
     """
 
     uuid: str | None = None
     name: str | None = None
     type: ArtifactType | None = None
+    distribution_ids: tuple[str, ...] | None = None
     distribution_types: tuple[str, ...] | None = None
     formats: tuple[ArtifactFormat, ...] = ()
 
@@ -448,7 +457,8 @@ class CLEEvent(_TeaModel):
 class CLE(_TeaModel):
     """Common Lifecycle Enumeration document per ECMA-428 TC54 TG3 v1.0.0.
 
-    Contains lifecycle events and optional definitions. Event ordering is determined by the producer.
+    Contains lifecycle events and optional definitions. Per spec, events
+    MUST be ordered by ``id`` in descending order (newest first).
     """
 
     events: tuple[CLEEvent, ...]

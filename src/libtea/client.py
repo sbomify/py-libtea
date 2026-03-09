@@ -49,7 +49,7 @@ from libtea.models import (
 
 logger = logging.getLogger("libtea")
 
-TEA_SPEC_VERSION = "0.3.0-beta.2"
+TEA_SPEC_VERSION = "0.4.0"
 
 _T = TypeVar("_T")
 

@@ -10,7 +10,7 @@ tea-cli [GLOBAL OPTIONS] COMMAND [COMMAND OPTIONS]
 
 ## Description
 
-`tea-cli` is a command-line interface for the Transparency Exchange API (TEA) v0.3.0-beta.2. It discovers, searches, and retrieves software transparency artifacts (SBOMs, VEX, build metadata) from TEA-compliant servers.
+`tea-cli` is a command-line interface for the Transparency Exchange API (TEA) v0.4.0. It discovers, searches, and retrieves software transparency artifacts (SBOMs, VEX, build metadata) from TEA-compliant servers.
 
 Output is rich-formatted by default (tables, panels) for interactive use. Use `--json` for machine-readable JSON output suitable for piping.
 
@@ -41,7 +41,7 @@ Every command accepts the following options for server selection and authenticat
 
 | Option | Description |
 |--------|-------------|
-| `--base-url` *URL* | TEA server base URL (e.g. `https://trust.sbomify.com/tea/v0.3.0-beta.2`). Can also be set via the `TEA_BASE_URL` environment variable. Mutually exclusive with `--domain`. |
+| `--base-url` *URL* | TEA server base URL (e.g. `https://trust.sbomify.com/tea/v0.4.0`). Can also be set via the `TEA_BASE_URL` environment variable. Mutually exclusive with `--domain`. |
 | `--domain` *DOMAIN* | Discover server from the domain's `.well-known/tea` endpoint. The domain can also be auto-extracted from a TEI URN argument. |
 | `--token` *TOKEN* | Bearer token for authentication. Prefer the `TEA_TOKEN` environment variable to avoid exposing the token in shell history. |
 | `--auth` *USER:PASSWORD* | HTTP basic authentication credentials. Prefer the `TEA_AUTH` environment variable to avoid exposing credentials in shell history. Mutually exclusive with `--token`. |
@@ -376,14 +376,14 @@ Local development with private IPs:
 ```bash
 # Allow downloads from a local TEA server
 tea-cli download "http://192.168.1.100:8080/sbom.json" ./sbom.json \
-    --allow-private-ips --base-url "http://192.168.1.100:8080/tea/v0.3.0-beta.2"
+    --allow-private-ips --base-url "http://192.168.1.100:8080/tea/v0.4.0"
 ```
 
 Using environment variables to avoid repeating credentials:
 
 ```bash
 export TEA_TOKEN="your-bearer-token"
-export TEA_BASE_URL="https://trust.sbomify.com/tea/v0.3.0-beta.2"
+export TEA_BASE_URL="https://trust.sbomify.com/tea/v0.4.0"
 tea-cli discover "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify"
 tea-cli get-product <product-uuid>
 ```
