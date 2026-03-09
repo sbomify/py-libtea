@@ -20,7 +20,7 @@ Items that depend on external factors or are deferred indefinitely. These are **
 
 **TEA spec tracking:** [CycloneDX/transparency-exchange-api](https://github.com/CycloneDX/transparency-exchange-api)
 
-**Additional note for Publisher API:** When serializing models back to the server, use `model_dump(exclude_none=True)` to avoid sending deprecated fields (`distribution_type`, `distribution_types`) that v0.4.0 servers may reject.
+**Additional note for Publisher API:** When serializing models back to the server, use `model_dump(mode="json", by_alias=True, exclude_none=True)` and explicitly exclude deprecated fields (`distribution_type`, `distribution_types`) — `exclude_none` alone won't help if they were populated from an older server response. Serialization should also be gated by the negotiated spec version so deprecated fields are only sent to servers that expect them.
 
 **Action:** When the Publisher API reaches beta (stable naming, stable schema), create a versioned design doc in `docs/plans/` and schedule for the next minor release.
 

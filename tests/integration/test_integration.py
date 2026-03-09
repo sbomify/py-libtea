@@ -25,12 +25,12 @@ TOMCAT_RELEASE = {
         {
             "distributionType": "zip",
             "description": "Core binary distribution, zip archive",
-            "identifiers": [{"idType": "PURL", "idValue": "pkg:maven/org.apache.tomcat/tomcat@11.0.6?type=zip"}],
+            "identifiers": [{"idType": "PURL", "idValue": "pkg:maven/org.apache.tomcat/tomcat@11.0.7?type=zip"}],
             "checksums": [
                 {"algType": "SHA-256", "algValue": "9da736a1cdd27231e70187cbc67398d29ca0b714f885e7032da9f1fb247693c1"}
             ],
-            "url": "https://repo.maven.apache.org/maven2/org/apache/tomcat/tomcat/11.0.7/tomcat-11.0.6.zip",
-            "signatureUrl": "https://repo.maven.apache.org/maven2/org/apache/tomcat/tomcat/11.0.7/tomcat-11.0.6.zip.asc",
+            "url": "https://repo.maven.apache.org/maven2/org/apache/tomcat/tomcat/11.0.7/tomcat-11.0.7.zip",
+            "signatureUrl": "https://repo.maven.apache.org/maven2/org/apache/tomcat/tomcat/11.0.7/tomcat-11.0.7.zip.asc",
         }
     ],
 }
@@ -93,11 +93,11 @@ TOMCAT_RELEASE_V040 = {
         {
             "distributionId": "d7a8e9f0-1234-5678-abcd-ef0123456789",
             "description": "Core binary distribution, zip archive",
-            "identifiers": [{"idType": "PURL", "idValue": "pkg:maven/org.apache.tomcat/tomcat@11.0.6?type=zip"}],
+            "identifiers": [{"idType": "PURL", "idValue": "pkg:maven/org.apache.tomcat/tomcat@11.0.7?type=zip"}],
             "checksums": [
                 {"algType": "SHA-256", "algValue": "9da736a1cdd27231e70187cbc67398d29ca0b714f885e7032da9f1fb247693c1"}
             ],
-            "url": "https://repo.maven.apache.org/maven2/org/apache/tomcat/tomcat/11.0.7/tomcat-11.0.6.zip",
+            "url": "https://repo.maven.apache.org/maven2/org/apache/tomcat/tomcat/11.0.7/tomcat-11.0.7.zip",
         }
     ],
 }
