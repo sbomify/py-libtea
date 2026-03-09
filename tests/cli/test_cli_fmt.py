@@ -692,6 +692,25 @@ class TestArtifactFormatDetails:
         output = _capture(fmt_component_release, data)
         assert "tar.gz" in output
 
+    def test_artifacts_table_empty_distribution_ids_no_fallback(self):
+        """Empty distribution_ids=() must not fall back to legacy distribution_types."""
+        data = Collection(
+            uuid=UUID,
+            version=1,
+            artifacts=[
+                Artifact(
+                    uuid=UUID,
+                    name="Build SBOM",
+                    type="BOM",
+                    distribution_ids=(),
+                    distribution_types=("binary",),
+                    formats=[ArtifactFormat(media_type="application/xml", url="https://example.com/sbom.xml")],
+                )
+            ],
+        )
+        output = _capture(fmt_collection, data)
+        assert "binary" not in output
+
     def test_inspect_artifact_shows_description_and_signature(self):
         """Inspect output should show description and signatureUrl for artifact formats."""
         data = [

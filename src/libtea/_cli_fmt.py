@@ -111,8 +111,11 @@ def _artifacts_table(artifacts: Sequence[Artifact], *, console: Console) -> None
     tbl.add_column("Formats")
     for a in artifacts:
         fmt_str = ", ".join(f.media_type or "?" for f in a.formats) or "-"
-        # Prefer v0.4.0 distribution_ids, fall back to legacy distribution_types
-        applies = ", ".join(a.distribution_ids or a.distribution_types or []) or "-"
+        # Prefer v0.4.0 distribution_ids, fall back to legacy distribution_types.
+        # Use `is not None` so an explicitly empty list from a v0.4.0 server
+        # does not fall back to legacy data (empty tuple is falsy).
+        applies_seq = a.distribution_ids if a.distribution_ids is not None else (a.distribution_types or ())
+        applies = ", ".join(applies_seq) or "-"
         tbl.add_row(_esc(a.uuid), _esc(a.name), _esc(a.type), escape(applies), escape(fmt_str))
     console.print(tbl)
 
@@ -434,7 +437,7 @@ def _inspect_component_details(comp: dict[str, Any], *, console: Console) -> Non
     if distributions:
         comp_name = comp.get("name") or release.get("componentName", "Component")
         tbl = Table(title=f"Distributions ({_esc(comp_name)})")
-        tbl.add_column("Type")
+        tbl.add_column("ID / Type")
         tbl.add_column("Description")
         tbl.add_column("URL")
         tbl.add_column("Signature URL")
@@ -473,8 +476,11 @@ def _inspect_component_details(comp: dict[str, Any], *, console: Console) -> Non
     tbl.add_column("URL")
     tbl.add_column("Signature URL")
     for art in artifacts:
-        # Prefer v0.4.0 distributionIds, fall back to legacy distributionTypes
-        applies = ", ".join(art.get("distributionIds") or art.get("distributionTypes") or []) or "-"
+        # Prefer v0.4.0 distributionIds, fall back to legacy distributionTypes.
+        # Use explicit key check so an empty v0.4.0 list does not fall back.
+        dist_ids = art.get("distributionIds")
+        applies_seq = dist_ids if dist_ids is not None else (art.get("distributionTypes") or [])
+        applies = ", ".join(applies_seq) or "-"
         formats = art.get("formats", [])
         if formats:
             for fmt in formats:
