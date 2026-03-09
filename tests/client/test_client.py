@@ -417,24 +417,32 @@ class TestArtifact:
 class TestSpecV040Fields:
     """Tests for fields added in TEA spec v0.4.0."""
 
+    _ART_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    _DIST_UUID = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+    _DIST_UUID2 = "e5e0a65b-bcdf-22ff-bd80-2b63a25e55c2"
+
     def test_artifact_distribution_ids(self):
-        art = Artifact.model_validate({"uuid": "abc", "distributionIds": ["id-1", "id-2"], "formats": []})
-        assert art.distribution_ids == ("id-1", "id-2")
+        art = Artifact.model_validate(
+            {"uuid": self._ART_UUID, "distributionIds": [self._DIST_UUID, self._DIST_UUID2], "formats": []}
+        )
+        assert art.distribution_ids == (self._DIST_UUID, self._DIST_UUID2)
 
     def test_artifact_distribution_ids_absent(self):
-        art = Artifact.model_validate({"uuid": "abc", "formats": []})
+        art = Artifact.model_validate({"uuid": self._ART_UUID, "formats": []})
         assert art.distribution_ids is None
 
     def test_artifact_backward_compat_distribution_types(self):
         """Older servers may still send distributionTypes — must not break."""
-        art = Artifact.model_validate({"uuid": "abc", "distributionTypes": ["binary", "source"], "formats": []})
+        art = Artifact.model_validate(
+            {"uuid": self._ART_UUID, "distributionTypes": ["binary", "source"], "formats": []}
+        )
         assert art.distribution_types == ("binary", "source")
 
     def test_release_distribution_id(self):
         from libtea.models import ReleaseDistribution
 
-        dist = ReleaseDistribution.model_validate({"distributionId": "d-1", "description": "core binary"})
-        assert dist.distribution_id == "d-1"
+        dist = ReleaseDistribution.model_validate({"distributionId": self._DIST_UUID, "description": "core binary"})
+        assert dist.distribution_id == self._DIST_UUID
 
     def test_release_distribution_backward_compat(self):
         """Older servers may send distributionType instead of distributionId."""
@@ -446,15 +454,20 @@ class TestSpecV040Fields:
 
     def test_artifact_distribution_ids_empty_array(self):
         """Empty distributionIds array should parse to empty tuple, not None."""
-        art = Artifact.model_validate({"uuid": "abc", "distributionIds": [], "formats": []})
+        art = Artifact.model_validate({"uuid": self._ART_UUID, "distributionIds": [], "formats": []})
         assert art.distribution_ids == ()
 
     def test_artifact_coexistence_old_and_new_fields(self):
         """A server sending both old and new fields should preserve both."""
         art = Artifact.model_validate(
-            {"uuid": "abc", "distributionIds": ["id-1"], "distributionTypes": ["binary"], "formats": []}
+            {
+                "uuid": self._ART_UUID,
+                "distributionIds": [self._DIST_UUID],
+                "distributionTypes": ["binary"],
+                "formats": [],
+            }
         )
-        assert art.distribution_ids == ("id-1",)
+        assert art.distribution_ids == (self._DIST_UUID,)
         assert art.distribution_types == ("binary",)
 
     def test_release_distribution_coexistence_old_and_new(self):
@@ -462,9 +475,9 @@ class TestSpecV040Fields:
         from libtea.models import ReleaseDistribution
 
         dist = ReleaseDistribution.model_validate(
-            {"distributionId": "d-1", "distributionType": "binary", "description": "both fields"}
+            {"distributionId": self._DIST_UUID, "distributionType": "binary", "description": "both fields"}
         )
-        assert dist.distribution_id == "d-1"
+        assert dist.distribution_id == self._DIST_UUID
         assert dist.distribution_type == "binary"
 
 

@@ -199,8 +199,9 @@ class ReleaseDistribution(_TeaModel):
     """A distribution format for a component release (e.g. binary, source).
 
     As of spec v0.4.0, ``distribution_id`` is required and ``distribution_type``
-    has been removed.  For backward compatibility with older servers that still
-    send ``distributionType``, the field is kept as optional.
+    has been removed.  Both fields are kept as **optional** in the model for
+    backward compatibility with older servers that still send
+    ``distributionType`` instead.
     """
 
     distribution_id: str | None = None
@@ -234,8 +235,9 @@ class Artifact(_TeaModel):
     """A security-related artifact (e.g. SBOM, VEX, attestation) with available formats.
 
     As of spec v0.4.0, ``uuid`` is required and ``distribution_ids`` replaces
-    ``distribution_types``.  Both fields are kept for backward compatibility
-    with older servers.
+    ``distribution_types``.  All fields are kept as **optional** in the model
+    for backward compatibility with older servers that may omit ``uuid`` or
+    still send ``distributionTypes``.
     """
 
     uuid: str | None = None

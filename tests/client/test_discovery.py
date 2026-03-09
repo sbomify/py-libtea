@@ -456,14 +456,24 @@ class TestSelectEndpoint:
         with pytest.raises(TeaDiscoveryError, match="No .*endpoint found"):
             select_endpoint(wk, "1.0.0")
 
-    def test_semver_matches_with_prerelease(self):
-        """Pre-release versions match exactly."""
+    def test_semver_exact_match(self):
+        """Release versions match exactly."""
         wk = self._make_well_known(
             [
                 {"url": "https://api.example.com", "versions": ["0.4.0"]},
             ]
         )
         ep = select_endpoint(wk, "0.4.0")
+        assert ep.url == "https://api.example.com"
+
+    def test_semver_prerelease_exact_match(self):
+        """Pre-release versions match exactly."""
+        wk = self._make_well_known(
+            [
+                {"url": "https://api.example.com", "versions": ["0.3.0-beta.2"]},
+            ]
+        )
+        ep = select_endpoint(wk, "0.3.0-beta.2")
         assert ep.url == "https://api.example.com"
 
     def test_semver_prerelease_does_not_match_release(self):
@@ -636,13 +646,17 @@ class TestIsCompatibleVersion:
         """Post-1.0: client 1.2.0 cannot connect to server 1.3.0."""
         assert not _is_compatible_version(self._v("1.2.0"), self._v("1.3.0"))
 
-    def test_prerelease_compatibility(self):
-        """0.4.0 client can downgrade to 0.2.0-beta.2 server."""
+    def test_release_client_downgrades_to_prerelease_server(self):
+        """Release client 0.4.0 can connect to prerelease server 0.2.0-beta.2."""
         assert _is_compatible_version(self._v("0.4.0"), self._v("0.2.0-beta.2"))
 
-    def test_prerelease_same_minor(self):
-        """0.4.0 client compatible with 0.3.0-beta.1 server."""
+    def test_release_client_compatible_with_older_prerelease_server(self):
+        """Release client 0.4.0 compatible with prerelease server 0.3.0-beta.1."""
         assert _is_compatible_version(self._v("0.4.0"), self._v("0.3.0-beta.1"))
+
+    def test_prerelease_client_downgrades_to_prerelease_server(self):
+        """Prerelease client 0.3.0-beta.2 can downgrade to 0.2.0-beta.2 server."""
+        assert _is_compatible_version(self._v("0.3.0-beta.2"), self._v("0.2.0-beta.2"))
 
     def test_post_1_patch_level_client_higher(self):
         """Post-1.0: client 1.2.1 can connect to server 1.2.0."""
