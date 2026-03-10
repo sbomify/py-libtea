@@ -300,7 +300,7 @@ class TestFmtInspect:
                 "discovery": {
                     "productReleaseUuid": UUID,
                     "servers": [
-                        {"rootUrl": "https://tea.example.com", "versions": ["0.3.0-beta.2"], "priority": 1.0},
+                        {"rootUrl": "https://tea.example.com", "versions": ["0.4.0"], "priority": 1.0},
                     ],
                 },
                 "productRelease": {"uuid": UUID, "version": "1.0.0", "createdDate": "2024-01-01T00:00:00Z"},
@@ -312,7 +312,7 @@ class TestFmtInspect:
         output = _capture(fmt_inspect, data)
         assert "Discovery Servers" in output
         assert "tea.example.com" in output
-        assert "0.3.0-beta.2" in output
+        assert "0.4.0" in output
         assert "Product Release" in output
         assert UUID in output
         assert "Components" in output
@@ -641,6 +641,75 @@ class TestArtifactFormatDetails:
         )
         output = _capture(fmt_collection, data)
         assert "zip, tar.gz" in output
+
+    def test_artifacts_table_prefers_distribution_ids(self):
+        """v0.4.0: distribution_ids should be displayed when present."""
+        data = Collection(
+            uuid=UUID,
+            version=1,
+            artifacts=[
+                Artifact(
+                    uuid=UUID,
+                    name="Build SBOM",
+                    type="BOM",
+                    distribution_ids=["dist-1", "dist-2"],
+                    formats=[ArtifactFormat(media_type="application/xml", url="https://example.com/sbom.xml")],
+                )
+            ],
+        )
+        output = _capture(fmt_collection, data)
+        assert "dist-1, dist-2" in output
+
+    def test_distributions_table_prefers_distribution_id(self):
+        """v0.4.0: distribution_id should be displayed when present."""
+        data = ComponentReleaseWithCollection(
+            release=Release(
+                uuid=UUID,
+                version="1.0.0",
+                created_date="2024-01-01T00:00:00Z",
+                distributions=[
+                    ReleaseDistribution(distribution_id="dist-abc", description="Primary"),
+                ],
+            ),
+            latest_collection=Collection(uuid=UUID, version=1, artifacts=[]),
+        )
+        output = _capture(fmt_component_release, data)
+        assert "dist-abc" in output
+
+    def test_distributions_table_falls_back_to_type(self):
+        """Legacy servers: distribution_type shown when distribution_id absent."""
+        data = ComponentReleaseWithCollection(
+            release=Release(
+                uuid=UUID,
+                version="1.0.0",
+                created_date="2024-01-01T00:00:00Z",
+                distributions=[
+                    ReleaseDistribution(distribution_type="tar.gz", description="Legacy"),
+                ],
+            ),
+            latest_collection=Collection(uuid=UUID, version=1, artifacts=[]),
+        )
+        output = _capture(fmt_component_release, data)
+        assert "tar.gz" in output
+
+    def test_artifacts_table_empty_distribution_ids_no_fallback(self):
+        """Empty distribution_ids=() must not fall back to legacy distribution_types."""
+        data = Collection(
+            uuid=UUID,
+            version=1,
+            artifacts=[
+                Artifact(
+                    uuid=UUID,
+                    name="Build SBOM",
+                    type="BOM",
+                    distribution_ids=(),
+                    distribution_types=("binary",),
+                    formats=[ArtifactFormat(media_type="application/xml", url="https://example.com/sbom.xml")],
+                )
+            ],
+        )
+        output = _capture(fmt_collection, data)
+        assert "binary" not in output
 
     def test_inspect_artifact_shows_description_and_signature(self):
         """Inspect output should show description and signatureUrl for artifact formats."""

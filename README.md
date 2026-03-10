@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/github/license/sbomify/py-libtea.svg)](https://github.com/sbomify/py-libtea/blob/master/LICENSE)
 [![sbomified](https://sbomify.com/assets/images/logo/badge.svg)](https://trust.sbomify.com/component/py-libtea/)
 
-Python client library for the [Transparency Exchange API (TEA)](https://transparency.exchange/) v0.3.0-beta.2.
+Python client library for the [Transparency Exchange API (TEA)](https://transparency.exchange/) v0.4.0.
 
 TEA is an open standard for discovering and retrieving software transparency artifacts (SBOMs, VEX, build metadata) for any software product or component. A [TEI identifier](https://github.com/CycloneDX/transparency-exchange-api/blob/main/discovery/readme.md) resolves via DNS to the right endpoint, similar to how email uses MX records — so consumers can fetch artifacts without knowing which server hosts them.
 
@@ -78,7 +78,7 @@ Or connect directly to a known endpoint:
 
 ```python
 client = TeaClient(
-    base_url="https://trust.sbomify.com/tea/v0.3.0-beta.2",
+    base_url="https://trust.sbomify.com/tea/v0.4.0",
     timeout=30.0,
 )
 ```
@@ -89,7 +89,7 @@ Using `from_well_known`, you can also override the spec version and timeout:
 client = TeaClient.from_well_known(
     "trust.sbomify.com",
     timeout=15.0,
-    version="0.3.0-beta.2",  # default
+    version="0.4.0",  # default
 )
 ```
 
@@ -121,7 +121,7 @@ tei_type, domain, identifier = parse_tei(
 
 # Fetch and select an endpoint manually
 well_known = fetch_well_known("trust.sbomify.com")
-endpoint = select_endpoint(well_known, "0.3.0-beta.2")
+endpoint = select_endpoint(well_known, "0.4.0")
 print(endpoint.url, endpoint.priority)
 ```
 
@@ -292,7 +292,7 @@ Enable optional TTL-based caching to avoid repeated API calls:
 
 ```python
 # Cache GET responses for 5 minutes
-client = TeaClient("https://trust.sbomify.com/tea/v0.3.0-beta.2", cache_ttl=300)
+client = TeaClient("https://trust.sbomify.com/tea/v0.4.0", cache_ttl=300)
 product = client.get_product("uuid")  # HTTP call
 product = client.get_product("uuid")  # served from cache
 
@@ -561,7 +561,7 @@ Optional:
 
 ## Not yet supported
 
-- Publisher API (spec is consumer-only in beta.2)
+- Publisher API (spec is consumer-only in v0.4.0)
 - Async client
 
 ## Development

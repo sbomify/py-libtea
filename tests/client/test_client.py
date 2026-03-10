@@ -414,6 +414,73 @@ class TestArtifact:
         assert artifact.name == "SBOM"
 
 
+class TestSpecV040Fields:
+    """Tests for fields added in TEA spec v0.4.0."""
+
+    _ART_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    _DIST_UUID = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+    _DIST_UUID2 = "e5e0a65b-bcdf-22ff-bd80-2b63a25e55c2"
+
+    def test_artifact_distribution_ids(self):
+        art = Artifact.model_validate(
+            {"uuid": self._ART_UUID, "distributionIds": [self._DIST_UUID, self._DIST_UUID2], "formats": []}
+        )
+        assert art.distribution_ids == (self._DIST_UUID, self._DIST_UUID2)
+
+    def test_artifact_distribution_ids_absent(self):
+        art = Artifact.model_validate({"uuid": self._ART_UUID, "formats": []})
+        assert art.distribution_ids is None
+
+    def test_artifact_backward_compat_distribution_types(self):
+        """Older servers may still send distributionTypes — must not break."""
+        art = Artifact.model_validate(
+            {"uuid": self._ART_UUID, "distributionTypes": ["binary", "source"], "formats": []}
+        )
+        assert art.distribution_types == ("binary", "source")
+
+    def test_release_distribution_id(self):
+        from libtea.models import ReleaseDistribution
+
+        dist = ReleaseDistribution.model_validate({"distributionId": self._DIST_UUID, "description": "core binary"})
+        assert dist.distribution_id == self._DIST_UUID
+
+    def test_release_distribution_backward_compat(self):
+        """Older servers may send distributionType instead of distributionId."""
+        from libtea.models import ReleaseDistribution
+
+        dist = ReleaseDistribution.model_validate({"distributionType": "binary", "description": "old format"})
+        assert dist.distribution_type == "binary"
+        assert dist.distribution_id is None
+
+    def test_artifact_distribution_ids_empty_array(self):
+        """Empty distributionIds array should parse to empty tuple, not None."""
+        art = Artifact.model_validate({"uuid": self._ART_UUID, "distributionIds": [], "formats": []})
+        assert art.distribution_ids == ()
+
+    def test_artifact_coexistence_old_and_new_fields(self):
+        """A server sending both old and new fields should preserve both."""
+        art = Artifact.model_validate(
+            {
+                "uuid": self._ART_UUID,
+                "distributionIds": [self._DIST_UUID],
+                "distributionTypes": ["binary"],
+                "formats": [],
+            }
+        )
+        assert art.distribution_ids == (self._DIST_UUID,)
+        assert art.distribution_types == ("binary",)
+
+    def test_release_distribution_coexistence_old_and_new(self):
+        """Both distributionId and distributionType present — both preserved."""
+        from libtea.models import ReleaseDistribution
+
+        dist = ReleaseDistribution.model_validate(
+            {"distributionId": self._DIST_UUID, "distributionType": "binary", "description": "both fields"}
+        )
+        assert dist.distribution_id == self._DIST_UUID
+        assert dist.distribution_type == "binary"
+
+
 class TestDiscovery:
     @responses.activate
     def test_discover(self, client, base_url):
@@ -448,10 +515,10 @@ class TestFromWellKnown:
             "https://example.com/.well-known/tea",
             json={
                 "schemaVersion": 1,
-                "endpoints": [{"url": "https://api.example.com", "versions": ["0.3.0-beta.2"]}],
+                "endpoints": [{"url": "https://api.example.com", "versions": ["0.4.0"]}],
             },
         )
-        responses.head("https://api.example.com/v0.3.0-beta.2", status=200)
+        responses.head("https://api.example.com/v0.4.0", status=200)
         client = TeaClient.from_well_known("example.com")
         assert client is not None
         client.close()
@@ -474,10 +541,10 @@ class TestFromWellKnown:
             "http://example.com:9080/.well-known/tea",
             json={
                 "schemaVersion": 1,
-                "endpoints": [{"url": "http://api.example.com", "versions": ["0.3.0-beta.2"]}],
+                "endpoints": [{"url": "http://api.example.com", "versions": ["0.4.0"]}],
             },
         )
-        responses.head("http://api.example.com/v0.3.0-beta.2", status=200)
+        responses.head("http://api.example.com/v0.4.0", status=200)
         import warnings
 
         from libtea.exceptions import TeaInsecureTransportWarning
@@ -496,12 +563,12 @@ class TestFromWellKnown:
             "https://example.com/.well-known/tea",
             json={
                 "schemaVersion": 1,
-                "endpoints": [{"url": "https://api.example.com", "versions": ["0.3.0-beta.2"]}],
+                "endpoints": [{"url": "https://api.example.com", "versions": ["0.4.0"]}],
             },
         )
-        responses.head("https://api.example.com/v0.3.0-beta.2", status=200)
+        responses.head("https://api.example.com/v0.4.0", status=200)
         responses.get(
-            "https://api.example.com/v0.3.0-beta.2/product/f6a7b8c9-d0e1-2345-fabc-456789012345",
+            "https://api.example.com/v0.4.0/product/f6a7b8c9-d0e1-2345-fabc-456789012345",
             json={"uuid": "f6a7b8c9-d0e1-2345-fabc-456789012345", "name": "P", "identifiers": []},
         )
         client = TeaClient.from_well_known("example.com", token="secret")
@@ -607,7 +674,7 @@ class TestVersionNegotiation:
 
     @responses.activate
     def test_from_well_known_negotiates_to_lower_version(self):
-        """Server advertises 0.2.0-beta.2, client requests 0.3.0-beta.2 — should succeed."""
+        """Server advertises 0.2.0-beta.2, client requests 0.4.0 — should succeed."""
         responses.get(
             "https://example.com/.well-known/tea",
             json={
@@ -651,15 +718,15 @@ class TestVersionNegotiation:
             json={
                 "schemaVersion": 1,
                 "endpoints": [
-                    {"url": "https://api.example.com", "versions": ["0.2.0-beta.2", "0.3.0-beta.2"]},
+                    {"url": "https://api.example.com", "versions": ["0.2.0-beta.2", "0.4.0"]},
                 ],
             },
         )
-        responses.head("https://api.example.com/v0.3.0-beta.2", status=200)
+        responses.head("https://api.example.com/v0.4.0", status=200)
         client = TeaClient.from_well_known("example.com")
         assert client is not None
         # Should use exact match version
-        assert responses.calls[1].request.url == "https://api.example.com/v0.3.0-beta.2"
+        assert responses.calls[1].request.url == "https://api.example.com/v0.4.0"
         client.close()
 
 
@@ -669,8 +736,8 @@ class TestEndpointFailover:
     WELL_KNOWN_DOC = {
         "schemaVersion": 1,
         "endpoints": [
-            {"url": "https://primary.example.com", "versions": ["0.3.0-beta.2"], "priority": 1.0},
-            {"url": "https://fallback.example.com", "versions": ["0.3.0-beta.2"], "priority": 0.5},
+            {"url": "https://primary.example.com", "versions": ["0.4.0"], "priority": 1.0},
+            {"url": "https://fallback.example.com", "versions": ["0.4.0"], "priority": 0.5},
         ],
     }
 
@@ -678,10 +745,10 @@ class TestEndpointFailover:
     def test_failover_to_second_on_connection_error(self):
         responses.get("https://example.com/.well-known/tea", json=self.WELL_KNOWN_DOC)
         responses.head(
-            "https://primary.example.com/v0.3.0-beta.2",
+            "https://primary.example.com/v0.4.0",
             body=requests.ConnectionError("refused"),
         )
-        responses.head("https://fallback.example.com/v0.3.0-beta.2", status=200)
+        responses.head("https://fallback.example.com/v0.4.0", status=200)
 
         client = TeaClient.from_well_known("example.com")
         assert client is not None
@@ -690,8 +757,8 @@ class TestEndpointFailover:
     @responses.activate
     def test_failover_to_second_on_500(self):
         responses.get("https://example.com/.well-known/tea", json=self.WELL_KNOWN_DOC)
-        responses.head("https://primary.example.com/v0.3.0-beta.2", status=500)
-        responses.head("https://fallback.example.com/v0.3.0-beta.2", status=200)
+        responses.head("https://primary.example.com/v0.4.0", status=500)
+        responses.head("https://fallback.example.com/v0.4.0", status=200)
 
         client = TeaClient.from_well_known("example.com")
         assert client is not None
@@ -701,11 +768,11 @@ class TestEndpointFailover:
     def test_all_endpoints_fail_raises_discovery_error(self):
         responses.get("https://example.com/.well-known/tea", json=self.WELL_KNOWN_DOC)
         responses.head(
-            "https://primary.example.com/v0.3.0-beta.2",
+            "https://primary.example.com/v0.4.0",
             body=requests.ConnectionError("refused"),
         )
         responses.head(
-            "https://fallback.example.com/v0.3.0-beta.2",
+            "https://fallback.example.com/v0.4.0",
             body=requests.ConnectionError("also refused"),
         )
 
@@ -718,10 +785,10 @@ class TestEndpointFailover:
         """Mixed TeaConnectionError + TeaServerError still raises TeaDiscoveryError."""
         responses.get("https://example.com/.well-known/tea", json=self.WELL_KNOWN_DOC)
         responses.head(
-            "https://primary.example.com/v0.3.0-beta.2",
+            "https://primary.example.com/v0.4.0",
             body=requests.ConnectionError("refused"),
         )
-        responses.head("https://fallback.example.com/v0.3.0-beta.2", status=500)
+        responses.head("https://fallback.example.com/v0.4.0", status=500)
 
         with pytest.raises(TeaDiscoveryError, match="All 2 endpoint") as exc_info:
             TeaClient.from_well_known("example.com")
@@ -731,10 +798,10 @@ class TestEndpointFailover:
     def test_single_endpoint_success_no_failover(self):
         doc = {
             "schemaVersion": 1,
-            "endpoints": [{"url": "https://only.example.com", "versions": ["0.3.0-beta.2"]}],
+            "endpoints": [{"url": "https://only.example.com", "versions": ["0.4.0"]}],
         }
         responses.get("https://example.com/.well-known/tea", json=doc)
-        responses.head("https://only.example.com/v0.3.0-beta.2", status=200)
+        responses.head("https://only.example.com/v0.4.0", status=200)
 
         client = TeaClient.from_well_known("example.com")
         assert client is not None
@@ -744,10 +811,10 @@ class TestEndpointFailover:
     def test_failover_uses_correct_base_url(self):
         """After failover, the client should use the fallback endpoint's URL."""
         responses.get("https://example.com/.well-known/tea", json=self.WELL_KNOWN_DOC)
-        responses.head("https://primary.example.com/v0.3.0-beta.2", status=503)
-        responses.head("https://fallback.example.com/v0.3.0-beta.2", status=200)
+        responses.head("https://primary.example.com/v0.4.0", status=503)
+        responses.head("https://fallback.example.com/v0.4.0", status=200)
         responses.get(
-            "https://fallback.example.com/v0.3.0-beta.2/product/f6a7b8c9-d0e1-2345-fabc-456789012345",
+            "https://fallback.example.com/v0.4.0/product/f6a7b8c9-d0e1-2345-fabc-456789012345",
             json={"uuid": "f6a7b8c9-d0e1-2345-fabc-456789012345", "name": "P", "identifiers": []},
         )
 

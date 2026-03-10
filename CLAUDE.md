@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**py-libtea** is a hand-crafted Python client library for the Transparency Exchange API (TEA) v0.3.0-beta.2. Consumer-focused (read-only); publisher API is not yet supported (blocked on TEA spec). Licensed Apache 2.0, maintained under sbomify.
+**py-libtea** is a hand-crafted Python client library for the Transparency Exchange API (TEA) v0.4.0. Consumer-focused (read-only); publisher API is not yet supported (blocked on TEA spec). Licensed Apache 2.0, maintained under sbomify.
 
 ## Build & Dev Commands
 

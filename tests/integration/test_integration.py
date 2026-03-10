@@ -25,12 +25,12 @@ TOMCAT_RELEASE = {
         {
             "distributionType": "zip",
             "description": "Core binary distribution, zip archive",
-            "identifiers": [{"idType": "PURL", "idValue": "pkg:maven/org.apache.tomcat/tomcat@11.0.6?type=zip"}],
+            "identifiers": [{"idType": "PURL", "idValue": "pkg:maven/org.apache.tomcat/tomcat@11.0.7?type=zip"}],
             "checksums": [
                 {"algType": "SHA-256", "algValue": "9da736a1cdd27231e70187cbc67398d29ca0b714f885e7032da9f1fb247693c1"}
             ],
-            "url": "https://repo.maven.apache.org/maven2/org/apache/tomcat/tomcat/11.0.7/tomcat-11.0.6.zip",
-            "signatureUrl": "https://repo.maven.apache.org/maven2/org/apache/tomcat/tomcat/11.0.7/tomcat-11.0.6.zip.asc",
+            "url": "https://repo.maven.apache.org/maven2/org/apache/tomcat/tomcat/11.0.7/tomcat-11.0.7.zip",
+            "signatureUrl": "https://repo.maven.apache.org/maven2/org/apache/tomcat/tomcat/11.0.7/tomcat-11.0.7.zip.asc",
         }
     ],
 }
@@ -81,6 +81,49 @@ LOG4J_COLLECTION = {
 }
 
 
+# v0.4.0 payload variants: distributionId replaces distributionType,
+# distributionIds replaces distributionTypes on artifacts.
+TOMCAT_RELEASE_V040 = {
+    "uuid": "605d0ecb-1057-40e4-9abf-c400b10f0345",
+    "version": "11.0.7",
+    "createdDate": "2025-05-07T18:08:00Z",
+    "releaseDate": "2025-05-12T18:08:00Z",
+    "identifiers": [{"idType": "PURL", "idValue": "pkg:maven/org.apache.tomcat/tomcat@11.0.7"}],
+    "distributions": [
+        {
+            "distributionId": "d7a8e9f0-1234-5678-abcd-ef0123456789",
+            "description": "Core binary distribution, zip archive",
+            "identifiers": [{"idType": "PURL", "idValue": "pkg:maven/org.apache.tomcat/tomcat@11.0.7?type=zip"}],
+            "checksums": [
+                {"algType": "SHA-256", "algValue": "9da736a1cdd27231e70187cbc67398d29ca0b714f885e7032da9f1fb247693c1"}
+            ],
+            "url": "https://repo.maven.apache.org/maven2/org/apache/tomcat/tomcat/11.0.7/tomcat-11.0.7.zip",
+        }
+    ],
+}
+
+LOG4J_COLLECTION_V040 = {
+    "uuid": "4c72fe22-9d83-4c2f-8eba-d6db484f32c8",
+    "version": 3,
+    "date": "2024-12-13T00:00:00Z",
+    "belongsTo": "COMPONENT_RELEASE",
+    "artifacts": [
+        {
+            "uuid": "1cb47b95-8bf8-3bad-a5a4-0d54d86e10ce",
+            "name": "Build SBOM",
+            "type": "BOM",
+            "distributionIds": ["d7a8e9f0-1234-5678-abcd-ef0123456789"],
+            "formats": [
+                {
+                    "mediaType": "application/vnd.cyclonedx+xml",
+                    "url": "https://repo.maven.apache.org/maven2/log4j-core-2.24.3-cyclonedx.xml",
+                }
+            ],
+        }
+    ],
+}
+
+
 class TestSpecExamples:
     @responses.activate
     def test_full_consumer_flow(self, base_url):
@@ -122,3 +165,59 @@ class TestSpecExamples:
 
             vdr = collection.artifacts[1]
             assert vdr.type == ArtifactType.VULNERABILITIES
+
+    @responses.activate
+    def test_v040_server_payload(self, base_url):
+        """v0.4.0 server sends distributionId and distributionIds instead of legacy fields."""
+        release_uuid = TOMCAT_RELEASE_V040["uuid"]
+
+        responses.get(
+            f"{base_url}/componentRelease/{release_uuid}",
+            json={
+                "release": TOMCAT_RELEASE_V040,
+                "latestCollection": LOG4J_COLLECTION_V040,
+            },
+        )
+
+        with TeaClient(base_url=base_url) as client:
+            cr = client.get_component_release(release_uuid)
+
+            # New v0.4.0 field
+            assert cr.release.distributions[0].distribution_id == "d7a8e9f0-1234-5678-abcd-ef0123456789"
+            # Legacy field absent
+            assert cr.release.distributions[0].distribution_type is None
+
+            # Artifact uses distributionIds (new) not distributionTypes (legacy)
+            sbom = cr.latest_collection.artifacts[0]
+            assert sbom.distribution_ids == ("d7a8e9f0-1234-5678-abcd-ef0123456789",)
+            assert sbom.distribution_types is None
+
+    @responses.activate
+    def test_mixed_server_payload(self, base_url):
+        """Transitional server sends both old and new fields — both preserved."""
+        mixed_release = {
+            **TOMCAT_RELEASE_V040,
+            "distributions": [
+                {
+                    "distributionId": "d7a8e9f0-1234-5678-abcd-ef0123456789",
+                    "distributionType": "zip",
+                    "description": "Both fields present",
+                }
+            ],
+        }
+        release_uuid = mixed_release["uuid"]
+
+        responses.get(
+            f"{base_url}/componentRelease/{release_uuid}",
+            json={
+                "release": mixed_release,
+                "latestCollection": LOG4J_COLLECTION,
+            },
+        )
+
+        with TeaClient(base_url=base_url) as client:
+            cr = client.get_component_release(release_uuid)
+            dist = cr.release.distributions[0]
+            # Both fields preserved
+            assert dist.distribution_id == "d7a8e9f0-1234-5678-abcd-ef0123456789"
+            assert dist.distribution_type == "zip"
