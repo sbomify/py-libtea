@@ -1,6 +1,6 @@
 [project]
 name = "libtea"
-version = "0.4.1"
+version = "0.5.0"
 description = "Python client library for the Transparency Exchange API (TEA)"
 authors = [{ name = "sbomify", email = "hello@sbomify.com" }]
 requires-python = ">=3.11"
