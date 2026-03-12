@@ -19,6 +19,8 @@ from libtea.models import (
     Component,
     ComponentReleaseWithCollection,
     DiscoveryInfo,
+    PaginatedComponentReleaseResponse,
+    PaginatedComponentResponse,
     PaginatedProductReleaseResponse,
     PaginatedProductResponse,
     Product,
@@ -82,6 +84,12 @@ class TeaClientProtocol(Protocol):
 
     def get_component_releases(self, uuid: str) -> list[Release]: ...
 
+    def list_components(self, *, page_offset: int = 0, page_size: int = 100) -> PaginatedComponentResponse: ...
+
+    def search_components(
+        self, id_type: str, id_value: str, *, page_offset: int = 0, page_size: int = 100
+    ) -> PaginatedComponentResponse: ...
+
     # --- Component Releases ---
 
     def get_component_release(self, uuid: str) -> ComponentReleaseWithCollection: ...
@@ -91,6 +99,14 @@ class TeaClientProtocol(Protocol):
     def get_component_release_collections(self, uuid: str) -> list[Collection]: ...
 
     def get_component_release_collection(self, uuid: str, version: int) -> Collection: ...
+
+    def list_component_releases(
+        self, *, page_offset: int = 0, page_size: int = 100
+    ) -> PaginatedComponentReleaseResponse: ...
+
+    def search_component_releases(
+        self, id_type: str, id_value: str, *, page_offset: int = 0, page_size: int = 100
+    ) -> PaginatedComponentReleaseResponse: ...
 
     # --- CLE ---
 
@@ -105,6 +121,8 @@ class TeaClientProtocol(Protocol):
     # --- Artifacts ---
 
     def get_artifact(self, uuid: str) -> Artifact: ...
+
+    def get_artifact_version(self, uuid: str, version: int) -> Artifact: ...
 
     def download_artifact(
         self,
@@ -124,6 +142,10 @@ class TeaClientProtocol(Protocol):
     ) -> Iterator[ProductRelease]: ...
 
     def iter_releases_for_product(self, uuid: str, *, page_size: int = 100) -> Iterator[ProductRelease]: ...
+
+    def iter_components(self, id_type: str, id_value: str, *, page_size: int = 100) -> Iterator[Component]: ...
+
+    def iter_component_releases(self, id_type: str, id_value: str, *, page_size: int = 100) -> Iterator[Release]: ...
 
     # --- Bulk fetch ---
 

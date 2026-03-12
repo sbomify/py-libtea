@@ -217,13 +217,54 @@ tea-cli list-collections [--component] UUID
 
 ---
 
+### search-components
+
+Search for components by identifier.
+
+```
+tea-cli search-components --id-type TYPE --id-value VALUE [--page-offset N] [--page-size N]
+```
+
+Options are the same as `search-products`.
+
+---
+
+### search-component-releases
+
+Search for component releases by identifier.
+
+```
+tea-cli search-component-releases --id-type TYPE --id-value VALUE [--page-offset N] [--page-size N]
+```
+
+Options are the same as `search-products`.
+
+---
+
 ### get-artifact
 
-Get artifact metadata by UUID.
+Get the latest revision of artifact metadata by UUID.
 
 ```
 tea-cli get-artifact UUID
 ```
+
+---
+
+### get-artifact-version
+
+Get a specific version of artifact metadata by UUID.
+
+```
+tea-cli get-artifact-version UUID VERSION
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| *UUID* | Artifact UUID. |
+| *VERSION* | Artifact version number (starts at 1). |
 
 ---
 
@@ -267,7 +308,7 @@ tea-cli get-cle [--entity TYPE] UUID
 
 ### conformance
 
-Run conformance checks against a TEA server. Validates that the server correctly implements the TEA specification by running 26 checks covering discovery, products, releases, components, artifacts, CLE, and cross-cutting concerns.
+Run conformance checks against a TEA server. Validates that the server correctly implements the TEA specification by running 27 checks covering discovery, products, releases, components, artifacts, CLE, and cross-cutting concerns.
 
 ```
 tea-cli conformance --base-url URL [OPTIONS]

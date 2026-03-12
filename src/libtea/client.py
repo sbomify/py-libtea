@@ -19,6 +19,7 @@ from libtea._hashing import WEAK_HASH_ALGORITHMS
 from libtea._http import TeaHttpClient, probe_endpoint
 from libtea._validation import (
     _validate,
+    _validate_artifact_version,
     _validate_collection_version,
     _validate_list,
     _validate_page_offset,
@@ -40,6 +41,8 @@ from libtea.models import (
     Component,
     ComponentReleaseWithCollection,
     DiscoveryInfo,
+    PaginatedComponentReleaseResponse,
+    PaginatedComponentResponse,
     PaginatedProductReleaseResponse,
     PaginatedProductResponse,
     Product,
@@ -388,6 +391,46 @@ class TeaClient:
         data = self._http.get_json(f"/component/{_validate_path_segment(uuid)}/releases")
         return _validate_list(Release, data)
 
+    def list_components(self, *, page_offset: int = 0, page_size: int = 100) -> PaginatedComponentResponse:
+        """List all components (no identifier filter).
+
+        Args:
+            page_offset: Zero-based page offset (default 0).
+            page_size: Number of results per page (default 100, max 10000).
+
+        Returns:
+            Paginated response containing components.
+        """
+        _validate_page_size(page_size)
+        _validate_page_offset(page_offset)
+        data = self._http.get_json(
+            "/components",
+            params={"pageOffset": page_offset, "pageSize": page_size},
+        )
+        return _validate(PaginatedComponentResponse, data)
+
+    def search_components(
+        self, id_type: str, id_value: str, *, page_offset: int = 0, page_size: int = 100
+    ) -> PaginatedComponentResponse:
+        """Search for components by identifier (e.g. PURL, CPE, TEI).
+
+        Args:
+            id_type: Identifier type (e.g. ``"PURL"``, ``"CPE"``, ``"TEI"``).
+            id_value: Identifier value to search for.
+            page_offset: Zero-based page offset (default 0).
+            page_size: Number of results per page (default 100, max 10000).
+
+        Returns:
+            Paginated response containing matching components.
+        """
+        _validate_page_size(page_size)
+        _validate_page_offset(page_offset)
+        data = self._http.get_json(
+            "/components",
+            params={"idType": id_type, "idValue": id_value, "pageOffset": page_offset, "pageSize": page_size},
+        )
+        return _validate(PaginatedComponentResponse, data)
+
     # --- Component Releases ---
 
     def get_component_release(self, uuid: str) -> ComponentReleaseWithCollection:
@@ -439,6 +482,48 @@ class TeaClient:
         _validate_collection_version(version)
         data = self._http.get_json(f"/componentRelease/{_validate_path_segment(uuid)}/collection/{version}")
         return _validate(Collection, data)
+
+    def list_component_releases(
+        self, *, page_offset: int = 0, page_size: int = 100
+    ) -> PaginatedComponentReleaseResponse:
+        """List all component releases (no identifier filter).
+
+        Args:
+            page_offset: Zero-based page offset (default 0).
+            page_size: Number of results per page (default 100, max 10000).
+
+        Returns:
+            Paginated response containing component releases.
+        """
+        _validate_page_size(page_size)
+        _validate_page_offset(page_offset)
+        data = self._http.get_json(
+            "/componentReleases",
+            params={"pageOffset": page_offset, "pageSize": page_size},
+        )
+        return _validate(PaginatedComponentReleaseResponse, data)
+
+    def search_component_releases(
+        self, id_type: str, id_value: str, *, page_offset: int = 0, page_size: int = 100
+    ) -> PaginatedComponentReleaseResponse:
+        """Search for component releases by identifier (e.g. PURL, CPE, TEI).
+
+        Args:
+            id_type: Identifier type (e.g. ``"PURL"``, ``"CPE"``, ``"TEI"``).
+            id_value: Identifier value to search for.
+            page_offset: Zero-based page offset (default 0).
+            page_size: Number of results per page (default 100, max 10000).
+
+        Returns:
+            Paginated response containing matching component releases.
+        """
+        _validate_page_size(page_size)
+        _validate_page_offset(page_offset)
+        data = self._http.get_json(
+            "/componentReleases",
+            params={"idType": id_type, "idValue": id_value, "pageOffset": page_offset, "pageSize": page_size},
+        )
+        return _validate(PaginatedComponentReleaseResponse, data)
 
     # --- CLE ---
 
@@ -493,7 +578,7 @@ class TeaClient:
     # --- Artifacts ---
 
     def get_artifact(self, uuid: str) -> Artifact:
-        """Get artifact metadata by UUID.
+        """Get the latest revision of artifact metadata by UUID.
 
         Args:
             uuid: Artifact UUID.
@@ -501,7 +586,21 @@ class TeaClient:
         Returns:
             The artifact with its formats and download URLs.
         """
-        data = self._http.get_json(f"/artifact/{_validate_path_segment(uuid)}")
+        data = self._http.get_json(f"/artifact/{_validate_path_segment(uuid)}/latest")
+        return _validate(Artifact, data)
+
+    def get_artifact_version(self, uuid: str, version: int) -> Artifact:
+        """Get a specific version of artifact metadata by UUID.
+
+        Args:
+            uuid: Artifact UUID.
+            version: Artifact version number (starts at 1).
+
+        Returns:
+            The artifact with its formats and download URLs.
+        """
+        _validate_artifact_version(version)
+        data = self._http.get_json(f"/artifact/{_validate_path_segment(uuid)}/{version}")
         return _validate(Artifact, data)
 
     def download_artifact(
@@ -652,6 +751,32 @@ class TeaClient:
             Each :class:`ProductRelease` for the product.
         """
         return self._paginate(self.get_product_releases, page_size, uuid=uuid)
+
+    def iter_components(self, id_type: str, id_value: str, *, page_size: int = 100) -> Iterator[Component]:
+        """Iterate over all components matching an identifier, auto-paginating.
+
+        Args:
+            id_type: Identifier type (e.g. ``"PURL"``, ``"CPE"``).
+            id_value: Identifier value to search for.
+            page_size: Number of results per page (default 100).
+
+        Yields:
+            Each matching :class:`Component`.
+        """
+        return self._paginate(self.search_components, page_size, id_type=id_type, id_value=id_value)
+
+    def iter_component_releases(self, id_type: str, id_value: str, *, page_size: int = 100) -> Iterator[Release]:
+        """Iterate over all component releases matching an identifier, auto-paginating.
+
+        Args:
+            id_type: Identifier type (e.g. ``"PURL"``, ``"CPE"``).
+            id_value: Identifier value to search for.
+            page_size: Number of results per page (default 100).
+
+        Yields:
+            Each matching :class:`Release`.
+        """
+        return self._paginate(self.search_component_releases, page_size, id_type=id_type, id_value=id_value)
 
     # --- Bulk fetch ---
 

@@ -46,6 +46,7 @@ Items that depend on external factors or are deferred indefinitely. These are **
 | Item | Notes |
 |------|-------|
 | Deprecation warnings for legacy fields | `distribution_type` and `distribution_types` are spec-deprecated in v0.4.0. Consider adding `DeprecationWarning` via `@model_validator(mode="after")` when only old fields are populated. |
-| Conformance checks for v0.4.0 required fields | `Artifact.uuid` and `ReleaseDistribution.distribution_id` are now required per spec. Add conformance checks that verify presence on v0.4.0 servers (gated behind version check). |
+| Conformance checks for v0.4.0 required fields | `Artifact.uuid` and `ReleaseDistribution.distribution_id` are now required per spec. Add conformance checks that verify presence on v0.4.0 servers (gated behind version check). Note: `Artifact.formats` check is implemented as `check_artifact_formats_required` (WARN status). |
+| Component conformance checks | Add conformance checks for `/components` and `/componentReleases` endpoints (list, search) to match the product-level checks. |
 
 **Action:** Address when a v0.4.0 server is available for testing.

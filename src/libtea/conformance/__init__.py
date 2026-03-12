@@ -4,7 +4,7 @@ Usage (programmatic)::
 
     from libtea.conformance import run_conformance
     result = run_conformance(base_url="https://tea.example.com/v1", tei="urn:tei:...")
-    print(f"{result.passed} passed, {result.failed} failed, {result.skipped} skipped")
+    print(f"{result.passed} passed, {result.failed} failed, {result.warned} warned, {result.skipped} skipped")
 
 Usage (CLI)::
 

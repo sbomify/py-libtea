@@ -21,3 +21,17 @@ def test_model_importable():
     assert Product is not None
     assert Collection is not None
     assert Artifact is not None
+
+
+def test_pagination_models_importable():
+    from libtea.models import PaginatedComponentReleaseResponse, PaginatedComponentResponse
+
+    assert PaginatedComponentResponse is not None
+    assert PaginatedComponentReleaseResponse is not None
+
+
+def test_lazy_import_pagination_models():
+    import libtea
+
+    assert libtea.PaginatedComponentResponse is not None
+    assert libtea.PaginatedComponentReleaseResponse is not None

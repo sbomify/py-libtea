@@ -80,3 +80,9 @@ def _validate_collection_version(version: int) -> None:
     """Validate that a collection version number is >= 1 per spec."""
     if version < 1:
         raise TeaValidationError(f"Collection version must be >= 1, got {version}")
+
+
+def _validate_artifact_version(version: int) -> None:
+    """Validate that an artifact version number is >= 1 per spec."""
+    if version < 1:
+        raise TeaValidationError(f"Artifact version must be >= 1, got {version}")

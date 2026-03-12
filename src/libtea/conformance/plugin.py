@@ -108,5 +108,9 @@ def test_tea_conformance(
     result = tea_check_fn(tea_client, tea_check_context)
     if result.status == CheckStatus.SKIP:
         pytest.skip(result.message)
+    elif result.status == CheckStatus.WARN:
+        import warnings
+
+        warnings.warn(f"{result.name}: {result.message}", stacklevel=2)
     elif result.status == CheckStatus.FAIL:
         pytest.fail(f"{result.name}: {result.message}")

@@ -13,6 +13,8 @@ from libtea.models import (
     Collection,
     Component,
     ComponentReleaseWithCollection,
+    PaginatedComponentReleaseResponse,
+    PaginatedComponentResponse,
     PaginatedProductReleaseResponse,
     PaginatedProductResponse,
     Product,
@@ -223,6 +225,205 @@ class TestListProductReleases:
             client.list_product_releases(page_offset=-1)
 
 
+class TestSearchComponents:
+    @responses.activate
+    def test_search_components_by_purl(self, client, base_url):
+        responses.get(
+            f"{base_url}/components",
+            json={
+                "timestamp": "2024-03-20T15:30:00Z",
+                "pageStartIndex": 0,
+                "pageSize": 100,
+                "totalResults": 1,
+                "results": [
+                    {
+                        "uuid": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+                        "name": "Test Component",
+                        "identifiers": [{"idType": "PURL", "idValue": "pkg:pypi/foo"}],
+                    },
+                ],
+            },
+        )
+        resp = client.search_components("PURL", "pkg:pypi/foo")
+        assert isinstance(resp, PaginatedComponentResponse)
+        assert resp.total_results == 1
+        assert resp.results[0].name == "Test Component"
+        request = responses.calls[0].request
+        assert "idType=PURL" in str(request.url)
+        assert "idValue=pkg" in str(request.url)
+
+    @responses.activate
+    def test_search_components_pagination(self, client, base_url):
+        responses.get(
+            f"{base_url}/components",
+            json={
+                "timestamp": "2024-03-20T15:30:00Z",
+                "pageStartIndex": 10,
+                "pageSize": 25,
+                "totalResults": 50,
+                "results": [],
+            },
+        )
+        resp = client.search_components("CPE", "cpe:2.3:a:vendor:product", page_offset=10, page_size=25)
+        request = responses.calls[0].request
+        assert "pageOffset=10" in str(request.url)
+        assert "pageSize=25" in str(request.url)
+        assert resp.page_start_index == 10
+
+    @responses.activate
+    def test_search_components_empty(self, client, base_url):
+        responses.get(
+            f"{base_url}/components",
+            json={
+                "timestamp": "2024-03-20T15:30:00Z",
+                "pageStartIndex": 0,
+                "pageSize": 100,
+                "totalResults": 0,
+                "results": [],
+            },
+        )
+        resp = client.search_components("PURL", "pkg:pypi/nonexistent")
+        assert resp.total_results == 0
+        assert resp.results == ()
+
+
+class TestListComponents:
+    @responses.activate
+    def test_list_components_no_filters(self, client, base_url):
+        responses.get(
+            f"{base_url}/components",
+            json={
+                "timestamp": "2024-03-20T15:30:00Z",
+                "pageStartIndex": 0,
+                "pageSize": 100,
+                "totalResults": 2,
+                "results": [
+                    {
+                        "uuid": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+                        "name": "Component A",
+                        "identifiers": [],
+                    },
+                    {
+                        "uuid": "d4e5f6a7-b8c9-0123-defa-234567890123",
+                        "name": "Component B",
+                        "identifiers": [],
+                    },
+                ],
+            },
+        )
+        resp = client.list_components()
+        assert isinstance(resp, PaginatedComponentResponse)
+        assert resp.total_results == 2
+        assert len(resp.results) == 2
+        request = responses.calls[0].request
+        assert "idType" not in str(request.url)
+        assert "idValue" not in str(request.url)
+
+    @responses.activate
+    def test_list_components_with_pagination(self, client, base_url):
+        responses.get(
+            f"{base_url}/components",
+            json={
+                "timestamp": "2024-03-20T15:30:00Z",
+                "pageStartIndex": 10,
+                "pageSize": 25,
+                "totalResults": 50,
+                "results": [],
+            },
+        )
+        resp = client.list_components(page_offset=10, page_size=25)
+        request = responses.calls[0].request
+        assert "pageOffset=10" in str(request.url)
+        assert "pageSize=25" in str(request.url)
+        assert resp.page_start_index == 10
+
+    def test_list_components_rejects_invalid_page_size(self, client):
+        with pytest.raises(TeaValidationError):
+            client.list_components(page_size=0)
+
+    def test_list_components_rejects_negative_offset(self, client):
+        with pytest.raises(TeaValidationError):
+            client.list_components(page_offset=-1)
+
+
+class TestSearchComponentReleases:
+    @responses.activate
+    def test_search_component_releases_by_purl(self, client, base_url):
+        responses.get(
+            f"{base_url}/componentReleases",
+            json={
+                "timestamp": "2024-03-20T15:30:00Z",
+                "pageStartIndex": 0,
+                "pageSize": 100,
+                "totalResults": 1,
+                "results": [
+                    {
+                        "uuid": "d4e5f6a7-b8c9-0123-defa-234567890123",
+                        "version": "1.0.0",
+                        "createdDate": "2024-01-01T00:00:00Z",
+                    }
+                ],
+            },
+        )
+        resp = client.search_component_releases("PURL", "pkg:pypi/foo@1.0.0")
+        assert isinstance(resp, PaginatedComponentReleaseResponse)
+        assert resp.total_results == 1
+        assert resp.results[0].version == "1.0.0"
+        request = responses.calls[0].request
+        assert "idType=PURL" in str(request.url)
+
+    @responses.activate
+    def test_search_component_releases_empty(self, client, base_url):
+        responses.get(
+            f"{base_url}/componentReleases",
+            json={
+                "timestamp": "2024-03-20T15:30:00Z",
+                "pageStartIndex": 0,
+                "pageSize": 100,
+                "totalResults": 0,
+                "results": [],
+            },
+        )
+        resp = client.search_component_releases("PURL", "pkg:pypi/nonexistent")
+        assert resp.total_results == 0
+        assert resp.results == ()
+
+
+class TestListComponentReleases:
+    @responses.activate
+    def test_list_component_releases_no_filters(self, client, base_url):
+        responses.get(
+            f"{base_url}/componentReleases",
+            json={
+                "timestamp": "2024-03-20T15:30:00Z",
+                "pageStartIndex": 0,
+                "pageSize": 100,
+                "totalResults": 1,
+                "results": [
+                    {
+                        "uuid": "d4e5f6a7-b8c9-0123-defa-234567890123",
+                        "version": "1.0.0",
+                        "createdDate": "2024-01-01T00:00:00Z",
+                    }
+                ],
+            },
+        )
+        resp = client.list_component_releases()
+        assert isinstance(resp, PaginatedComponentReleaseResponse)
+        assert resp.total_results == 1
+        request = responses.calls[0].request
+        assert "idType" not in str(request.url)
+        assert "idValue" not in str(request.url)
+
+    def test_list_component_releases_invalid_page_size(self, client):
+        with pytest.raises(TeaValidationError):
+            client.list_component_releases(page_size=0)
+
+    def test_list_component_releases_invalid_offset(self, client):
+        with pytest.raises(TeaValidationError):
+            client.list_component_releases(page_offset=-1)
+
+
 class TestProduct:
     @responses.activate
     def test_get_product(self, client, base_url):
@@ -395,7 +596,7 @@ class TestArtifact:
     @responses.activate
     def test_get_artifact(self, client, base_url):
         responses.get(
-            f"{base_url}/artifact/e5f6a7b8-c9d0-1234-efab-345678901234",
+            f"{base_url}/artifact/e5f6a7b8-c9d0-1234-efab-345678901234/latest",
             json={
                 "uuid": "e5f6a7b8-c9d0-1234-efab-345678901234",
                 "name": "SBOM",
@@ -412,6 +613,30 @@ class TestArtifact:
         artifact = client.get_artifact("e5f6a7b8-c9d0-1234-efab-345678901234")
         assert isinstance(artifact, Artifact)
         assert artifact.name == "SBOM"
+
+    @responses.activate
+    def test_get_artifact_version(self, client, base_url):
+        responses.get(
+            f"{base_url}/artifact/e5f6a7b8-c9d0-1234-efab-345678901234/2",
+            json={
+                "uuid": "e5f6a7b8-c9d0-1234-efab-345678901234",
+                "name": "SBOM",
+                "type": "BOM",
+                "version": 2,
+                "formats": [],
+            },
+        )
+        artifact = client.get_artifact_version("e5f6a7b8-c9d0-1234-efab-345678901234", 2)
+        assert isinstance(artifact, Artifact)
+        assert artifact.version == 2
+
+    def test_get_artifact_version_rejects_zero(self, client):
+        with pytest.raises(TeaValidationError, match="Artifact version must be >= 1"):
+            client.get_artifact_version("e5f6a7b8-c9d0-1234-efab-345678901234", 0)
+
+    def test_get_artifact_version_rejects_negative(self, client):
+        with pytest.raises(TeaValidationError, match="Artifact version must be >= 1"):
+            client.get_artifact_version("e5f6a7b8-c9d0-1234-efab-345678901234", -1)
 
 
 class TestSpecV040Fields:

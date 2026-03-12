@@ -31,6 +31,8 @@ from libtea.models import (
     ComponentReleaseWithCollection,
     DiscoveryInfo,
     Identifier,
+    PaginatedComponentReleaseResponse,
+    PaginatedComponentResponse,
     PaginatedProductReleaseResponse,
     PaginatedProductResponse,
     Product,
@@ -70,7 +72,14 @@ def _kv_panel(title: str, fields: list[tuple[str, str]], *, console: Console) ->
     console.print(Panel("\n".join(lines), title=escape(title), expand=False))
 
 
-def _pagination_header(data: PaginatedProductResponse | PaginatedProductReleaseResponse, *, console: Console) -> None:
+def _pagination_header(
+    data: PaginatedProductResponse
+    | PaginatedProductReleaseResponse
+    | PaginatedComponentResponse
+    | PaginatedComponentReleaseResponse,
+    *,
+    console: Console,
+) -> None:
     """Render a dim pagination summary line."""
     if not data.results:
         console.print(Text(f"No results (total: {data.total_results})", style="dim"))
@@ -182,6 +191,34 @@ def fmt_search_releases(data: PaginatedProductReleaseResponse, *, console: Conso
     console.print(tbl)
 
 
+def fmt_search_components(data: PaginatedComponentResponse, *, console: Console) -> None:
+    """Render paginated component search results."""
+    _pagination_header(data, console=console)
+    tbl = Table(title="Components")
+    tbl.add_column("UUID", style="cyan", no_wrap=True)
+    tbl.add_column("Name")
+    tbl.add_column("Identifiers")
+    for c in data.results:
+        tbl.add_row(escape(c.uuid), escape(c.name), escape(_fmt_identifiers(c.identifiers)))
+    console.print(tbl)
+
+
+def fmt_search_component_releases(data: PaginatedComponentReleaseResponse, *, console: Console) -> None:
+    """Render paginated component-release search results."""
+    _pagination_header(data, console=console)
+    tbl = Table(title="Component Releases")
+    tbl.add_column("UUID", style="cyan", no_wrap=True)
+    tbl.add_column("Version")
+    tbl.add_column("Component")
+    tbl.add_column("Release Date")
+    tbl.add_column("Pre-release")
+    for r in data.results:
+        tbl.add_row(
+            escape(r.uuid), escape(r.version), _esc(r.component_name), _esc(r.release_date), _esc(r.pre_release)
+        )
+    console.print(tbl)
+
+
 def fmt_product(data: Product, *, console: Console) -> None:
     """Render a single product as a panel."""
     _kv_panel(
@@ -269,11 +306,16 @@ def fmt_collection(data: Collection, *, console: Console) -> None:
 
 def fmt_artifact(data: Artifact, *, console: Console) -> None:
     """Render artifact metadata as a panel with formats table."""
-    _kv_panel(
-        "Artifact",
-        [("UUID", _opt(data.uuid)), ("Name", _opt(data.name)), ("Type", _opt(data.type))],
-        console=console,
-    )
+    fields: list[tuple[str, str]] = [
+        ("UUID", _opt(data.uuid)),
+        ("Name", _opt(data.name)),
+        ("Type", _opt(data.type)),
+    ]
+    if data.version is not None:
+        fields.append(("Version", str(data.version)))
+    if data.created_date is not None:
+        fields.append(("Created", str(data.created_date)))
+    _kv_panel("Artifact", fields, console=console)
     _formats_table(data.formats, console=console)
 
 
@@ -525,6 +567,7 @@ def format_conformance(result: ConformanceResult, *, verbose: bool = False, cons
         CheckStatus.PASS: "[green]PASS[/green]",
         CheckStatus.FAIL: "[red]FAIL[/red]",
         CheckStatus.SKIP: "[yellow]SKIP[/yellow]",
+        CheckStatus.WARN: "[bold yellow]WARN[/bold yellow]",
     }
 
     for check in result.checks:
@@ -542,6 +585,7 @@ def format_conformance(result: ConformanceResult, *, verbose: bool = False, cons
     console.print(
         f"Results: [green]{result.passed} passed[/green], "
         f"[red]{result.failed} failed[/red], "
+        f"[bold yellow]{result.warned} warned[/bold yellow], "
         f"[yellow]{result.skipped} skipped[/yellow]"
     )
 
@@ -558,6 +602,8 @@ _TYPE_FORMATTERS = {
     CLE: fmt_cle,
     PaginatedProductResponse: fmt_search_products,
     PaginatedProductReleaseResponse: fmt_search_releases,
+    PaginatedComponentResponse: fmt_search_components,
+    PaginatedComponentReleaseResponse: fmt_search_component_releases,
 }
 
 

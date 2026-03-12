@@ -4,7 +4,7 @@ import pytest
 import responses
 
 from libtea.client import TeaClient
-from libtea.models import Product, ProductRelease
+from libtea.models import Component, Product, ProductRelease, Release
 
 BASE_URL = "https://api.example.com/tea/v1"
 
@@ -188,6 +188,96 @@ class TestIterReleasesForProduct:
         assert all(isinstance(r, ProductRelease) for r in releases)
 
 
+def _component_json(uuid: str, name: str) -> dict:
+    return {"uuid": uuid, "name": name, "identifiers": []}
+
+
+def _component_release_json(uuid: str, version: str) -> dict:
+    return {
+        "uuid": uuid,
+        "version": version,
+        "createdDate": "2024-01-01T00:00:00Z",
+    }
+
+
+class TestIterComponents:
+    @responses.activate
+    def test_iter_components_single_page(self):
+        responses.get(
+            f"{BASE_URL}/components",
+            json={
+                "timestamp": "2024-03-20T15:30:00Z",
+                "pageStartIndex": 0,
+                "pageSize": 100,
+                "totalResults": 2,
+                "results": [
+                    _component_json("c3d4e5f6-a7b8-9012-cdef-123456789012", "C1"),
+                    _component_json("d4e5f6a7-b8c9-0123-defa-234567890123", "C2"),
+                ],
+            },
+        )
+        with TeaClient(BASE_URL) as client:
+            components = list(client.iter_components("PURL", "pkg:pypi/foo"))
+        assert len(components) == 2
+        assert all(isinstance(c, Component) for c in components)
+        assert components[0].name == "C1"
+        assert components[1].name == "C2"
+
+    @responses.activate
+    def test_iter_components_multi_page(self):
+        responses.get(
+            f"{BASE_URL}/components",
+            json={
+                "timestamp": "2024-03-20T15:30:00Z",
+                "pageStartIndex": 0,
+                "pageSize": 2,
+                "totalResults": 3,
+                "results": [
+                    _component_json("c3d4e5f6-a7b8-9012-cdef-123456789012", "C1"),
+                    _component_json("d4e5f6a7-b8c9-0123-defa-234567890123", "C2"),
+                ],
+            },
+        )
+        responses.get(
+            f"{BASE_URL}/components",
+            json={
+                "timestamp": "2024-03-20T15:30:00Z",
+                "pageStartIndex": 2,
+                "pageSize": 2,
+                "totalResults": 3,
+                "results": [
+                    _component_json("e5f6a7b8-c9d0-1234-efab-345678901234", "C3"),
+                ],
+            },
+        )
+        with TeaClient(BASE_URL) as client:
+            components = list(client.iter_components("PURL", "pkg:pypi/foo", page_size=2))
+        assert len(components) == 3
+        assert components[2].name == "C3"
+
+
+class TestIterComponentReleases:
+    @responses.activate
+    def test_iter_component_releases_single_page(self):
+        responses.get(
+            f"{BASE_URL}/componentReleases",
+            json={
+                "timestamp": "2024-03-20T15:30:00Z",
+                "pageStartIndex": 0,
+                "pageSize": 100,
+                "totalResults": 1,
+                "results": [
+                    _component_release_json("d4e5f6a7-b8c9-0123-defa-234567890123", "1.0.0"),
+                ],
+            },
+        )
+        with TeaClient(BASE_URL) as client:
+            releases = list(client.iter_component_releases("PURL", "pkg:pypi/foo"))
+        assert len(releases) == 1
+        assert all(isinstance(r, Release) for r in releases)
+        assert releases[0].version == "1.0.0"
+
+
 class TestPaginateValidation:
     def test_iter_products_rejects_zero_page_size(self):
         from libtea.exceptions import TeaValidationError
@@ -253,7 +343,7 @@ class TestBulkFetch:
         ]
         for uid in uuids:
             responses.get(
-                f"{BASE_URL}/artifact/{uid}",
+                f"{BASE_URL}/artifact/{uid}/latest",
                 json={"uuid": uid, "name": "SBOM", "type": "BOM", "formats": []},
             )
         with TeaClient(BASE_URL) as client:

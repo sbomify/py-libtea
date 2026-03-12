@@ -13,10 +13,14 @@ from libtea.models import (
     Collection,
     CollectionBelongsTo,
     CollectionUpdateReasonType,
+    ComplianceDocumentType,
+    Component,
     ErrorResponse,
     ErrorType,
     Identifier,
     IdentifierType,
+    PaginatedComponentReleaseResponse,
+    PaginatedComponentResponse,
     PaginatedProductResponse,
     Product,
     Release,
@@ -645,6 +649,8 @@ class TestInteropCompat:
         assert art.uuid is None
         assert art.name is None
         assert art.type is None
+        assert art.version is None
+        assert art.created_date is None
         assert art.formats == ()
 
     def test_artifact_partial_fields(self):
@@ -697,3 +703,77 @@ class TestErrorResponse:
         """_TeaModel uses extra='ignore' — tolerant parsing for robustness."""
         resp = ErrorResponse.model_validate({"error": "OBJECT_UNKNOWN", "detail": "something"})
         assert resp.error == ErrorType.OBJECT_UNKNOWN
+
+
+class TestComplianceDocumentType:
+    def test_fedramp_value(self):
+        assert ComplianceDocumentType.FEDRAMP == "FedRAMP"
+
+    def test_all_members_count(self):
+        assert len(ComplianceDocumentType) == 20
+
+
+class TestPaginatedComponentResponse:
+    def test_basic(self):
+        data = {
+            "timestamp": "2024-03-20T15:30:00Z",
+            "pageStartIndex": 0,
+            "pageSize": 100,
+            "totalResults": 1,
+            "results": [
+                {
+                    "uuid": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+                    "name": "Test Component",
+                    "identifiers": [{"idType": "PURL", "idValue": "pkg:pypi/test"}],
+                }
+            ],
+        }
+        resp = PaginatedComponentResponse.model_validate(data)
+        assert resp.total_results == 1
+        assert isinstance(resp.results[0], Component)
+        assert resp.results[0].name == "Test Component"
+
+    def test_empty_results(self):
+        data = {
+            "timestamp": "2024-03-20T15:30:00Z",
+            "pageStartIndex": 0,
+            "pageSize": 100,
+            "totalResults": 0,
+            "results": [],
+        }
+        resp = PaginatedComponentResponse.model_validate(data)
+        assert resp.total_results == 0
+        assert resp.results == ()
+
+
+class TestPaginatedComponentReleaseResponse:
+    def test_basic(self):
+        data = {
+            "timestamp": "2024-03-20T15:30:00Z",
+            "pageStartIndex": 0,
+            "pageSize": 100,
+            "totalResults": 1,
+            "results": [
+                {
+                    "uuid": "d4e5f6a7-b8c9-0123-defa-234567890123",
+                    "version": "1.0.0",
+                    "createdDate": "2024-01-01T00:00:00Z",
+                }
+            ],
+        }
+        resp = PaginatedComponentReleaseResponse.model_validate(data)
+        assert resp.total_results == 1
+        assert isinstance(resp.results[0], Release)
+        assert resp.results[0].version == "1.0.0"
+
+    def test_empty_results(self):
+        data = {
+            "timestamp": "2024-03-20T15:30:00Z",
+            "pageStartIndex": 0,
+            "pageSize": 100,
+            "totalResults": 0,
+            "results": [],
+        }
+        resp = PaginatedComponentReleaseResponse.model_validate(data)
+        assert resp.total_results == 0
+        assert resp.results == ()

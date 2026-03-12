@@ -34,7 +34,7 @@ class TestRunConformance:
         assert isinstance(result, ConformanceResult)
         assert result.base_url == BASE_URL
         assert len(result.checks) > 0
-        assert result.passed + result.failed + result.skipped == len(result.checks)
+        assert result.passed + result.failed + result.skipped + result.warned == len(result.checks)
 
     @responses.activate
     def test_passes_tei_to_context(self):
