@@ -108,7 +108,7 @@ class TestCLICommands:
     def test_get_artifact(self):
         uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
         responses.get(
-            f"{BASE_URL}/artifact/{uuid}",
+            f"{BASE_URL}/artifact/{uuid}/latest",
             json={"uuid": uuid, "name": "SBOM", "type": "BOM", "formats": []},
         )
         result = runner.invoke(app, ["--json", "get-artifact", uuid, "--base-url", BASE_URL])
@@ -149,6 +149,87 @@ class TestCLICommands:
             app, ["search-releases", "--id-type", "PURL", "--id-value", "pkg:pypi/test", "--base-url", BASE_URL]
         )
         assert result.exit_code == 0
+
+    @responses.activate
+    def test_search_components(self):
+        responses.get(
+            f"{BASE_URL}/components",
+            json={
+                "timestamp": "2024-01-01T00:00:00Z",
+                "pageStartIndex": 0,
+                "pageSize": 100,
+                "totalResults": 0,
+                "results": [],
+            },
+        )
+        result = runner.invoke(
+            app, ["search-components", "--id-type", "PURL", "--id-value", "pkg:pypi/test", "--base-url", BASE_URL]
+        )
+        assert result.exit_code == 0
+
+    @responses.activate
+    def test_search_components_json(self):
+        responses.get(
+            f"{BASE_URL}/components",
+            json={
+                "timestamp": "2024-01-01T00:00:00Z",
+                "pageStartIndex": 0,
+                "pageSize": 100,
+                "totalResults": 1,
+                "results": [
+                    {
+                        "uuid": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+                        "name": "Test Component",
+                        "identifiers": [{"idType": "PURL", "idValue": "pkg:pypi/test"}],
+                    }
+                ],
+            },
+        )
+        result = runner.invoke(
+            app,
+            ["--json", "search-components", "--id-type", "PURL", "--id-value", "pkg:pypi/test", "--base-url", BASE_URL],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["totalResults"] == 1
+
+    @responses.activate
+    def test_search_component_releases(self):
+        responses.get(
+            f"{BASE_URL}/componentReleases",
+            json={
+                "timestamp": "2024-01-01T00:00:00Z",
+                "pageStartIndex": 0,
+                "pageSize": 100,
+                "totalResults": 0,
+                "results": [],
+            },
+        )
+        result = runner.invoke(
+            app,
+            [
+                "search-component-releases",
+                "--id-type",
+                "PURL",
+                "--id-value",
+                "pkg:pypi/test",
+                "--base-url",
+                BASE_URL,
+            ],
+        )
+        assert result.exit_code == 0
+
+    @responses.activate
+    def test_get_artifact_version(self):
+        uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            f"{BASE_URL}/artifact/{uuid}/2",
+            json={"uuid": uuid, "name": "SBOM", "type": "BOM", "version": 2, "formats": []},
+        )
+        result = runner.invoke(app, ["--json", "get-artifact-version", uuid, "2", "--base-url", BASE_URL])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["name"] == "SBOM"
 
     @responses.activate
     def test_get_release_product(self):
@@ -530,7 +611,7 @@ class TestCLIMoreErrorPaths:
     @responses.activate
     def test_get_artifact_error(self):
         uuid = "d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
-        responses.get(f"{BASE_URL}/artifact/{uuid}", status=500)
+        responses.get(f"{BASE_URL}/artifact/{uuid}/latest", status=500)
         result = runner.invoke(app, ["get-artifact", uuid, "--base-url", BASE_URL])
         assert result.exit_code == 1
 

@@ -24,14 +24,17 @@ class TestConformanceResult:
                 CheckResult(name="b", status=CheckStatus.FAIL, message="bad"),
                 CheckResult(name="c", status=CheckStatus.SKIP, message="no data"),
                 CheckResult(name="d", status=CheckStatus.PASS),
+                CheckResult(name="e", status=CheckStatus.WARN, message="caution"),
             ],
         )
         assert result.passed == 2
         assert result.failed == 1
         assert result.skipped == 1
+        assert result.warned == 1
 
     def test_empty(self):
         result = ConformanceResult(base_url="https://example.com")
         assert result.passed == 0
         assert result.failed == 0
         assert result.skipped == 0
+        assert result.warned == 0

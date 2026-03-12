@@ -794,6 +794,74 @@ def get_cle(
     _output(result)
 
 
+@app.command("search-components")
+@click.option("--id-type", required=True, help="Identifier type (CPE, TEI, PURL)")
+@click.option("--id-value", required=True, help="Identifier value")
+@click.option("--page-offset", type=int, default=0, help="Page offset")
+@click.option("--page-size", type=int, default=100, help="Page size")
+@shared_options
+def search_components(
+    id_type: str,
+    id_value: str,
+    page_offset: int,
+    page_size: int,
+    base_url: str | None,
+    token: str | None,
+    auth: str | None,
+    domain: str | None,
+    timeout: float,
+    use_http: bool,
+    port: int | None,
+    allow_private_ips: bool,
+) -> None:
+    """Search for components by identifier.
+
+    \b
+    Examples:
+      tea-cli search-components --id-type PURL --id-value 'pkg:pypi/requests' --domain example.com
+      tea-cli search-components --id-type CPE --id-value 'cpe:2.3:a:*:requests:*' --base-url https://tea.example.com
+    """
+    with _client_session(
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+    ) as client:
+        result = client.search_components(id_type, id_value, page_offset=page_offset, page_size=page_size)
+    _output(result)
+
+
+@app.command("search-component-releases")
+@click.option("--id-type", required=True, help="Identifier type (CPE, TEI, PURL)")
+@click.option("--id-value", required=True, help="Identifier value")
+@click.option("--page-offset", type=int, default=0, help="Page offset")
+@click.option("--page-size", type=int, default=100, help="Page size")
+@shared_options
+def search_component_releases(
+    id_type: str,
+    id_value: str,
+    page_offset: int,
+    page_size: int,
+    base_url: str | None,
+    token: str | None,
+    auth: str | None,
+    domain: str | None,
+    timeout: float,
+    use_http: bool,
+    port: int | None,
+    allow_private_ips: bool,
+) -> None:
+    """Search for component releases by identifier.
+
+    \b
+    Examples:
+      tea-cli search-component-releases --id-type PURL --id-value 'pkg:pypi/requests' --domain example.com
+      tea-cli search-component-releases --id-type TEI --id-value 'urn:tei:...' --json
+    """
+    with _client_session(
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+    ) as client:
+        result = client.search_component_releases(id_type, id_value, page_offset=page_offset, page_size=page_size)
+    _output(result)
+
+
 @app.command("get-artifact")
 @click.argument("uuid")
 @shared_options
@@ -808,7 +876,7 @@ def get_artifact(
     port: int | None,
     allow_private_ips: bool,
 ) -> None:
-    """Get artifact metadata by UUID.
+    """Get the latest revision of artifact metadata by UUID.
 
     \b
     Examples:
@@ -819,6 +887,36 @@ def get_artifact(
         base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
     ) as client:
         result = client.get_artifact(uuid)
+    _output(result)
+
+
+@app.command("get-artifact-version")
+@click.argument("uuid")
+@click.argument("version", type=int)
+@shared_options
+def get_artifact_version(
+    uuid: str,
+    version: int,
+    base_url: str | None,
+    token: str | None,
+    auth: str | None,
+    domain: str | None,
+    timeout: float,
+    use_http: bool,
+    port: int | None,
+    allow_private_ips: bool,
+) -> None:
+    """Get a specific version of artifact metadata by UUID.
+
+    \b
+    Examples:
+      tea-cli get-artifact-version 550e8400-e29b-41d4-a716-446655440000 1 --base-url https://tea.example.com
+      tea-cli get-artifact-version 550e8400-e29b-41d4-a716-446655440000 2 --json
+    """
+    with _client_session(
+        base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+    ) as client:
+        result = client.get_artifact_version(uuid, version)
     _output(result)
 
 

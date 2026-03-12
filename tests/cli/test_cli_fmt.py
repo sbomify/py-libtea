@@ -22,6 +22,8 @@ from libtea._cli_fmt import (  # noqa: E402
     fmt_product,
     fmt_product_release,
     fmt_releases,
+    fmt_search_component_releases,
+    fmt_search_components,
     fmt_search_products,
     fmt_search_releases,
     format_output,
@@ -45,6 +47,8 @@ from libtea.models import (  # noqa: E402
     ComponentReleaseWithCollection,
     DiscoveryInfo,
     Identifier,
+    PaginatedComponentReleaseResponse,
+    PaginatedComponentResponse,
     PaginatedProductReleaseResponse,
     PaginatedProductResponse,
     Product,
@@ -58,7 +62,7 @@ from libtea.models import (  # noqa: E402
 def _capture(fn, *args, **kwargs) -> str:
     """Call a formatter with a StringIO-backed Console and return the output."""
     buf = StringIO()
-    console = Console(file=buf, force_terminal=True, width=200)
+    console = Console(file=buf, force_terminal=True, width=300)
     fn(*args, console=console, **kwargs)
     return buf.getvalue()
 
@@ -1020,3 +1024,65 @@ class TestFormatOutputFallbacks:
         output = _capture(format_output, eps, command="unknown_command")
         assert "tea1.example.com" in output
         assert "tea2.example.com" in output
+
+
+class TestArtifactsTableVersion:
+    """Test display of artifact version column in the artifacts table."""
+
+    def test_artifact_with_version(self):
+        data = Artifact(
+            uuid=UUID,
+            name="SBOM",
+            type="BOM",
+            version=3,
+            formats=[],
+        )
+        output = _capture(fmt_artifact, data)
+        assert "Artifact" in output
+        assert "SBOM" in output
+
+    def test_artifact_without_version(self):
+        data = Artifact(uuid=UUID, name="SBOM", type="BOM", formats=[])
+        output = _capture(fmt_artifact, data)
+        assert "Artifact" in output
+        assert "SBOM" in output
+
+
+class TestFmtSearchComponents:
+    def test_renders_pagination_and_table(self):
+        data = PaginatedComponentResponse(
+            timestamp="2024-01-01T00:00:00Z",
+            page_start_index=0,
+            page_size=100,
+            total_results=1,
+            results=[Component(uuid=UUID, name="Test Component", identifiers=[])],
+        )
+        output = _capture(fmt_search_components, data)
+        assert "Results 1-1 of 1" in output
+        assert "Test Component" in output
+
+    def test_empty_results(self):
+        data = PaginatedComponentResponse(
+            timestamp="2024-01-01T00:00:00Z",
+            page_start_index=0,
+            page_size=100,
+            total_results=0,
+            results=[],
+        )
+        output = _capture(fmt_search_components, data)
+        assert "No results (total: 0)" in output
+
+
+class TestFmtSearchComponentReleases:
+    def test_renders_table(self):
+        data = PaginatedComponentReleaseResponse(
+            timestamp="2024-01-01T00:00:00Z",
+            page_start_index=0,
+            page_size=100,
+            total_results=1,
+            results=[Release(uuid=UUID, version="1.0.0", created_date="2024-01-01T00:00:00Z", pre_release=True)],
+        )
+        output = _capture(fmt_search_component_releases, data)
+        assert "Component Releases" in output
+        assert "1.0.0" in output
+        assert "True" in output

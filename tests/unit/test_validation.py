@@ -2,6 +2,7 @@ import pytest
 
 from libtea._validation import (
     _MAX_PAGE_SIZE,
+    _validate_artifact_version,
     _validate_collection_version,
     _validate_page_offset,
     _validate_page_size,
@@ -120,3 +121,21 @@ class TestCollectionVersionValidation:
     def test_get_component_release_collection_rejects_zero(self, client):
         with pytest.raises(TeaValidationError, match="Collection version"):
             client.get_component_release_collection("d4e5f6a7-b8c9-0123-defa-234567890123", 0)
+
+
+class TestArtifactVersionValidation:
+    """Artifact version parameter is validated before making API calls."""
+
+    def test_validate_artifact_version_rejects_zero(self):
+        with pytest.raises(TeaValidationError, match="Artifact version must be >= 1"):
+            _validate_artifact_version(0)
+
+    def test_validate_artifact_version_rejects_negative(self):
+        with pytest.raises(TeaValidationError, match="Artifact version must be >= 1"):
+            _validate_artifact_version(-1)
+
+    def test_validate_artifact_version_accepts_one(self):
+        _validate_artifact_version(1)  # should not raise
+
+    def test_validate_artifact_version_accepts_large(self):
+        _validate_artifact_version(999)  # should not raise

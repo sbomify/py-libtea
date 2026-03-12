@@ -1,6 +1,6 @@
 # Conformance Test Suite
 
-The `libtea.conformance` module validates that a TEA server correctly implements the [Transparency Exchange API specification](https://github.com/CycloneDX/transparency-exchange-api). It runs 26 checks covering discovery, products, releases, components, artifacts, CLE, and cross-cutting concerns.
+The `libtea.conformance` module validates that a TEA server correctly implements the [Transparency Exchange API specification](https://github.com/CycloneDX/transparency-exchange-api). It runs 27 checks covering discovery, products, releases, components, artifacts, CLE, and cross-cutting concerns.
 
 ## Installation
 
@@ -24,7 +24,7 @@ result = run_conformance(
     timeout=30.0,
 )
 
-print(f"{result.passed} passed, {result.failed} failed, {result.skipped} skipped")
+print(f"{result.passed} passed, {result.failed} failed, {result.warned} warned, {result.skipped} skipped")
 
 for check in result.checks:
     if check.status.value == "fail":
@@ -49,7 +49,7 @@ for check in result.checks:
 | `timeout` | `float` | Request timeout in seconds (default: 30) |
 | `allow_private_ips` | `bool` | Allow private IPs in downloads (default: False) |
 
-**Returns:** `ConformanceResult` with `.passed`, `.failed`, `.skipped` counts and `.checks` list.
+**Returns:** `ConformanceResult` with `.passed`, `.failed`, `.warned`, `.skipped` counts and `.checks` list.
 
 ### CLI
 
@@ -129,6 +129,7 @@ Providing a TEI or explicit UUIDs seeds the context, enabling checks that depend
 Each check returns one of three statuses:
 - **PASS** — the server responded correctly
 - **FAIL** — the server's response violates the spec
+- **WARN** — the server responded but with a non-ideal configuration (e.g. artifact without formats)
 - **SKIP** — the check couldn't run (missing prerequisite UUID or no data on server)
 
 ## Check reference
@@ -170,11 +171,12 @@ Each check returns one of three statuses:
 | `component_release` | Get a component release with its latest collection |
 | `component_release_collections` | Get all collection versions for a component release |
 
-### Artifacts (1 check)
+### Artifacts (2 checks)
 
 | Check | Description |
 |-------|-------------|
 | `get_artifact` | Get artifact metadata by UUID |
+| `artifact_formats_required` | Warn if artifact has no formats |
 
 ### CLE (5 checks)
 

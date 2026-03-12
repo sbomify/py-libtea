@@ -44,6 +44,32 @@ class IdentifierType(StrEnum):
     CPE = "CPE"
     TEI = "TEI"
     PURL = "PURL"
+    COMPLIANCE_DOCUMENT = "COMPLIANCE_DOCUMENT"
+
+
+class ComplianceDocumentType(StrEnum):
+    """Compliance document types for the COMPLIANCE_DOCUMENT identifier type."""
+
+    SOC_2_TYPE_I = "SOC_2_TYPE_I"
+    SOC_2_TYPE_II = "SOC_2_TYPE_II"
+    SOC_3 = "SOC_3"
+    ISO_27001 = "ISO_27001"
+    ISO_27017 = "ISO_27017"
+    ISO_27018 = "ISO_27018"
+    ISO_27701 = "ISO_27701"
+    ISO_42001 = "ISO_42001"
+    PCI_DSS = "PCI_DSS"
+    HIPAA = "HIPAA"
+    FEDRAMP = "FedRAMP"
+    GDPR = "GDPR"
+    CSA_STAR = "CSA_STAR"
+    NIST_800_53 = "NIST_800_53"
+    NIST_800_171 = "NIST_800_171"
+    CMMC = "CMMC"
+    HITRUST = "HITRUST"
+    TISAX = "TISAX"
+    CYBER_ESSENTIALS = "CYBER_ESSENTIALS"
+    CYBER_ESSENTIALS_PLUS = "CYBER_ESSENTIALS_PLUS"
 
 
 class TeiType(StrEnum):
@@ -243,6 +269,8 @@ class Artifact(_TeaModel):
     uuid: str | None = None
     name: str | None = None
     type: ArtifactType | None = None
+    version: int | None = Field(default=None, ge=1)
+    created_date: datetime | None = None
     distribution_ids: tuple[str, ...] | None = None
     distribution_types: tuple[str, ...] | None = None
     formats: tuple[ArtifactFormat, ...] = ()
@@ -490,6 +518,26 @@ class PaginatedProductReleaseResponse(_TeaModel):
     results: tuple[ProductRelease, ...] = ()
 
 
+class PaginatedComponentResponse(_TeaModel):
+    """Paginated response containing a list of components."""
+
+    timestamp: datetime
+    page_start_index: int
+    page_size: int
+    total_results: int
+    results: tuple[Component, ...] = ()
+
+
+class PaginatedComponentReleaseResponse(_TeaModel):
+    """Paginated response containing a list of component releases."""
+
+    timestamp: datetime
+    page_start_index: int
+    page_size: int
+    total_results: int
+    results: tuple[Release, ...] = ()
+
+
 # --- Discovery types ---
 
 
@@ -541,6 +589,7 @@ __all__ = [
     "CLEEventType",
     "CollectionBelongsTo",
     "CollectionUpdateReasonType",
+    "ComplianceDocumentType",
     "ErrorType",
     "IdentifierType",
     "TeiType",
@@ -561,6 +610,8 @@ __all__ = [
     "DiscoveryInfo",
     "ErrorResponse",
     "Identifier",
+    "PaginatedComponentReleaseResponse",
+    "PaginatedComponentResponse",
     "PaginatedProductReleaseResponse",
     "PaginatedProductResponse",
     "Product",

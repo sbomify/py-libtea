@@ -10,6 +10,7 @@ class CheckStatus(StrEnum):
     PASS = "pass"
     FAIL = "fail"
     SKIP = "skip"
+    WARN = "warn"
 
 
 @dataclass(frozen=True)
@@ -40,3 +41,7 @@ class ConformanceResult:
     @property
     def skipped(self) -> int:
         return sum(1 for c in self.checks if c.status == CheckStatus.SKIP)
+
+    @property
+    def warned(self) -> int:
+        return sum(1 for c in self.checks if c.status == CheckStatus.WARN)

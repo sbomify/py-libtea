@@ -60,6 +60,10 @@ def _skip(name: str, msg: str) -> CheckResult:
     return CheckResult(name=name, status=CheckStatus.SKIP, message=msg)
 
 
+def _warn(name: str, msg: str) -> CheckResult:
+    return CheckResult(name=name, status=CheckStatus.WARN, message=msg)
+
+
 def _collect(ctx: CheckContext, uuid: str | None) -> None:
     """Append a UUID to the collected list if it looks non-empty."""
     if uuid:
@@ -375,6 +379,20 @@ def check_get_artifact(client: TeaClient, ctx: CheckContext) -> CheckResult:
     return _pass(name, f"Got artifact: {artifact.name or artifact.uuid}")
 
 
+def check_artifact_formats_required(client: TeaClient, ctx: CheckContext) -> CheckResult:
+    """Warn if an artifact has no formats (formats are recommended but not strictly required)."""
+    name = "artifact_formats_required"
+    if not ctx.artifact_uuid:
+        return _skip(name, "No artifact UUID available")
+    try:
+        artifact = client.get_artifact(ctx.artifact_uuid)
+    except TeaError as exc:
+        return _fail(name, f"get_artifact() failed: {exc}", details=str(exc))
+    if not artifact.formats:
+        return _warn(name, "Artifact has no formats")
+    return _pass(name, f"Artifact has {len(artifact.formats)} format(s)")
+
+
 # ---------------------------------------------------------------------------
 # CLE checks
 # ---------------------------------------------------------------------------
@@ -530,6 +548,7 @@ ALL_CHECKS: list[Callable[[TeaClient, CheckContext], CheckResult]] = [
     check_component_release_collections,
     # Artifacts
     check_get_artifact,
+    check_artifact_formats_required,
     # CLE
     check_product_cle,
     check_product_release_cle,

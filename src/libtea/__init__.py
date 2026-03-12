@@ -112,6 +112,9 @@ if TYPE_CHECKING:
         CollectionUpdateReasonType as CollectionUpdateReasonType,
     )
     from libtea.models import (
+        ComplianceDocumentType as ComplianceDocumentType,
+    )
+    from libtea.models import (
         Component as Component,
     )
     from libtea.models import (
@@ -134,6 +137,12 @@ if TYPE_CHECKING:
     )
     from libtea.models import (
         IdentifierType as IdentifierType,
+    )
+    from libtea.models import (
+        PaginatedComponentReleaseResponse as PaginatedComponentReleaseResponse,
+    )
+    from libtea.models import (
+        PaginatedComponentResponse as PaginatedComponentResponse,
     )
     from libtea.models import (
         PaginatedProductReleaseResponse as PaginatedProductReleaseResponse,
@@ -207,6 +216,7 @@ __all__ = [
     "CollectionBelongsTo",
     "CollectionUpdateReason",
     "CollectionUpdateReasonType",
+    "ComplianceDocumentType",
     "Component",
     "ComponentRef",
     "ComponentReleaseWithCollection",
@@ -215,6 +225,8 @@ __all__ = [
     "ErrorType",
     "Identifier",
     "IdentifierType",
+    "PaginatedComponentReleaseResponse",
+    "PaginatedComponentResponse",
     "PaginatedProductReleaseResponse",
     "PaginatedProductResponse",
     "Product",
@@ -266,6 +278,7 @@ _LAZY_IMPORTS: dict[str, str] = {
     "CollectionBelongsTo": "libtea.models",
     "CollectionUpdateReason": "libtea.models",
     "CollectionUpdateReasonType": "libtea.models",
+    "ComplianceDocumentType": "libtea.models",
     "Component": "libtea.models",
     "ComponentRef": "libtea.models",
     "ComponentReleaseWithCollection": "libtea.models",
@@ -274,6 +287,8 @@ _LAZY_IMPORTS: dict[str, str] = {
     "ErrorType": "libtea.models",
     "Identifier": "libtea.models",
     "IdentifierType": "libtea.models",
+    "PaginatedComponentReleaseResponse": "libtea.models",
+    "PaginatedComponentResponse": "libtea.models",
     "PaginatedProductReleaseResponse": "libtea.models",
     "PaginatedProductResponse": "libtea.models",
     "Product": "libtea.models",

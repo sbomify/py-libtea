@@ -5,6 +5,7 @@ from libtea.conformance._checks import (
     _ZERO_UUID,
     ALL_CHECKS,
     CheckContext,
+    check_artifact_formats_required,
     check_camel_case_fields,
     check_cle_event_ordering,
     check_component_cle,
@@ -1042,7 +1043,7 @@ class TestCheckComponentReleaseCollections:
 class TestCheckGetArtifact:
     @responses.activate
     def test_pass(self):
-        responses.get(f"{BASE_URL}/artifact/{_ARTIFACT_UUID}", json=_ARTIFACT_JSON)
+        responses.get(f"{BASE_URL}/artifact/{_ARTIFACT_UUID}/latest", json=_ARTIFACT_JSON)
         client = _make_client()
         ctx = CheckContext(artifact_uuid=_ARTIFACT_UUID)
         result = check_get_artifact(client, ctx)
@@ -1057,7 +1058,7 @@ class TestCheckGetArtifact:
 
     @responses.activate
     def test_fail_on_server_error(self):
-        responses.get(f"{BASE_URL}/artifact/{_ARTIFACT_UUID}", status=500)
+        responses.get(f"{BASE_URL}/artifact/{_ARTIFACT_UUID}/latest", status=500)
         client = _make_client()
         ctx = CheckContext(artifact_uuid=_ARTIFACT_UUID)
         result = check_get_artifact(client, ctx)
@@ -1066,7 +1067,7 @@ class TestCheckGetArtifact:
     @responses.activate
     def test_pass_artifact_without_name(self):
         artifact_no_name = {"uuid": _ARTIFACT_UUID, "formats": []}
-        responses.get(f"{BASE_URL}/artifact/{_ARTIFACT_UUID}", json=artifact_no_name)
+        responses.get(f"{BASE_URL}/artifact/{_ARTIFACT_UUID}/latest", json=artifact_no_name)
         client = _make_client()
         ctx = CheckContext(artifact_uuid=_ARTIFACT_UUID)
         result = check_get_artifact(client, ctx)
@@ -1357,6 +1358,45 @@ class TestCheckCamelCaseFields:
         ctx = CheckContext(product_uuid=_PRODUCT_UUID)
         result = check_camel_case_fields(client, ctx)
         assert result.status == CheckStatus.SKIP
+
+
+class TestCheckArtifactFormatsRequired:
+    @responses.activate
+    def test_pass_with_formats(self):
+        artifact_with_formats = {
+            "uuid": _ARTIFACT_UUID,
+            "name": "sbom.json",
+            "formats": [{"mediaType": "application/json", "url": "https://example.com/sbom.json"}],
+        }
+        responses.get(f"{BASE_URL}/artifact/{_ARTIFACT_UUID}/latest", json=artifact_with_formats)
+        client = _make_client()
+        ctx = CheckContext(artifact_uuid=_ARTIFACT_UUID)
+        result = check_artifact_formats_required(client, ctx)
+        assert result.status == CheckStatus.PASS
+        assert "1 format(s)" in result.message
+
+    @responses.activate
+    def test_warn_no_formats(self):
+        responses.get(f"{BASE_URL}/artifact/{_ARTIFACT_UUID}/latest", json=_ARTIFACT_JSON)
+        client = _make_client()
+        ctx = CheckContext(artifact_uuid=_ARTIFACT_UUID)
+        result = check_artifact_formats_required(client, ctx)
+        assert result.status == CheckStatus.WARN
+        assert "no formats" in result.message
+
+    def test_skip_no_uuid(self):
+        client = _make_client()
+        ctx = CheckContext()
+        result = check_artifact_formats_required(client, ctx)
+        assert result.status == CheckStatus.SKIP
+
+    @responses.activate
+    def test_fail_on_server_error(self):
+        responses.get(f"{BASE_URL}/artifact/{_ARTIFACT_UUID}/latest", status=500)
+        client = _make_client()
+        ctx = CheckContext(artifact_uuid=_ARTIFACT_UUID)
+        result = check_artifact_formats_required(client, ctx)
+        assert result.status == CheckStatus.FAIL
 
 
 class TestAllChecksRegistry:
