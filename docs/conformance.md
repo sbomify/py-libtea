@@ -126,7 +126,7 @@ For example:
 
 Providing a TEI or explicit UUIDs seeds the context, enabling checks that depend on those resources.
 
-Each check returns one of three statuses:
+Each check returns one of four statuses:
 - **PASS** — the server responded correctly
 - **FAIL** — the server's response violates the spec
 - **WARN** — the server responded but with a non-ideal configuration (e.g. artifact without formats)

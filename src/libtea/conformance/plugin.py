@@ -111,6 +111,6 @@ def test_tea_conformance(
     elif result.status == CheckStatus.WARN:
         import warnings
 
-        warnings.warn(f"{result.name}: {result.message}", stacklevel=1)
+        warnings.warn(f"{result.name}: {result.message}", stacklevel=2)
     elif result.status == CheckStatus.FAIL:
         pytest.fail(f"{result.name}: {result.message}")

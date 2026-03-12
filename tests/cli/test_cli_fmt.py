@@ -1026,8 +1026,8 @@ class TestFormatOutputFallbacks:
         assert "tea2.example.com" in output
 
 
-class TestArtifactsTableVersion:
-    """Test display of artifact version column in the artifacts table."""
+class TestArtifactVersionRendering:
+    """Test that fmt_artifact renders version and created_date when present."""
 
     def test_artifact_with_version(self):
         data = Artifact(
@@ -1038,14 +1038,13 @@ class TestArtifactsTableVersion:
             formats=[],
         )
         output = _capture(fmt_artifact, data)
-        assert "Artifact" in output
-        assert "SBOM" in output
+        assert "Version" in output
+        assert "3" in output
 
     def test_artifact_without_version(self):
         data = Artifact(uuid=UUID, name="SBOM", type="BOM", formats=[])
         output = _capture(fmt_artifact, data)
-        assert "Artifact" in output
-        assert "SBOM" in output
+        assert "Version" not in output
 
 
 class TestFmtSearchComponents:

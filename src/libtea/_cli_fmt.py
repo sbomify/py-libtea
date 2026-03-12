@@ -306,11 +306,16 @@ def fmt_collection(data: Collection, *, console: Console) -> None:
 
 def fmt_artifact(data: Artifact, *, console: Console) -> None:
     """Render artifact metadata as a panel with formats table."""
-    _kv_panel(
-        "Artifact",
-        [("UUID", _opt(data.uuid)), ("Name", _opt(data.name)), ("Type", _opt(data.type))],
-        console=console,
-    )
+    fields: list[tuple[str, str]] = [
+        ("UUID", _opt(data.uuid)),
+        ("Name", _opt(data.name)),
+        ("Type", _opt(data.type)),
+    ]
+    if data.version is not None:
+        fields.append(("Version", str(data.version)))
+    if data.created_date is not None:
+        fields.append(("Created", str(data.created_date)))
+    _kv_panel("Artifact", fields, console=console)
     _formats_table(data.formats, console=console)
 
 
