@@ -20,7 +20,7 @@ jobs:
       - name: Generate and Upload SBOM
         uses: sbomify/sbomify-action@master
         env:
-          TOKEN: ${{ secrets.SBOMIFY_STAGE_TOKEN }}
+          OIDC_AUDIENCE: stage.sbomify.com
           API_BASE_URL: 'https://stage.sbomify.com'
           COMPONENT_ID: 'rw6sHZjLbrDb'
           COMPONENT_NAME: 'py-libtea'
@@ -49,7 +49,7 @@ jobs:
       - name: Generate and Upload SBOM
         uses: sbomify/sbomify-action@master
         env:
-          TOKEN: ${{ secrets.SBOMIFY_TOKEN }}
+          OIDC_AUDIENCE: sbomify.com
           COMPONENT_ID: 'Xt5ZkVk3DSST'
           COMPONENT_NAME: 'py-libtea'
           COMPONENT_VERSION: ${{ github.ref_name }}
