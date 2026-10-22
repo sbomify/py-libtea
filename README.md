@@ -63,9 +63,7 @@ from libtea import TeaClient
 # Auto-discover the sbomify TEA server from its .well-known/tea
 with TeaClient.from_well_known("trust.sbomify.com") as client:
     # Discover a product by TEI
-    results = client.discover(
-        "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify"
-    )
+    results = client.discover("urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify")
     for info in results:
         print(info.product_release_uuid, info.servers)
 
@@ -102,9 +100,7 @@ from libtea import TeaClient
 
 # Discover sbomify products via TEI
 with TeaClient.from_well_known("trust.sbomify.com") as client:
-    results = client.discover(
-        "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify"
-    )
+    results = client.discover("urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify")
     for info in results:
         print(info.product_release_uuid, info.servers)
 ```
@@ -115,9 +111,7 @@ Low-level discovery functions are also available:
 from libtea.discovery import parse_tei, fetch_well_known, select_endpoint
 
 # Parse a TEI URN
-tei_type, domain, identifier = parse_tei(
-    "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify"
-)
+tei_type, domain, identifier = parse_tei("urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify")
 
 # Fetch and select an endpoint manually
 well_known = fetch_well_known("trust.sbomify.com")
@@ -138,8 +132,10 @@ with TeaClient.from_well_known("trust.sbomify.com") as client:
 
     # Search product releases (with pagination)
     releases = client.search_product_releases(
-        "PURL", "pkg:github/sbomify/sbomify",
-        page_offset=0, page_size=100,
+        "PURL",
+        "pkg:github/sbomify/sbomify",
+        page_offset=0,
+        page_size=100,
     )
     print(releases.total_results)
 ```
@@ -321,6 +317,7 @@ Use the `TeaClientProtocol` for dependency inversion in consumer code:
 
 ```python
 from libtea import TeaClientProtocol
+
 
 def fetch_sbom(client: TeaClientProtocol, product_uuid: str):
     """Accepts any object matching the TeaClient interface."""
