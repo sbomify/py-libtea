@@ -26,8 +26,9 @@ class TeaNotFoundError(TeaError):
     """HTTP 404 response from the TEA server.
 
     Attributes:
-        error_type: Optional TEA error type from the JSON response body
-            (e.g. ``"OBJECT_UNKNOWN"`` or ``"OBJECT_NOT_SHAREABLE"``).
+        error_type: Optional TEA ``error`` value from the JSON response body
+            (e.g. ``"OBJECT_UNKNOWN"``; ``"OBJECT_NOT_SHAREABLE"`` on 0.4.0).
+            Servers may send values not in :class:`~libtea.models.ErrorType`.
     """
 
     def __init__(self, message: str, *, error_type: str | None = None):
@@ -36,7 +37,17 @@ class TeaNotFoundError(TeaError):
 
 
 class TeaRequestError(TeaError):
-    """Unexpected HTTP redirect (3xx) or client error (4xx other than 401/403/404)."""
+    """Unexpected HTTP redirect (3xx) or client error (4xx other than 401/403/404).
+
+    Attributes:
+        error_type: Optional TEA ``error`` value from the JSON response body
+            (e.g. ``"INVALID_PAGE_TOKEN"``). Servers may send values not in
+            :class:`~libtea.models.ErrorType`.
+    """
+
+    def __init__(self, message: str, *, error_type: str | None = None):
+        super().__init__(message)
+        self.error_type = error_type
 
 
 class TeaServerError(TeaError):

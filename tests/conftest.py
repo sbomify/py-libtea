@@ -5,8 +5,9 @@ import pytest
 
 from libtea._http import TeaHttpClient
 from libtea.client import TeaClient
+from tests.spec_data import LEGACY_BASE_URL, V1_BASE_URL
 
-BASE_URL = "https://api.example.com/tea/v1"
+BASE_URL = "https://api.example.com/tea/v0.4.0"
 
 # Public IP used by getaddrinfo mock so SSRF validation passes for test hostnames.
 _FAKE_PUBLIC_ADDR = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
@@ -34,6 +35,20 @@ def base_url():
 @pytest.fixture
 def client():
     c = TeaClient(base_url=BASE_URL)
+    yield c
+    c.close()
+
+
+@pytest.fixture
+def v1():
+    c = TeaClient(V1_BASE_URL)
+    yield c
+    c.close()
+
+
+@pytest.fixture
+def legacy():
+    c = TeaClient(LEGACY_BASE_URL)
     yield c
     c.close()
 

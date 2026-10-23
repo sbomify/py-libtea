@@ -1,11 +1,12 @@
 """TEI parsing, .well-known/tea fetching, and SemVer-based endpoint selection.
 
-Implements the TEA discovery flow: parse a TEI URN, fetch the ``.well-known/tea``
+Implements the TEA discovery flow: parse a TEI, fetch the ``.well-known/tea``
 document from the TEI's domain, and select the best-matching endpoint using
 SemVer 2.0.0 comparison and priority-based ordering.
 """
 
 import logging
+import re
 import warnings
 from dataclasses import dataclass
 from typing import Any
@@ -23,6 +24,12 @@ from libtea.models import TeaEndpoint, TeaWellKnown, TeiType
 logger = logging.getLogger("libtea")
 
 _VALID_TEI_TYPES = frozenset(e.value for e in TeiType)
+
+_TEI_URI_PREFIX = "tei://"
+_TEI_URI_TYPE = re.compile(r"[a-z][a-z0-9]*")
+_TEI_EXPECTED_FORMAT = (
+    "Expected format: tei://<domain>/<type>/<identifier> (or legacy urn:tei:<type>:<domain>:<identifier>)"
+)
 
 
 def _endpoint_sort_key(pair: tuple[_SemVer, TeaEndpoint]) -> tuple[_SemVer, float]:
@@ -51,13 +58,35 @@ def _is_valid_domain(domain: str) -> bool:
     return True
 
 
-def parse_tei(tei: str) -> tuple[str, str, str]:
-    """Parse a TEI URN into (type, domain, identifier).
+def _parse_tei_uri(tei: str) -> tuple[str, str, str]:
+    """Parse ``tei://<domain>/<type>/<identifier>``; the type is checked syntactically, not against ``TeiType``."""
+    parts = tei[len(_TEI_URI_PREFIX) :].split("/")
+    if len(parts) == 3:
+        domain, tei_type, identifier = parts
+        # _is_valid_domain also rejects ":" (no port allowed)
+        if (
+            _is_valid_domain(domain)
+            and _TEI_URI_TYPE.fullmatch(tei_type)
+            and identifier
+            and not {"?", "#"} & set(identifier)
+            and "%2f" not in identifier.lower()
+        ):
+            return tei_type, domain, identifier
+    raise TeaDiscoveryError(f"Invalid TEI: {tei!r}. {_TEI_EXPECTED_FORMAT}")
 
-    TEI format: ``urn:tei:<type>:<domain>:<identifier>``
+
+def parse_tei(tei: str) -> tuple[str, str, str]:
+    """Parse a TEI into (type, domain, identifier).
+
+    Two forms are accepted:
+
+    - ``tei://<domain>/<type>/<identifier>`` (TEA 1.0.0). The scheme is case-sensitive, the domain is
+      returned unchanged, any lowercase alphanumeric ``type`` is accepted (the type registry may grow),
+      and the identifier may contain ``:`` but not ``/``, ``%2F``, ``?`` or ``#``.
+    - ``urn:tei:<type>:<domain>:<identifier>`` (TEA 0.4.0), where ``type`` must be a known :class:`TeiType`.
 
     Args:
-        tei: TEI URN string.
+        tei: TEI string.
 
     Returns:
         Tuple of (type, domain, identifier).
@@ -65,9 +94,11 @@ def parse_tei(tei: str) -> tuple[str, str, str]:
     Raises:
         TeaDiscoveryError: If the TEI format is invalid.
     """
+    if tei.startswith(_TEI_URI_PREFIX):
+        return _parse_tei_uri(tei)
     parts = tei.split(":")
     if len(parts) < 5 or parts[0] != "urn" or parts[1] != "tei":
-        raise TeaDiscoveryError(f"Invalid TEI: {tei!r}. Expected format: urn:tei:<type>:<domain>:<identifier>")
+        raise TeaDiscoveryError(f"Invalid TEI: {tei!r}. {_TEI_EXPECTED_FORMAT}")
 
     tei_type = parts[2]
     if tei_type not in _VALID_TEI_TYPES:
@@ -186,7 +217,7 @@ def fetch_well_known(
 
             try:
                 data = response.json()
-            except ValueError as exc:
+            except (ValueError, RecursionError) as exc:  # RecursionError: deep nesting
                 raise TeaDiscoveryError(f"Invalid JSON in .well-known/tea response from {domain}") from exc
         finally:
             if response is not None:
@@ -277,11 +308,28 @@ class VersionedEndpoint:
     """An endpoint paired with the server version it was matched on.
 
     Returned by :func:`select_best_endpoint` to let callers know which
-    version to use in the URL path (``v{matched_version}``).
+    version to use in the URL path (``v{matched_version}``). ``matched_version``
+    is the string exactly as the endpoint advertises it, build metadata included.
     """
 
     endpoint: TeaEndpoint
     matched_version: str
+
+
+def _advertised_version(ep: TeaEndpoint, version: str) -> str:
+    """Return the spelling ``ep`` advertises for ``version``.
+
+    SemVer equality ignores build metadata, so ``1.0.0`` equals ``1.0.0+build.5``; the spec requires
+    the path to use the string exactly as advertised, so recover it from the endpoint.
+    """
+    target = _SemVer.parse(version)
+    for v_str in ep.versions:
+        try:
+            if _SemVer.parse(v_str) == target:
+                return v_str
+        except ValueError:
+            continue
+    return version  # pragma: no cover — callers only pass a version the endpoint advertises
 
 
 def _is_compatible_version(client: _SemVer, server: _SemVer) -> bool:
@@ -327,7 +375,7 @@ def select_best_endpoint(well_known: TeaWellKnown, supported_version: str) -> Ve
     # Phase 1: exact match — delegate to select_endpoints
     try:
         exact = select_endpoints(well_known, supported_version)
-        return VersionedEndpoint(endpoint=exact[0], matched_version=supported_version)
+        return VersionedEndpoint(endpoint=exact[0], matched_version=_advertised_version(exact[0], supported_version))
     except TeaDiscoveryError:
         pass  # fall through to Phase 2 (compatible match)
 

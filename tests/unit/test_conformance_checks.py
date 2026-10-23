@@ -1,4 +1,5 @@
 import responses
+from responses import matchers
 
 from libtea.client import TeaClient
 from libtea.conformance._checks import (
@@ -23,6 +24,7 @@ from libtea.conformance._checks import (
     check_list_product_releases,
     check_list_products,
     check_pagination_fields,
+    check_pagination_token,
     check_product_cle,
     check_product_release_cle,
     check_product_release_collection_latest,
@@ -34,8 +36,17 @@ from libtea.conformance._checks import (
     check_uuid_format,
 )
 from libtea.conformance._types import CheckStatus
+from tests.spec_data import (
+    COMPONENT,
+    PRODUCT,
+    PRODUCT_RELEASE,
+    V1_BASE_URL,
+    V1_COLLECTION,
+    V1_PRODUCT_RELEASE,
+    product,
+)
 
-BASE_URL = "https://api.example.com/tea/v1"
+BASE_URL = "https://api.example.com/tea/v0.4.0"
 
 # Reusable response payloads ---------------------------------------------------
 
@@ -120,7 +131,7 @@ _PAGINATED_RELEASES_EMPTY = {
 
 _COLLECTION_JSON = {
     "version": 1,
-    "artifacts": [{"uuid": _ARTIFACT_UUID, "name": "sbom.json", "formats": []}],
+    "artifacts": [{"uuid": _ARTIFACT_UUID, "name": "sbom.json", "type": "BOM", "formats": []}],
 }
 
 _COLLECTION_NO_ARTIFACTS_JSON = {
@@ -154,6 +165,7 @@ _COMPONENT_RELEASE_NO_ARTIFACTS_JSON = {
 _ARTIFACT_JSON = {
     "uuid": _ARTIFACT_UUID,
     "name": "sbom.json",
+    "type": "BOM",
     "formats": [],
 }
 
@@ -256,6 +268,14 @@ class TestCheckDiscovery:
         assert result.status == CheckStatus.FAIL
 
     @responses.activate
+    def test_v1_fail_empty_array(self, v1):
+        responses.get(f"{V1_BASE_URL}/discovery", json=[])
+        result = check_discovery(v1, CheckContext(tei="tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1"))
+        assert result.status == CheckStatus.FAIL
+        assert "must be a non-empty array" in result.message
+        assert "Unexpected error" not in result.message
+
+    @responses.activate
     def test_does_not_overwrite_existing_uuid(self):
         responses.get(f"{BASE_URL}/discovery", json=_DISCOVERY_RESULT)
         client = _make_client()
@@ -274,6 +294,50 @@ class TestCheckDiscovery:
 
 
 class TestCheckDiscovery404:
+    @responses.activate
+    def test_v1_uses_tei_uri(self, v1):
+        responses.get(f"{V1_BASE_URL}/discovery", status=404, json={"error": "OBJECT_UNKNOWN"})
+        result = check_discovery_404(v1, CheckContext())
+        assert result.status == CheckStatus.PASS
+        assert len(responses.calls) == 1
+        assert "tei%3A%2F%2Fnonexistent.example.com%2Fuuid%2F" + _ZERO_UUID in responses.calls[0].request.url
+
+    @responses.activate
+    def test_v1_fail_on_404_without_tea_error_body(self, v1):
+        """A bare 404 (e.g. an unmounted path) is not a TEA "not found" answer on 1.0.0."""
+        responses.get(f"{V1_BASE_URL}/discovery", status=404, body="<html>nginx</html>")
+        result = check_discovery_404(v1, CheckContext())
+        assert result.status == CheckStatus.FAIL
+        assert "TEA 1.0.0 requires a TEA error body" in result.message
+
+    @responses.activate
+    def test_legacy_passes_on_404_without_tea_error_body(self, legacy):
+        responses.get(f"{BASE_URL}/discovery", status=404, body="<html>nginx</html>")
+        assert check_discovery_404(legacy, CheckContext()).status == CheckStatus.PASS
+
+    @responses.activate
+    def test_legacy_keeps_urn(self, legacy):
+        responses.get(f"{BASE_URL}/discovery", status=404, json={"error": "OBJECT_UNKNOWN"})
+        result = check_discovery_404(legacy, CheckContext())
+        assert result.status == CheckStatus.PASS
+        assert len(responses.calls) == 1
+        assert "urn%3Atei%3Auuid%3Anonexistent.example.com" in responses.calls[0].request.url
+
+    @responses.activate
+    def test_v1_fail_on_empty_array(self, v1):
+        responses.get(f"{V1_BASE_URL}/discovery", json=[])
+        result = check_discovery_404(v1, CheckContext())
+        assert result.status == CheckStatus.FAIL
+        assert "must be a non-empty array" in result.message
+        assert "Unexpected error" not in result.message
+
+    @responses.activate
+    def test_v1_fail_when_results_returned(self, v1):
+        responses.get(f"{V1_BASE_URL}/discovery", json=_DISCOVERY_RESULT)
+        result = check_discovery_404(v1, CheckContext())
+        assert result.status == CheckStatus.FAIL
+        assert result.message == "Expected 404, got 1 result(s)"
+
     @responses.activate
     def test_pass_on_404(self):
         responses.get(f"{BASE_URL}/discovery", json={"error": "OBJECT_UNKNOWN"}, status=404)
@@ -494,6 +558,25 @@ class TestCheckSearchProducts:
         assert result.status == CheckStatus.FAIL
         assert "no results" in result.message
 
+    @responses.activate
+    def test_v1_follows_token_past_empty_first_page(self, v1):
+        known = {**product(PRODUCT, "A"), "identifiers": [{"idType": "PURL", "idValue": "pkg:x"}]}
+        responses.get(f"{V1_BASE_URL}/product/{PRODUCT}", json=known)
+        search = {"idType": "PURL", "idValue": "pkg:x", "pageSize": "100"}
+        responses.get(
+            f"{V1_BASE_URL}/products",
+            match=[matchers.query_param_matcher(search)],
+            json={"hasNext": True, "nextPageToken": "t2", "results": []},
+        )
+        responses.get(
+            f"{V1_BASE_URL}/products",
+            match=[matchers.query_param_matcher({**search, "pageToken": "t2"})],
+            json={"hasNext": False, "results": [known]},
+        )
+        result = check_search_products(v1, CheckContext(product_uuid=PRODUCT))
+        assert result.status == CheckStatus.PASS
+        assert len(responses.calls) == 3
+
 
 class TestCheckProductReleases:
     @responses.activate
@@ -638,6 +721,28 @@ class TestCheckSearchProductReleases:
         assert result.status == CheckStatus.FAIL
         assert "no results" in result.message
 
+    @responses.activate
+    def test_v1_follows_token_past_empty_first_page(self, v1):
+        release = {**V1_PRODUCT_RELEASE, "identifiers": [{"idType": "PURL", "idValue": "pkg:x@1"}]}
+        responses.get(
+            f"{V1_BASE_URL}/productRelease/{PRODUCT_RELEASE}",
+            json={**release, "latestCollection": {**V1_COLLECTION, "belongsTo": "PRODUCT_RELEASE"}},
+        )
+        search = {"idType": "PURL", "idValue": "pkg:x@1", "pageSize": "100"}
+        responses.get(
+            f"{V1_BASE_URL}/productReleases",
+            match=[matchers.query_param_matcher(search)],
+            json={"hasNext": True, "nextPageToken": "t2", "results": []},
+        )
+        responses.get(
+            f"{V1_BASE_URL}/productReleases",
+            match=[matchers.query_param_matcher({**search, "pageToken": "t2"})],
+            json={"hasNext": False, "results": [release]},
+        )
+        result = check_search_product_releases(v1, CheckContext(product_release_uuid=PRODUCT_RELEASE))
+        assert result.status == CheckStatus.PASS
+        assert len(responses.calls) == 3
+
 
 class TestCheckGetProductRelease:
     @responses.activate
@@ -733,43 +838,6 @@ class TestCheckProductReleaseCollectionLatest:
         ctx = CheckContext(product_release_uuid=_RELEASE_UUID, artifact_uuid="existing-uuid")
         check_product_release_collection_latest(client, ctx)
         assert ctx.artifact_uuid == "existing-uuid"
-
-    @responses.activate
-    def test_skips_artifact_with_no_uuid(self):
-        collection_json = {
-            "version": 1,
-            "artifacts": [
-                {"name": "no-uuid.json", "formats": []},
-                {"uuid": _ARTIFACT_UUID, "name": "sbom.json", "formats": []},
-            ],
-        }
-        responses.get(
-            f"{BASE_URL}/productRelease/{_RELEASE_UUID}/collection/latest",
-            json=collection_json,
-        )
-        client = _make_client()
-        ctx = CheckContext(product_release_uuid=_RELEASE_UUID)
-        check_product_release_collection_latest(client, ctx)
-        assert ctx.artifact_uuid == _ARTIFACT_UUID
-
-    @responses.activate
-    def test_all_artifacts_without_uuid(self):
-        collection_json = {
-            "version": 1,
-            "artifacts": [
-                {"name": "no-uuid-1.json", "formats": []},
-                {"name": "no-uuid-2.json", "formats": []},
-            ],
-        }
-        responses.get(
-            f"{BASE_URL}/productRelease/{_RELEASE_UUID}/collection/latest",
-            json=collection_json,
-        )
-        client = _make_client()
-        ctx = CheckContext(product_release_uuid=_RELEASE_UUID)
-        result = check_product_release_collection_latest(client, ctx)
-        assert result.status == CheckStatus.PASS
-        assert ctx.artifact_uuid is None
 
 
 class TestCheckProductReleaseCollections:
@@ -966,49 +1034,6 @@ class TestCheckComponentRelease:
         check_component_release(client, ctx)
         assert ctx.artifact_uuid == "existing-uuid"
 
-    @responses.activate
-    def test_skips_artifact_with_no_uuid(self):
-        json_data = {
-            "release": _RELEASE_JSON,
-            "latestCollection": {
-                "version": 1,
-                "artifacts": [
-                    {"name": "no-uuid.json", "formats": []},
-                    {"uuid": _ARTIFACT_UUID, "name": "sbom.json", "formats": []},
-                ],
-            },
-        }
-        responses.get(
-            f"{BASE_URL}/componentRelease/{_COMPONENT_RELEASE_UUID}",
-            json=json_data,
-        )
-        client = _make_client()
-        ctx = CheckContext(component_release_uuid=_COMPONENT_RELEASE_UUID)
-        check_component_release(client, ctx)
-        assert ctx.artifact_uuid == _ARTIFACT_UUID
-
-    @responses.activate
-    def test_all_artifacts_without_uuid(self):
-        json_data = {
-            "release": _RELEASE_JSON,
-            "latestCollection": {
-                "version": 1,
-                "artifacts": [
-                    {"name": "no-uuid-1.json", "formats": []},
-                    {"name": "no-uuid-2.json", "formats": []},
-                ],
-            },
-        }
-        responses.get(
-            f"{BASE_URL}/componentRelease/{_COMPONENT_RELEASE_UUID}",
-            json=json_data,
-        )
-        client = _make_client()
-        ctx = CheckContext(component_release_uuid=_COMPONENT_RELEASE_UUID)
-        result = check_component_release(client, ctx)
-        assert result.status == CheckStatus.PASS
-        assert ctx.artifact_uuid is None
-
 
 class TestCheckComponentReleaseCollections:
     @responses.activate
@@ -1066,7 +1091,7 @@ class TestCheckGetArtifact:
 
     @responses.activate
     def test_pass_artifact_without_name(self):
-        artifact_no_name = {"uuid": _ARTIFACT_UUID, "formats": []}
+        artifact_no_name = {"uuid": _ARTIFACT_UUID, "type": "BOM", "formats": []}
         responses.get(f"{BASE_URL}/artifact/{_ARTIFACT_UUID}/latest", json=artifact_no_name)
         client = _make_client()
         ctx = CheckContext(artifact_uuid=_ARTIFACT_UUID)
@@ -1339,6 +1364,76 @@ class TestCheckPaginationFields:
         assert result.status == CheckStatus.FAIL
         assert "page_size" in result.details
 
+    @responses.activate
+    def test_v1_pass_within_page_size(self, v1):
+        responses.get(
+            f"{V1_BASE_URL}/products", json={"hasNext": True, "nextPageToken": "t", "results": [_PRODUCT_JSON]}
+        )
+        result = check_pagination_fields(v1, CheckContext())
+        assert result.status == CheckStatus.PASS
+        assert result.message == "Page size respected (1 result(s) for pageSize=10)"
+
+    @responses.activate
+    def test_v1_fail_when_page_overflows(self, v1):
+        responses.get(f"{V1_BASE_URL}/products", json={"hasNext": False, "results": [_PRODUCT_JSON] * 11})
+        result = check_pagination_fields(v1, CheckContext())
+        assert result.status == CheckStatus.FAIL
+        assert "got 11 results" in result.details
+
+
+class TestCheckPaginationToken:
+    @responses.activate
+    def test_pass(self, v1):
+        responses.get(
+            f"{V1_BASE_URL}/products",
+            match=[matchers.query_param_matcher({"pageSize": "1"})],
+            json={"hasNext": True, "nextPageToken": "t", "results": [product(PRODUCT, "A")]},
+        )
+        responses.get(
+            f"{V1_BASE_URL}/products",
+            match=[matchers.query_param_matcher({"pageSize": "1", "pageToken": "t"})],
+            json={"hasNext": False, "results": [product(COMPONENT, "B")]},
+        )
+        result = check_pagination_token(v1, CheckContext())
+        assert result.status == CheckStatus.PASS
+        assert len(responses.calls) == 2
+
+    @responses.activate
+    def test_same_page_fails(self, v1):
+        responses.get(
+            f"{V1_BASE_URL}/products",
+            match=[matchers.query_param_matcher({"pageSize": "1"})],
+            json={"hasNext": True, "nextPageToken": "t", "results": [product(PRODUCT, "A")]},
+        )
+        responses.get(
+            f"{V1_BASE_URL}/products",
+            match=[matchers.query_param_matcher({"pageSize": "1", "pageToken": "t"})],
+            json={"hasNext": False, "results": [product(PRODUCT, "A")]},
+        )
+        result = check_pagination_token(v1, CheckContext())
+        assert result.status == CheckStatus.FAIL
+        assert len(responses.calls) == 2
+
+    @responses.activate
+    def test_single_page_skips(self, v1):
+        responses.get(f"{V1_BASE_URL}/products", json={"hasNext": False, "results": []})
+        result = check_pagination_token(v1, CheckContext())
+        assert result.status == CheckStatus.SKIP
+        assert len(responses.calls) == 1
+
+    @responses.activate
+    def test_skips_legacy(self, legacy):
+        result = check_pagination_token(legacy, CheckContext())
+        assert result.status == CheckStatus.SKIP
+        assert len(responses.calls) == 0
+
+    @responses.activate
+    def test_fail_on_server_error(self, v1):
+        responses.get(f"{V1_BASE_URL}/products", status=500)
+        result = check_pagination_token(v1, CheckContext())
+        assert result.status == CheckStatus.FAIL
+        assert "list_products() failed" in result.message
+
 
 class TestCheckCamelCaseFields:
     def test_pass_with_collected_uuids(self):
@@ -1366,6 +1461,7 @@ class TestCheckArtifactFormatsRequired:
         artifact_with_formats = {
             "uuid": _ARTIFACT_UUID,
             "name": "sbom.json",
+            "type": "BOM",
             "formats": [{"mediaType": "application/json", "url": "https://example.com/sbom.json"}],
         }
         responses.get(f"{BASE_URL}/artifact/{_ARTIFACT_UUID}/latest", json=artifact_with_formats)
@@ -1431,7 +1527,9 @@ class TestAllChecksRegistry:
         assert ALL_CHECKS[1].__name__ == "check_discovery_404"
 
     def test_cross_cutting_checks_come_last(self):
-        last_three = [c.__name__ for c in ALL_CHECKS[-3:]]
-        assert "check_uuid_format" in last_three
-        assert "check_pagination_fields" in last_three
-        assert "check_camel_case_fields" in last_three
+        assert [c.__name__ for c in ALL_CHECKS[-4:]] == [
+            "check_uuid_format",
+            "check_pagination_fields",
+            "check_pagination_token",
+            "check_camel_case_fields",
+        ]

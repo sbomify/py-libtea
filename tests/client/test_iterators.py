@@ -2,11 +2,13 @@
 
 import pytest
 import responses
+from responses import matchers
 
 from libtea.client import TeaClient
+from libtea.exceptions import TeaServerError
 from libtea.models import Component, Product, ProductRelease, Release
 
-BASE_URL = "https://api.example.com/tea/v1"
+BASE_URL = "https://api.example.com/tea/v0.4.0"
 
 
 def _product_json(uuid: str, name: str) -> dict:
@@ -20,6 +22,42 @@ def _release_json(uuid: str, version: str) -> dict:
         "createdDate": "2024-01-01T00:00:00Z",
         "components": [],
     }
+
+
+def _legacy_page(start: int, total: int, names: list[str]) -> dict:
+    return {
+        "timestamp": "2024-03-20T15:30:00Z",
+        "pageStartIndex": start,
+        "pageSize": 2,
+        "totalResults": total,
+        "results": [_product_json("a1b2c3d4-e5f6-7890-abcd-ef1234567890", n) for n in names],
+    }
+
+
+class TestLegacyOffsetTokens:
+    @responses.activate
+    def test_second_page_requested_at_next_offset(self):
+        query = {"idType": "PURL", "idValue": "pkg:pypi/foo", "pageSize": "2"}
+        responses.get(
+            f"{BASE_URL}/products",
+            match=[matchers.query_param_matcher({**query, "pageOffset": "0"})],
+            json=_legacy_page(0, 3, ["P1", "P2"]),
+        )
+        responses.get(
+            f"{BASE_URL}/products",
+            match=[matchers.query_param_matcher({**query, "pageOffset": "2"})],
+            json=_legacy_page(2, 3, ["P3"]),
+        )
+        with TeaClient(BASE_URL) as client:
+            names = [p.name for p in client.iter_products("PURL", "pkg:pypi/foo", page_size=2)]
+        assert names == ["P1", "P2", "P3"]
+        assert len(responses.calls) == 2
+
+    @responses.activate
+    def test_server_ignoring_offset_raises(self):
+        responses.get(f"{BASE_URL}/products", json=_legacy_page(0, 3, ["P1", "P2"]))
+        with TeaClient(BASE_URL) as client, pytest.raises(TeaServerError, match="repeated"):
+            list(client.iter_products("PURL", "pkg:pypi/foo", page_size=2))
 
 
 class TestIterProducts:

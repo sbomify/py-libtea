@@ -17,7 +17,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from inspect import signature as _signature
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast
 from urllib.parse import urlparse
 
 import click
@@ -37,6 +37,8 @@ from libtea.models import (
 )
 
 logger = logging.getLogger("libtea")
+
+_TEI_PREFIXES = ("tei://", "urn:tei:")
 
 
 def _configure_logging(*, verbose: bool, debug: bool) -> None:
@@ -85,9 +87,7 @@ def shared_options(fn):  # type: ignore[no-untyped-def]
         click.option("--no-input", is_flag=True, help="Never prompt for input (for scripts and CI)"),
     ]
     if not has_positional_tei:
-        options.append(
-            click.option("--tei", "tei_urn", default=None, help="TEI URN for base-url/domain auto-discovery")
-        )
+        options.append(click.option("--tei", "tei_urn", default=None, help="TEI for base-url/domain auto-discovery"))
     options.extend(
         [
             click.option("--port", type=int, default=None, help="Port for well-known resolution"),
@@ -181,9 +181,9 @@ def _parse_basic_auth(auth: str | None) -> tuple[str, str] | None:
 
 
 def _domain_from_tei(tei: str | None) -> str | None:
-    """Extract the domain component from a TEI URN for auto-discovery.
+    """Extract the domain component from a TEI (``tei://`` URI or legacy URN form) for auto-discovery.
 
-    Returns ``None`` if ``tei`` is falsy or not a valid TEI URN.
+    Returns ``None`` if ``tei`` is falsy or not a valid TEI.
     """
     if not tei:
         return None
@@ -209,7 +209,7 @@ def _build_client(
     """Build a TeaClient from CLI options.
 
     When neither --base-url nor --domain is provided, the domain is extracted
-    from the TEI URN (if given) and used for .well-known/tea discovery.
+    from the TEI (if given) and used for .well-known/tea discovery.
     """
     # Fall back to --tei from shared_options (stored in ctx.obj) when tei is not provided directly
     if not tei:
@@ -321,7 +321,8 @@ def _output(data: Any, *, command: str | None = None) -> None:
     """Output ``data`` as JSON (when ``--json``) or rich-formatted tables/panels.
 
     In JSON mode, Pydantic models are serialized via ``model_dump(mode="json",
-    by_alias=True)`` to produce camelCase keys matching the TEA API wire format.
+    by_alias=True)``: libtea's model shape with camelCase aliases, stable across
+    TEA spec versions (not a byte-for-byte copy of any server's wire format).
     """
     output_file, no_color = _get_output_options()
     if _is_json_output():
@@ -358,8 +359,8 @@ def _error(message: str) -> NoReturn:
 
 \b
 Quick start:
-  tea-cli inspect 'urn:tei:purl:example.com:pkg:pypi/requests@2.31.0'
-  tea-cli download 'urn:tei:purl:example.com:pkg:pypi/requests@2.31.0' ./sboms/
+  tea-cli inspect 'tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1'
+  tea-cli download 'tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1' ./sboms/
 
 \b
 Environment variables:
@@ -428,11 +429,15 @@ def app(
 
 
 @app.command()
-@click.argument("tei")
+@click.argument("tei", required=False)
+@click.option(
+    "--purl", default=None, help="Resolve a PURL on the server given by --base-url (TEA 1.x), instead of a TEI"
+)
 @click.option("--quiet", "-q", is_flag=True, help="Output only UUIDs, one per line")
 @shared_options
 def discover(
-    tei: str,
+    tei: str | None,
+    purl: str | None,
     quiet: bool,
     base_url: str | None,
     token: str | None,
@@ -443,17 +448,22 @@ def discover(
     port: int | None,
     allow_private_ips: bool,
 ) -> None:
-    """Resolve a TEI to product release UUID(s).
+    """Resolve a TEI, or a PURL (--purl, TEA 1.x), to product release UUID(s).
 
     \b
     Examples:
-      tea-cli discover 'urn:tei:purl:example.com:pkg:pypi/requests@2.31.0' --domain example.com
-      tea-cli discover 'urn:tei:purl:example.com:pkg:pypi/requests@2.31.0' --quiet
+      tea-cli discover 'tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1' --domain example.com
+      tea-cli discover 'tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1' --quiet
+      tea-cli discover --purl 'pkg:pypi/requests@2.31.0' --base-url https://tea.example.com/tea/v1.0.0
     """
+    if (tei is None) == (purl is None):
+        raise click.UsageError("Provide exactly one of TEI or --purl")
+    if purl is not None and not base_url:
+        _error("--purl requires --base-url")
     with _client_session(
         base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
     ) as client:
-        result = client.discover(tei)
+        result = client.discover(tei, purl=purl)
     if quiet:
         for d in result:
             print(d.product_release_uuid)
@@ -464,13 +474,13 @@ def discover(
 @app.command("search-products")
 @click.option("--id-type", required=True, help="Identifier type (CPE, TEI, PURL)")
 @click.option("--id-value", required=True, help="Identifier value")
-@click.option("--page-offset", type=int, default=0, help="Page offset")
+@click.option("--page-token", default=None, help="Token from the previous page (an offset on TEA 0.x servers)")
 @click.option("--page-size", type=int, default=100, help="Page size")
 @shared_options
 def search_products(
     id_type: str,
     id_value: str,
-    page_offset: int,
+    page_token: str | None,
     page_size: int,
     base_url: str | None,
     token: str | None,
@@ -491,20 +501,20 @@ def search_products(
     with _client_session(
         base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
     ) as client:
-        result = client.search_products(id_type, id_value, page_offset=page_offset, page_size=page_size)
+        result = client.search_products(id_type, id_value, page_token=page_token, page_size=page_size)
     _output(result)
 
 
 @app.command("search-releases")
 @click.option("--id-type", required=True, help="Identifier type (CPE, TEI, PURL)")
 @click.option("--id-value", required=True, help="Identifier value")
-@click.option("--page-offset", type=int, default=0, help="Page offset")
+@click.option("--page-token", default=None, help="Token from the previous page (an offset on TEA 0.x servers)")
 @click.option("--page-size", type=int, default=100, help="Page size")
 @shared_options
 def search_releases(
     id_type: str,
     id_value: str,
-    page_offset: int,
+    page_token: str | None,
     page_size: int,
     base_url: str | None,
     token: str | None,
@@ -520,12 +530,12 @@ def search_releases(
     \b
     Examples:
       tea-cli search-releases --id-type PURL --id-value 'pkg:pypi/requests' --domain example.com
-      tea-cli search-releases --id-type TEI --id-value 'urn:tei:purl:example.com:pkg:pypi/requests@2.31.0' --json
+      tea-cli search-releases --id-type TEI --id-value 'tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1' --json
     """
     with _client_session(
         base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
     ) as client:
-        result = client.search_product_releases(id_type, id_value, page_offset=page_offset, page_size=page_size)
+        result = client.search_product_releases(id_type, id_value, page_token=page_token, page_size=page_size)
     _output(result)
 
 
@@ -634,12 +644,12 @@ def get_collection(
 
 @app.command("get-product-releases")
 @click.argument("uuid")
-@click.option("--page-offset", type=int, default=0, help="Page offset")
+@click.option("--page-token", default=None, help="Token from the previous page (an offset on TEA 0.x servers)")
 @click.option("--page-size", type=int, default=100, help="Page size")
 @shared_options
 def get_product_releases(
     uuid: str,
-    page_offset: int,
+    page_token: str | None,
     page_size: int,
     base_url: str | None,
     token: str | None,
@@ -660,7 +670,7 @@ def get_product_releases(
     with _client_session(
         base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
     ) as client:
-        result = client.get_product_releases(uuid, page_offset=page_offset, page_size=page_size)
+        result = client.get_product_releases(uuid, page_token=page_token, page_size=page_size)
     _output(result)
 
 
@@ -797,13 +807,13 @@ def get_cle(
 @app.command("search-components")
 @click.option("--id-type", required=True, help="Identifier type (CPE, TEI, PURL)")
 @click.option("--id-value", required=True, help="Identifier value")
-@click.option("--page-offset", type=int, default=0, help="Page offset")
+@click.option("--page-token", default=None, help="Token from the previous page (an offset on TEA 0.x servers)")
 @click.option("--page-size", type=int, default=100, help="Page size")
 @shared_options
 def search_components(
     id_type: str,
     id_value: str,
-    page_offset: int,
+    page_token: str | None,
     page_size: int,
     base_url: str | None,
     token: str | None,
@@ -824,20 +834,20 @@ def search_components(
     with _client_session(
         base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
     ) as client:
-        result = client.search_components(id_type, id_value, page_offset=page_offset, page_size=page_size)
+        result = client.search_components(id_type, id_value, page_token=page_token, page_size=page_size)
     _output(result)
 
 
 @app.command("search-component-releases")
 @click.option("--id-type", required=True, help="Identifier type (CPE, TEI, PURL)")
 @click.option("--id-value", required=True, help="Identifier value")
-@click.option("--page-offset", type=int, default=0, help="Page offset")
+@click.option("--page-token", default=None, help="Token from the previous page (an offset on TEA 0.x servers)")
 @click.option("--page-size", type=int, default=100, help="Page size")
 @shared_options
 def search_component_releases(
     id_type: str,
     id_value: str,
-    page_offset: int,
+    page_token: str | None,
     page_size: int,
     base_url: str | None,
     token: str | None,
@@ -853,12 +863,12 @@ def search_component_releases(
     \b
     Examples:
       tea-cli search-component-releases --id-type PURL --id-value 'pkg:pypi/requests' --domain example.com
-      tea-cli search-component-releases --id-type TEI --id-value 'urn:tei:...' --json
+      tea-cli search-component-releases --id-type TEI --id-value 'tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1' --json
     """
     with _client_session(
         base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
     ) as client:
-        result = client.search_component_releases(id_type, id_value, page_offset=page_offset, page_size=page_size)
+        result = client.search_component_releases(id_type, id_value, page_token=page_token, page_size=page_size)
     _output(result)
 
 
@@ -1052,12 +1062,12 @@ def _download_from_tei(
         collection = client.get_product_release_collection_latest(disc.product_release_uuid)
         for art_idx, artifact in enumerate(collection.artifacts):
             for fmt in artifact.formats:
-                if not fmt.url:
+                if not fmt.url and client.is_legacy:
                     continue
                 filename = _artifact_filename(fmt, artifact, art_idx)
                 filename = _deduplicate_filename(filename, seen_filenames)
                 dest_path = dest_dir / filename
-                checksums = [cs for cs in fmt.checksums if cs.algorithm_type and cs.algorithm_value]
+                checksums = list(fmt.checksums)
                 attempted += 1
                 if dry_run:
                     if not quiet:
@@ -1065,12 +1075,22 @@ def _download_from_tei(
                     downloaded += 1
                     continue
                 try:
-                    client.download_artifact(
-                        fmt.url,
-                        dest_path,
-                        verify_checksums=checksums or None,
-                        max_download_bytes=max_download_bytes,
-                    )
+                    if fmt.url:
+                        client.download_artifact(
+                            fmt.url,
+                            dest_path,
+                            verify_checksums=checksums or None,
+                            max_download_bytes=max_download_bytes,
+                        )
+                    else:  # TEA 1.x: the server hosts formats without a url
+                        client.download_artifact_content(
+                            artifact.uuid,
+                            dest_path,
+                            media_type=cast(str, fmt.media_type),  # required on TEA 1.x
+                            version=artifact.version,
+                            verify_checksums=checksums or None,
+                            max_download_bytes=max_download_bytes,
+                        )
                     if not quiet:
                         checksum_note = " (checksum OK)" if checksums else ""
                         print(f"Downloaded {filename}{checksum_note}", file=sys.stderr)
@@ -1115,9 +1135,9 @@ def download(
     port: int | None,
     allow_private_ips: bool,
 ) -> None:
-    """Fetch artifact(s) from a URL or TEI URN.
+    """Fetch artifact(s) from a URL or TEI.
 
-    SOURCE is a direct artifact URL or a TEI URN (urn:tei:...).
+    SOURCE is a direct artifact URL or a TEI (tei://... or urn:tei:...).
 
     \b
     URL mode:   download <url> <destination-file>
@@ -1128,7 +1148,7 @@ def download(
 
     \b
     Examples:
-      tea-cli download 'urn:tei:purl:example.com:pkg:pypi/requests@2.31.0' ./sboms/
+      tea-cli download 'tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1' ./sboms/
       tea-cli download https://tea.example.com/artifacts/abc/download output.json --checksum SHA-256:abcdef...
     """
     ctx = click.get_current_context()
@@ -1136,7 +1156,7 @@ def download(
     if output_file:
         raise click.UsageError("--output is not supported by 'download'; use DESTINATION to specify the output path")
 
-    if source.startswith("urn:tei:"):
+    if source.startswith(_TEI_PREFIXES):
         if checksum:
             raise click.UsageError("--checksum is not supported in TEI mode (checksums come from server metadata)")
         if destination is not None and Path(destination).is_file():
@@ -1162,7 +1182,7 @@ def download(
 
     # URL mode: existing direct download behavior
     if dry_run:
-        raise click.UsageError("--dry-run is only supported in TEI mode (urn:tei:... source)")
+        raise click.UsageError("--dry-run is only supported in TEI mode (tei://... or urn:tei:... source)")
     if destination is None:
         raise click.UsageError("DESTINATION is required when downloading from a URL")
     dest_path = Path(destination)
@@ -1183,7 +1203,10 @@ def download(
                 _error(
                     f"Unknown checksum algorithm: {alg!r}. Supported: {', '.join(e.value for e in ChecksumAlgorithm)}"
                 )
-            checksums.append(Checksum(algorithm_type=alg_enum, algorithm_value=value))
+            # The user supplied this hash; it is not server data, so TEA 1.0.0 response rules (e.g. no MD5) don't apply.
+            checksums.append(
+                Checksum.model_validate({"algType": alg_enum, "algValue": value}, context={"tea_legacy": True})
+            )
 
     try:
         with _client_session(
@@ -1220,8 +1243,8 @@ def inspect(
 
     \b
     Examples:
-      tea-cli inspect 'urn:tei:purl:example.com:pkg:pypi/requests@2.31.0' --domain example.com
-      tea-cli inspect 'urn:tei:purl:example.com:pkg:pypi/requests@2.31.0' --json
+      tea-cli inspect 'tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1' --domain example.com
+      tea-cli inspect 'tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1' --json
     """
     with _client_session(
         base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
@@ -1242,7 +1265,8 @@ def inspect(
                     try:
                         releases = client.get_component_releases(comp_ref.uuid)
                         if releases:
-                            latest = releases[0]
+                            # TEA 1.0.0 lists releases oldest first; pick by createdDate, not position.
+                            latest = max(releases, key=lambda r: r.created_date)
                             cr = client.get_component_release(latest.uuid)
                             comp_data["resolvedRelease"] = cr.model_dump(mode="json", by_alias=True)
                             comp_data["resolvedNote"] = "latest release (not pinned)"
@@ -1319,7 +1343,7 @@ def conformance(
 
     \b
     Examples:
-      tea-cli conformance --base-url https://tea.example.com --tei 'urn:tei:purl:example.com:pkg:pypi/requests@2.31.0'
+      tea-cli conformance --base-url https://tea.example.com --tei 'tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1'
       tea-cli conformance --base-url https://tea.example.com --verbose
     """
     ctx.ensure_object(dict)

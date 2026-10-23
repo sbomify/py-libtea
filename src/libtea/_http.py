@@ -35,7 +35,24 @@ logger = logging.getLogger("libtea")
 
 _MAX_DOWNLOAD_REDIRECTS = 10
 _ERROR_BODY_SNIPPET_BYTES = 200
+# A TEA error body may carry a long `message`; read enough to parse it so `error` is not lost to the snippet cut.
+_ERROR_BODY_PARSE_BYTES = 4096
 _DOWNLOAD_CHUNK_SIZE = 8192
+
+
+def _tea_error_type(raw: bytes) -> str | None:
+    """Return the ``error`` value of a TEA error body, or ``None``.
+
+    A TEA error is a JSON object with a string ``error`` property. Anything else
+    (empty, non-JSON, non-object, non-string ``error``) yields ``None``. Unknown
+    ``error`` values are returned as-is; clients must not reject them.
+    """
+    try:
+        body = json.loads(raw)
+    except (ValueError, RecursionError):  # ValueError: bad JSON/UTF-8, empty; RecursionError: deep nesting on 3.11
+        return None
+    error = body.get("error") if isinstance(body, dict) else None
+    return error if isinstance(error, str) else None
 
 
 def probe_endpoint(url: str, timeout: float = 5.0) -> None:
@@ -229,7 +246,7 @@ class TeaHttpClient:
                 raise TeaValidationError(f"Response body exceeds limit: >{limit} bytes (limit {limit})")
             try:
                 result = json.loads(body)
-            except (ValueError, UnicodeDecodeError) as exc:
+            except (ValueError, UnicodeDecodeError, RecursionError) as exc:  # RecursionError: deep nesting
                 raise TeaValidationError(f"Invalid JSON in response: {exc}") from exc
 
             # Cache store (bounded: evict least-recently-stored entry when full)
@@ -252,6 +269,8 @@ class TeaHttpClient:
         *,
         max_download_bytes: int | None = None,
         allow_private_ips: bool = False,
+        params: dict[str, str] | None = None,
+        authenticated: bool = False,
     ) -> dict[str, str]:
         """Download a file and compute checksums on-the-fly.
 
@@ -259,21 +278,34 @@ class TeaHttpClient:
         is not leaked to third-party artifact hosts (CDNs, Maven Central, etc.).
         Redirects are followed manually with SSRF validation at each hop.
 
+        With ``authenticated=True`` the first request goes through the API session
+        (credentials, retries) and, like :meth:`get_json`, trusts the configured API
+        base without an SSRF check. Every redirect hop still uses the unauthenticated
+        session, so credentials never leave the API base, not even on a same-host redirect.
+
         Args:
-            url: Direct download URL.
+            url: Direct download URL. Must be under the API base when ``authenticated``.
             dest: Local file path to write to. Parent directories are created.
             algorithms: Optional list of checksum algorithm names to compute.
             max_download_bytes: Optional maximum download size in bytes.
+            params: Optional query parameters for the first request.
+            authenticated: Send the first request with the API credentials.
 
         Returns:
             Dict mapping algorithm name to hex digest string.
 
         Raises:
+            ValueError: If ``authenticated`` and ``url`` is not under the API base.
             TeaConnectionError: On network failure. Partial files are deleted.
             TeaChecksumError: If an unsupported algorithm is requested.
-            TeaValidationError: If download exceeds max_download_bytes or fails SSRF check.
+            TeaValidationError: If download exceeds max_download_bytes, fails SSRF check, or a redirect
+                downgrades HTTPS to HTTP.
         """
-        _validate_download_url(url, allow_private_ips=allow_private_ips)
+        if authenticated:
+            if not url.startswith(f"{self._base_url}/"):
+                raise ValueError(f"Authenticated download URL must be under the API base {self._base_url}")
+        else:
+            _validate_download_url(url, allow_private_ips=allow_private_ips)
         logger.debug("DOWNLOAD %s -> %s", url, dest)
         hashers = _build_hashers(algorithms) if algorithms else {}
 
@@ -284,12 +316,13 @@ class TeaHttpClient:
 
                 # Follow redirects manually with SSRF validation at each hop
                 current_url = url
+                session = self._session if authenticated else download_session
                 response = None
                 try:
                     redirects = 0
                     while True:
-                        response = download_session.get(
-                            current_url, stream=True, timeout=self._timeout, allow_redirects=False
+                        response = session.get(
+                            current_url, params=params, stream=True, timeout=self._timeout, allow_redirects=False
                         )
                         if 300 <= response.status_code < 400:
                             redirects += 1
@@ -298,8 +331,12 @@ class TeaHttpClient:
                             location = response.headers.get("Location")
                             if not location:
                                 raise TeaRequestError(f"Redirect without Location header: HTTP {response.status_code}")
-                            current_url = urljoin(current_url, location)
-                            _validate_download_url(current_url, allow_private_ips=allow_private_ips)
+                            next_url = urljoin(current_url, location)
+                            _validate_download_url(next_url, allow_private_ips=allow_private_ips)
+                            if urlparse(current_url).scheme == "https" and urlparse(next_url).scheme == "http":
+                                raise TeaValidationError(f"Download redirect downgraded HTTPS to HTTP: {next_url}")
+                            current_url = next_url
+                            session, params = download_session, None
                             response.close()
                             response = None
                             continue
@@ -360,19 +397,20 @@ class TeaHttpClient:
 
     @staticmethod
     def _read_error_body(response: requests.Response) -> bytes:
-        """Read a bounded snippet of the response body for error messages.
+        """Read a bounded prefix of the response body for error messages and TEA error parsing.
 
-        Returns up to ``_ERROR_BODY_SNIPPET_BYTES + 1`` bytes so callers can
-        detect truncation.  Falls back to ``response.content`` when the raw
-        stream is empty (e.g. already consumed by the transport layer).
+        Returns up to ``_ERROR_BODY_PARSE_BYTES`` bytes; callers compare the
+        length with ``_ERROR_BODY_SNIPPET_BYTES`` to detect a truncated snippet.
+        Falls back to ``response.content`` when the raw stream is empty
+        (e.g. already consumed by the transport layer).
         """
-        limit = _ERROR_BODY_SNIPPET_BYTES
+        limit = _ERROR_BODY_PARSE_BYTES
         try:
             if response.raw:
                 response.raw.decode_content = True
-            raw_bytes = response.raw.read(limit + 1) if response.raw else b""
+            raw_bytes = response.raw.read(limit) if response.raw else b""
             if not raw_bytes:
-                raw_bytes = response.content[: limit + 1]
+                raw_bytes = response.content[:limit]
         except Exception:
             raw_bytes = b""
         return raw_bytes
@@ -394,30 +432,19 @@ class TeaHttpClient:
         if status in (401, 403):
             logger.warning("Authentication failed: HTTP %d for %s", status, response.url)
             raise TeaAuthenticationError(f"Authentication failed: HTTP {status}")
-        if status == 404:
-            error_type = None
-            try:
-                raw_bytes = TeaHttpClient._read_error_body(response)
-                if raw_bytes:
-                    body = json.loads(raw_bytes)
-                    if isinstance(body, dict):
-                        error_type = body.get("error")
-            except (ValueError, UnicodeDecodeError):
-                pass
-            raise TeaNotFoundError(f"Not found: HTTP {status}", error_type=error_type)
         if status >= 500:
             raise TeaServerError(f"Server error: HTTP {status}")
+        # 4xx: read the bounded body once; the snippet and the TEA error type both come from it.
+        raw_bytes = TeaHttpClient._read_error_body(response)
+        error_type = _tea_error_type(raw_bytes)
+        if status == 404:
+            raise TeaNotFoundError(f"Not found: HTTP {status}", error_type=error_type)
         # Remaining 4xx codes (400, 405-499 excluding 401/403/404)
         limit = _ERROR_BODY_SNIPPET_BYTES
-        body_text = ""
-        try:
-            raw_bytes = TeaHttpClient._read_error_body(response)
-            body_text = raw_bytes.decode("utf-8", errors="replace")[:limit]
-            if len(raw_bytes) > limit:
-                body_text += " (truncated)"
-        except Exception:
-            pass
+        body_text = raw_bytes.decode("utf-8", errors="replace")[:limit]
+        if len(raw_bytes) > limit:
+            body_text += " (truncated)"
         msg = f"Client error: HTTP {status}"
         if body_text:
             msg = f"{msg} — {body_text}"
-        raise TeaRequestError(msg)
+        raise TeaRequestError(msg, error_type=error_type)

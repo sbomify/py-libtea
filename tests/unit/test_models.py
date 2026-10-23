@@ -1,8 +1,11 @@
+from datetime import datetime, timezone
+
 import pytest
 from pydantic import ValidationError
 
 from libtea.models import (
     CLE,
+    Artifact,
     ArtifactFormat,
     ArtifactType,
     Checksum,
@@ -15,16 +18,31 @@ from libtea.models import (
     CollectionUpdateReasonType,
     ComplianceDocumentType,
     Component,
+    ComponentReleaseWithCollection,
     ErrorResponse,
     ErrorType,
     Identifier,
     IdentifierType,
+    PaginatedCollectionResponse,
     PaginatedComponentReleaseResponse,
     PaginatedComponentResponse,
     PaginatedProductResponse,
     Product,
+    ProductRelease,
+    ProductReleaseWithCollection,
     Release,
     TeiType,
+)
+from tests.spec_data import (
+    COMPONENT_RELEASE,
+    LEGACY,
+    MD5_HEX,
+    PRODUCT,
+    V1_ARTIFACT,
+    V1_COLLECTION,
+    V1_PRODUCT_RELEASE,
+    V1_RELEASE,
+    product,
 )
 
 
@@ -138,7 +156,7 @@ class TestChecksumNormalization:
 
     def test_valid_values_pass_through(self):
         for member in ChecksumAlgorithm:
-            cs = Checksum.model_validate({"algType": member.value, "algValue": "aabbcc"})
+            cs = Checksum.model_validate({"algType": member.value, "algValue": "aabbcc"}, context=LEGACY)
             assert cs.algorithm_type == member
 
 
@@ -202,6 +220,17 @@ class TestEnumCompleteness:
         assert ErrorType.OBJECT_NOT_SHAREABLE == "OBJECT_NOT_SHAREABLE"
         assert isinstance(ErrorType.OBJECT_UNKNOWN, str)
 
+    def test_error_type_1_0_0_members(self):
+        assert {e.value for e in ErrorType} == {
+            "OBJECT_UNKNOWN",
+            "OBJECT_NOT_SHAREABLE",
+            "NOT_IMPLEMENTED",
+            "NO_ACCEPTABLE_FORMAT",
+            "SIGNATURE_NOT_FOUND",
+            "INVALID_REQUEST",
+            "INVALID_PAGE_TOKEN",
+        }
+
 
 class TestProduct:
     def test_product_from_json(self):
@@ -241,7 +270,7 @@ class TestRelease:
             "identifiers": [{"idType": "PURL", "idValue": "pkg:maven/org.apache.tomcat/tomcat@11.0.7"}],
             "distributions": [
                 {
-                    "distributionType": "zip",
+                    "distributionId": "zip",
                     "description": "Core binary distribution",
                     "checksums": [
                         {
@@ -253,9 +282,9 @@ class TestRelease:
                 }
             ],
         }
-        release = Release.model_validate(data)
+        release = Release.model_validate(data, context=LEGACY)
         assert release.version == "11.0.7"
-        assert release.distributions[0].distribution_type == "zip"
+        assert release.distributions[0].distribution_id == "zip"
         assert release.distributions[0].checksums[0].algorithm_type == ChecksumAlgorithm.SHA_256
 
 
@@ -283,7 +312,7 @@ class TestCollection:
                 }
             ],
         }
-        collection = Collection.model_validate(data)
+        collection = Collection.model_validate(data, context=LEGACY)
         assert collection.version == 3
         assert collection.belongs_to == CollectionBelongsTo.COMPONENT_RELEASE
         assert collection.update_reason.type == CollectionUpdateReasonType.ARTIFACT_UPDATED
@@ -298,7 +327,7 @@ class TestOptionalFields:
             "version": "1.0.0",
             "createdDate": "2024-01-01T00:00:00Z",
         }
-        release = Release.model_validate(data)
+        release = Release.model_validate(data, context=LEGACY)
         assert release.release_date is None
         assert release.pre_release is None
         assert release.component is None
@@ -307,15 +336,15 @@ class TestOptionalFields:
 
     def test_collection_minimal_fields(self):
         data = {"uuid": "c-1", "version": 1}
-        collection = Collection.model_validate(data)
-        assert collection.date is None
+        collection = Collection.model_validate(data, context=LEGACY)
+        assert collection.created_date is None
         assert collection.belongs_to is None
         assert collection.update_reason is None
         assert collection.artifacts == ()
 
     def test_collection_all_fields_optional(self):
-        """Per TEA spec, all Collection fields are optional."""
-        collection = Collection.model_validate({})
+        """Per TEA 0.4.0, all Collection fields are optional."""
+        collection = Collection.model_validate({}, context=LEGACY)
         assert collection.uuid is None
         assert collection.version is None
         assert collection.artifacts == ()
@@ -323,18 +352,18 @@ class TestOptionalFields:
     def test_collection_version_rejects_zero(self):
         """TEA spec says versions start with 1."""
         with pytest.raises(ValidationError):
-            Collection.model_validate({"version": 0})
+            Collection.model_validate({"version": 0}, context=LEGACY)
 
     def test_collection_version_rejects_negative(self):
         with pytest.raises(ValidationError):
-            Collection.model_validate({"version": -1})
+            Collection.model_validate({"version": -1}, context=LEGACY)
 
     def test_artifact_format_minimal_fields(self):
         data = {
             "mediaType": "application/json",
             "url": "https://example.com/sbom.json",
         }
-        fmt = ArtifactFormat.model_validate(data)
+        fmt = ArtifactFormat.model_validate(data, context=LEGACY)
         assert fmt.description is None
         assert fmt.signature_url is None
         assert fmt.checksums == ()
@@ -347,7 +376,7 @@ class TestOptionalFields:
             "totalResults": 0,
             "results": [],
         }
-        resp = PaginatedProductResponse.model_validate(data)
+        resp = PaginatedProductResponse.model_validate(data, context=LEGACY)
         assert resp.total_results == 0
         assert resp.results == ()
 
@@ -367,9 +396,77 @@ class TestPaginatedResponse:
                 }
             ],
         }
-        resp = PaginatedProductResponse.model_validate(data)
+        resp = PaginatedProductResponse.model_validate(data, context=LEGACY)
         assert resp.total_results == 1
         assert resp.results[0].name == "Apache Log4j 2"
+
+
+class TestPagination:
+    def test_v1_page(self):
+        p = PaginatedProductResponse.model_validate(
+            {"hasNext": True, "nextPageToken": "eyJwYWdlIjoiY29udGludWF0aW9uIn0", "results": []}
+        )
+        assert (p.has_next, p.next_page_token, p.total_results) == (True, "eyJwYWdlIjoiY29udGludWF0aW9uIn0", None)
+
+    def test_v1_drops_legacy_offsets(self):
+        p = PaginatedProductResponse.model_validate(
+            {"hasNext": False, "totalResults": 5, "pageStartIndex": 0, "pageSize": 2, "timestamp": "x", "results": []}
+        )
+        assert (p.total_results, p.page_start_index, p.page_size, p.timestamp) == (None, None, None, None)
+
+    def test_non_object_rejected(self):
+        with pytest.raises(ValidationError):
+            PaginatedProductResponse.model_validate([])
+
+    def test_v1_missing_results_rejected(self):
+        with pytest.raises(ValidationError, match="missing required field 'results'"):
+            PaginatedProductResponse.model_validate({"hasNext": False})
+
+    def test_legacy_missing_results_still_accepted(self):
+        data = {"timestamp": "2024-03-20T15:30:00Z", "pageStartIndex": 0, "pageSize": 2, "totalResults": 0}
+        p = PaginatedProductResponse.model_validate(data, context=LEGACY)
+        assert (p.results, p.has_next) == ((), False)
+
+    def test_v1_has_next_without_token_rejected(self):
+        with pytest.raises(ValidationError, match="nextPageToken"):
+            PaginatedProductResponse.model_validate({"hasNext": True, "results": []})
+
+    def test_legacy_shape_rejected_on_v1(self):
+        with pytest.raises(ValidationError, match="hasNext"):  # Pydantic reports missing fields by alias
+            PaginatedProductResponse.model_validate(
+                {
+                    "timestamp": "2024-03-20T15:30:00Z",
+                    "pageStartIndex": 0,
+                    "pageSize": 2,
+                    "totalResults": 3,
+                    "results": [],
+                }
+            )
+
+    @pytest.mark.parametrize(
+        ("start", "n", "total", "has_next", "token"),
+        [(0, 2, 3, True, "2"), (2, 1, 3, False, None), (0, 0, 5, False, None)],
+    )
+    def test_legacy_offsets_synthesize_token(self, start, n, total, has_next, token):
+        data = {
+            "timestamp": "2024-03-20T15:30:00Z",
+            "pageStartIndex": start,
+            "pageSize": 2,
+            "totalResults": total,
+            "results": [product(PRODUCT, f"P{i}") for i in range(n)],
+        }
+        p = PaginatedProductResponse.model_validate(data, context=LEGACY)
+        assert (p.has_next, p.next_page_token) == (has_next, token)
+
+    def test_legacy_bad_offsets_rejected(self):
+        with pytest.raises(ValidationError):
+            PaginatedProductResponse.model_validate(
+                {"pageStartIndex": "x", "totalResults": 3, "results": []}, context=LEGACY
+            )
+
+    def test_collection_page(self):
+        p = PaginatedCollectionResponse.model_validate({"hasNext": False, "results": [V1_COLLECTION]})
+        assert p.results[0].version == 2
 
 
 class TestCLEEventType:
@@ -577,25 +674,9 @@ class TestCLEModels:
 class TestInteropCompat:
     """Tests for interoperability with older/non-standard server responses."""
 
-    def test_artifact_format_accepts_mime_type_as_alias(self):
-        """Servers may send ``mimeType`` instead of ``mediaType``."""
-        fmt = ArtifactFormat.model_validate({"mimeType": "application/json", "url": "https://example.com/sbom.json"})
-        assert fmt.media_type == "application/json"
-
-    def test_artifact_format_prefers_media_type_over_mime_type(self):
-        """When both are present, ``mediaType`` takes precedence."""
-        fmt = ArtifactFormat.model_validate(
-            {
-                "mediaType": "application/xml",
-                "mimeType": "text/plain",
-                "url": "https://example.com/sbom.xml",
-            }
-        )
-        assert fmt.media_type == "application/xml"
-
     def test_artifact_format_media_type_optional(self):
-        """mediaType is not required by the spec."""
-        fmt = ArtifactFormat.model_validate({"url": "https://example.com/sbom.json"})
+        """mediaType is not required by the 0.4.0 spec."""
+        fmt = ArtifactFormat.model_validate({"url": "https://example.com/sbom.json"}, context=LEGACY)
         assert fmt.media_type is None
 
     def test_artifact_format_url_optional(self):
@@ -603,78 +684,31 @@ class TestInteropCompat:
         fmt = ArtifactFormat.model_validate({"mediaType": "application/json"})
         assert fmt.url is None
 
-    def test_release_distribution_type_optional(self):
-        """distributionType can be null (not required by spec)."""
-        from libtea.models import ReleaseDistribution
-
-        dist = ReleaseDistribution.model_validate({"distributionType": None})
-        assert dist.distribution_type is None
-
-    def test_release_distribution_type_absent(self):
-        """distributionType can be entirely absent."""
-        from libtea.models import ReleaseDistribution
-
-        dist = ReleaseDistribution.model_validate({})
-        assert dist.distribution_type is None
-
     def test_identifier_all_fields_optional(self):
-        """Per spec, Identifier has no required fields."""
-        ident = Identifier.model_validate({})
+        """Per TEA 0.4.0, Identifier has no required fields."""
+        ident = Identifier.model_validate({}, context=LEGACY)
         assert ident.id_type is None
         assert ident.id_value is None
 
     def test_identifier_partial_fields(self):
-        """Per spec, only idType without idValue is valid."""
-        ident = Identifier.model_validate({"idType": "PURL"})
+        """Per TEA 0.4.0, only idType without idValue is valid."""
+        ident = Identifier.model_validate({"idType": "PURL"}, context=LEGACY)
         assert ident.id_type == "PURL"
         assert ident.id_value is None
 
-    def test_checksum_all_fields_optional(self):
-        """Per spec, Checksum has no required fields."""
-        cs = Checksum.model_validate({})
-        assert cs.algorithm_type is None
-        assert cs.algorithm_value is None
-
-    def test_checksum_partial_algorithm_type_only(self):
-        """Per spec, algType without algValue is valid."""
-        cs = Checksum.model_validate({"algType": "SHA-256"})
-        assert cs.algorithm_type == ChecksumAlgorithm.SHA_256
-        assert cs.algorithm_value is None
-
-    def test_artifact_all_fields_optional(self):
-        """Per spec, Artifact has no required fields."""
-        from libtea.models import Artifact
-
-        art = Artifact.model_validate({})
-        assert art.uuid is None
-        assert art.name is None
-        assert art.type is None
-        assert art.version is None
-        assert art.created_date is None
-        assert art.formats == ()
-
-    def test_artifact_partial_fields(self):
-        """Per spec, uuid alone is valid."""
-        from libtea.models import Artifact
-
-        art = Artifact.model_validate({"uuid": "abc-123"})
-        assert art.uuid == "abc-123"
-        assert art.name is None
-        assert art.type is None
-
     def test_collection_update_reason_all_fields_optional(self):
-        """Per spec, CollectionUpdateReason has no required fields."""
+        """Per TEA 0.4.0, CollectionUpdateReason has no required fields."""
         from libtea.models import CollectionUpdateReason
 
-        reason = CollectionUpdateReason.model_validate({})
+        reason = CollectionUpdateReason.model_validate({}, context=LEGACY)
         assert reason.type is None
         assert reason.comment is None
 
     def test_collection_update_reason_comment_only(self):
-        """Per spec, comment without type is valid."""
+        """Per TEA 0.4.0, comment without type is valid."""
         from libtea.models import CollectionUpdateReason
 
-        reason = CollectionUpdateReason.model_validate({"comment": "Updated manually"})
+        reason = CollectionUpdateReason.model_validate({"comment": "Updated manually"}, context=LEGACY)
         assert reason.type is None
         assert reason.comment == "Updated manually"
 
@@ -692,12 +726,23 @@ class TestErrorResponse:
 
     def test_to_json(self):
         resp = ErrorResponse(error=ErrorType.OBJECT_UNKNOWN)
-        data = resp.model_dump(by_alias=True)
+        data = resp.model_dump(by_alias=True, exclude_none=True)
         assert data == {"error": "OBJECT_UNKNOWN"}
 
-    def test_rejects_unknown_error_type(self):
+    def test_unknown_error_value_accepted(self):
+        resp = ErrorResponse.model_validate({"error": "SOMETHING_NEW", "message": "x"})
+        assert resp.error == "SOMETHING_NEW"
+        assert resp.message == "x"
+
+    def test_message_optional(self):
+        assert ErrorResponse.model_validate({"error": "INVALID_REQUEST"}).message is None
+
+    def test_known_error_compares_equal_to_enum(self):
+        assert ErrorResponse.model_validate({"error": "INVALID_PAGE_TOKEN"}).error == ErrorType.INVALID_PAGE_TOKEN
+
+    def test_non_string_error_rejected(self):
         with pytest.raises(ValidationError):
-            ErrorResponse.model_validate({"error": "INVALID_TYPE"})
+            ErrorResponse.model_validate({"error": 5})
 
     def test_extra_fields_tolerated(self):
         """_TeaModel uses extra='ignore' — tolerant parsing for robustness."""
@@ -706,11 +751,8 @@ class TestErrorResponse:
 
 
 class TestComplianceDocumentType:
-    def test_fedramp_value(self):
-        assert ComplianceDocumentType.FEDRAMP == "FedRAMP"
-
     def test_all_members_count(self):
-        assert len(ComplianceDocumentType) == 20
+        assert len(ComplianceDocumentType) == 21
 
 
 class TestPaginatedComponentResponse:
@@ -728,7 +770,7 @@ class TestPaginatedComponentResponse:
                 }
             ],
         }
-        resp = PaginatedComponentResponse.model_validate(data)
+        resp = PaginatedComponentResponse.model_validate(data, context=LEGACY)
         assert resp.total_results == 1
         assert isinstance(resp.results[0], Component)
         assert resp.results[0].name == "Test Component"
@@ -741,7 +783,7 @@ class TestPaginatedComponentResponse:
             "totalResults": 0,
             "results": [],
         }
-        resp = PaginatedComponentResponse.model_validate(data)
+        resp = PaginatedComponentResponse.model_validate(data, context=LEGACY)
         assert resp.total_results == 0
         assert resp.results == ()
 
@@ -761,7 +803,7 @@ class TestPaginatedComponentReleaseResponse:
                 }
             ],
         }
-        resp = PaginatedComponentReleaseResponse.model_validate(data)
+        resp = PaginatedComponentReleaseResponse.model_validate(data, context=LEGACY)
         assert resp.total_results == 1
         assert isinstance(resp.results[0], Release)
         assert resp.results[0].version == "1.0.0"
@@ -774,6 +816,120 @@ class TestPaginatedComponentReleaseResponse:
             "totalResults": 0,
             "results": [],
         }
-        resp = PaginatedComponentReleaseResponse.model_validate(data)
+        resp = PaginatedComponentReleaseResponse.model_validate(data, context=LEGACY)
         assert resp.total_results == 0
         assert resp.results == ()
+
+
+class TestV1RequiredFields:
+    def test_collection_missing_created_date_rejected(self):
+        data = {k: v for k, v in V1_COLLECTION.items() if k != "createdDate"}
+        with pytest.raises(ValidationError, match="created_date"):
+            Collection.model_validate(data)
+
+    def test_collection_legacy_date_mapped(self):
+        c = Collection.model_validate({"uuid": COMPONENT_RELEASE, "date": "2024-12-15T00:00:00Z"}, context=LEGACY)
+        assert c.created_date == datetime(2024, 12, 15, tzinfo=timezone.utc)
+
+    def test_collection_date_key_not_mapped_on_v1(self):
+        data = {**{k: v for k, v in V1_COLLECTION.items() if k != "createdDate"}, "date": "2024-12-15T00:00:00Z"}
+        with pytest.raises(ValidationError, match="created_date"):
+            Collection.model_validate(data)
+
+    def test_nested_artifact_enforced(self):
+        bad = {**V1_COLLECTION, "artifacts": [{k: v for k, v in V1_ARTIFACT.items() if k != "version"}]}
+        with pytest.raises(ValidationError) as exc:
+            Collection.model_validate(bad)
+        assert exc.value.errors()[0]["loc"][:2] == ("artifacts", 0)
+
+    def test_identifier_both_fields_v1_only(self):
+        with pytest.raises(ValidationError, match="id_value"):
+            Identifier.model_validate({"idType": "PURL"})
+        assert Identifier.model_validate({"idType": "PURL"}, context=LEGACY).id_value is None
+
+    def test_checksum_fields_required_in_both(self):
+        with pytest.raises(ValidationError):
+            Checksum.model_validate({"algType": "SHA-256"}, context=LEGACY)
+
+    def test_format_with_url_requires_checksums(self):
+        with pytest.raises(ValidationError, match="checksums"):
+            ArtifactFormat.model_validate({"mediaType": "application/json", "url": "https://x.example.com/a"})
+
+    def test_artifact_requires_formats_entry(self):
+        with pytest.raises(ValidationError, match="formats"):
+            Artifact.model_validate({**V1_ARTIFACT, "formats": []})
+
+    def test_collection_requires_artifacts_key(self):
+        data = {k: v for k, v in V1_COLLECTION.items() if k != "artifacts"}
+        with pytest.raises(ValidationError, match="missing required field 'artifacts'"):
+            Collection.model_validate(data)
+        assert Collection.model_validate({**data, "artifacts": []}).artifacts == ()
+        assert Collection.model_validate(data, context=LEGACY).artifacts == ()
+
+    def test_format_checksums_present_must_not_be_empty(self):
+        for extra in ({}, {"url": "https://x.example.com/a"}):
+            with pytest.raises(ValidationError, match="'checksums' must not be empty"):
+                ArtifactFormat.model_validate({"mediaType": "application/json", "checksums": [], **extra})
+        assert ArtifactFormat.model_validate({"mediaType": "application/json"}).checksums == ()
+
+    def test_valid_v1_documents_pass(self):
+        Collection.model_validate(V1_COLLECTION)
+        Release.model_validate(V1_RELEASE)
+        ProductRelease.model_validate(V1_PRODUCT_RELEASE)
+
+    def test_md5_rejected_on_v1(self):
+        with pytest.raises(ValidationError, match="MD5"):
+            Checksum.model_validate({"algType": "MD5", "algValue": MD5_HEX})
+
+    def test_md5_accepted_legacy(self):
+        cs = Checksum.model_validate({"algType": "MD5", "algValue": MD5_HEX}, context=LEGACY)
+        assert cs.algorithm_type is ChecksumAlgorithm.MD5
+
+    def test_fedramp_value(self):
+        assert ComplianceDocumentType.FEDRAMP == "FEDRAMP"
+
+
+class TestReleaseWithCollection:
+    def test_component_release_flattened_on_v1(self):
+        r = ComponentReleaseWithCollection.model_validate({**V1_RELEASE, "latestCollection": V1_COLLECTION})
+        assert (r.release.version, r.latest_collection.version) == ("2.24.3", 2)
+
+    def test_component_release_nested_rejected_on_v1(self):
+        with pytest.raises(ValidationError):
+            ComponentReleaseWithCollection.model_validate({"release": V1_RELEASE, "latestCollection": V1_COLLECTION})
+
+    def test_component_release_nested_legacy(self):
+        r = ComponentReleaseWithCollection.model_validate(
+            {"release": V1_RELEASE, "latestCollection": V1_COLLECTION}, context=LEGACY
+        )
+        assert r.release.uuid == COMPONENT_RELEASE
+
+    def test_component_release_requires_latest_collection_on_v1(self):
+        with pytest.raises(ValidationError, match="latestCollection"):
+            ComponentReleaseWithCollection.model_validate(V1_RELEASE)
+
+    def test_component_release_built_from_instances(self):
+        built = ComponentReleaseWithCollection(
+            release=Release.model_validate(V1_RELEASE), latest_collection=Collection.model_validate(V1_COLLECTION)
+        )
+        assert built.latest_collection.version == 2
+
+    def test_product_release_requires_latest_collection_on_v1(self):
+        with pytest.raises(ValidationError, match="latest_collection"):
+            ProductReleaseWithCollection.model_validate(V1_PRODUCT_RELEASE)
+
+    def test_product_release_with_collection_on_v1(self):
+        r = ProductReleaseWithCollection.model_validate({**V1_PRODUCT_RELEASE, "latestCollection": V1_COLLECTION})
+        assert isinstance(r, ProductRelease)
+        assert (r.product, r.latest_collection.version) == (V1_PRODUCT_RELEASE["product"], 2)
+
+    def test_product_release_still_requires_product_on_v1(self):
+        data = {k: v for k, v in V1_PRODUCT_RELEASE.items() if k != "product"}
+        with pytest.raises(ValidationError, match="'product'"):
+            ProductReleaseWithCollection.model_validate({**data, "latestCollection": V1_COLLECTION})
+
+    def test_product_release_without_collection_legacy(self):
+        r = ProductReleaseWithCollection.model_validate(
+            {k: v for k, v in V1_PRODUCT_RELEASE.items() if k != "product"}, context=LEGACY
+        )
+        assert r.latest_collection is None
