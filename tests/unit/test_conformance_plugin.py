@@ -144,8 +144,8 @@ class TestTeaClientFixtureLogic:
 
         # The fixture extracts base_url, token, and timeout from config.
         # We test the same logic directly.
-        client = TeaClient(base_url="https://tea.example.com/v1", token="secret", timeout=15.0)
-        assert client._http._base_url == "https://tea.example.com/v1"
+        client = TeaClient(base_url="https://tea.example.com/v0.4.0", token="secret", timeout=15.0)
+        assert client._http._base_url == "https://tea.example.com/v0.4.0"
         client.close()
 
 

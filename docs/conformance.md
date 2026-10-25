@@ -1,6 +1,6 @@
 # Conformance Test Suite
 
-The `libtea.conformance` module validates that a TEA server correctly implements the [Transparency Exchange API specification](https://github.com/CycloneDX/transparency-exchange-api). It runs 27 checks covering discovery, products, releases, components, artifacts, CLE, and cross-cutting concerns.
+The `libtea.conformance` module validates that a TEA server correctly implements the [Transparency Exchange API specification](https://github.com/CycloneDX/transparency-exchange-api). It runs 28 checks covering discovery, products, releases, components, artifacts, CLE, and cross-cutting concerns.
 
 ## Installation
 
@@ -19,7 +19,7 @@ from libtea.conformance import run_conformance
 
 result = run_conformance(
     "https://tea.example.com/v1",
-    tei="urn:tei:purl:example.com:pkg:pypi/mylib",
+    tei="tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1",
     token="your-bearer-token",
     timeout=30.0,
 )
@@ -38,7 +38,7 @@ for check in result.checks:
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `base_url` | `str` | TEA server base URL (required) |
-| `tei` | `str \| None` | TEI URN for discovery-driven testing |
+| `tei` | `str \| None` | TEI for discovery-driven testing |
 | `product_uuid` | `str \| None` | Explicit product UUID |
 | `product_release_uuid` | `str \| None` | Explicit product release UUID |
 | `component_uuid` | `str \| None` | Explicit component UUID |
@@ -49,6 +49,8 @@ for check in result.checks:
 | `timeout` | `float` | Request timeout in seconds (default: 30) |
 | `allow_private_ips` | `bool` | Allow private IPs in downloads (default: False) |
 
+The spec version under test comes from `base_url`: a `/v<semver>` suffix such as `/v0.4.0` selects that version, otherwise TEA 1.0.0 is assumed. Checks that differ between versions adapt to it (see the check reference).
+
 **Returns:** `ConformanceResult` with `.passed`, `.failed`, `.warned`, `.skipped` counts and `.checks` list.
 
 ### CLI
@@ -58,7 +60,7 @@ for check in result.checks:
 tea-cli conformance --base-url https://tea.example.com/v1
 
 # With TEI for discovery-driven testing
-tea-cli conformance --base-url https://tea.example.com/v1 --tei "urn:tei:..."
+tea-cli conformance --base-url https://tea.example.com/v1 --tei "tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
 
 # With explicit UUIDs
 tea-cli conformance --base-url https://tea.example.com/v1 \
@@ -83,7 +85,7 @@ The conformance suite registers as a pytest plugin via the `pytest11` entry poin
 
 ```bash
 # Run conformance checks as pytest tests
-pytest --tea-base-url https://tea.example.com/v1 --tea-tei "urn:tei:..."
+pytest --tea-base-url https://tea.example.com/v1 --tea-tei "tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
 
 # With authentication
 pytest --tea-base-url https://tea.example.com/v1 --tea-token "$TEA_TOKEN"
@@ -97,7 +99,7 @@ pytest --tea-base-url https://tea.example.com/v1 -v
 | Option | Description |
 |--------|-------------|
 | `--tea-base-url` | TEA server base URL (required to enable conformance tests) |
-| `--tea-tei` | TEI URN for discovery-driven testing |
+| `--tea-tei` | TEI for discovery-driven testing |
 | `--tea-token` | Bearer token |
 | `--tea-product-uuid` | Explicit product UUID |
 | `--tea-release-uuid` | Explicit product release UUID |
@@ -139,7 +141,7 @@ Each check returns one of four statuses:
 | Check | Description |
 |-------|-------------|
 | `discovery` | Discover a TEI and verify the server returns results |
-| `discovery_404` | Verify unknown TEI returns 404 or empty list |
+| `discovery_404` | Verify unknown TEI returns 404 (TEA 0.x also accepts an empty list; on TEA 1.x the 404 must carry a TEA error body and a successful discovery response must be a non-empty array) |
 
 ### Products (5 checks)
 
@@ -188,12 +190,13 @@ Each check returns one of four statuses:
 | `component_release_cle` | Get CLE data for a component release |
 | `cle_event_ordering` | Verify CLE events are ordered by id descending |
 
-### Cross-cutting (3 checks)
+### Cross-cutting (4 checks)
 
 | Check | Description |
 |-------|-------------|
 | `uuid_format` | Validate all collected UUIDs match canonical lowercase format |
-| `pagination_fields` | Verify paginated listing exposes valid pagination metadata fields |
+| `pagination_fields` | TEA 0.x: verify the `/products` listing exposes valid offset metadata (`pageSize`, `pageStartIndex`, `totalResults`, `timestamp`). TEA 1.x: verify the listing honours `pageSize` (no more than 10 results for `pageSize=10`) |
+| `pagination_token` | TEA 1.x: request `/products` with `pageSize=1`, follow `nextPageToken`, and verify the next page returns different products. Skipped on TEA 0.x or when the server has fewer than two products |
 | `camel_case_fields` | Confirm server uses camelCase field names |
 
 ## CI integration

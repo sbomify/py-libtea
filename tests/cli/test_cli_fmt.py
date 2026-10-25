@@ -53,10 +53,17 @@ from libtea.models import (  # noqa: E402
     PaginatedProductResponse,
     Product,
     ProductRelease,
+    ProductReleaseWithCollection,
     Release,
     ReleaseDistribution,
     TeaServerInfo,
 )
+from tests.spec_data import LEGACY, product  # noqa: E402
+
+
+def _legacy(model_cls, **fields):
+    """Build a model from 0.4.0-shaped data, skipping the TEA 1.0.0 required-field checks."""
+    return model_cls.model_validate(fields, context=LEGACY)
 
 
 def _capture(fn, *args, **kwargs) -> str:
@@ -128,6 +135,7 @@ class TestFmtSearchProducts:
             timestamp="2024-01-01T00:00:00Z",
             page_start_index=0,
             page_size=100,
+            has_next=False,
             total_results=1,
             results=[Product(uuid=UUID, name="Test Product", identifiers=[])],
         )
@@ -140,23 +148,69 @@ class TestFmtSearchProducts:
             timestamp="2024-01-01T00:00:00Z",
             page_start_index=0,
             page_size=100,
+            has_next=False,
             total_results=0,
             results=[],
         )
         output = _capture(fmt_search_products, data)
         assert "No results (total: 0)" in output
 
+    def test_v1_page_shows_count_and_next_token(self):
+        data = PaginatedProductResponse(
+            has_next=True,
+            next_page_token="t2",
+            results=[Product(uuid=UUID, name="Test Product", identifiers=[])],
+        )
+        output = _capture(fmt_search_products, data)
+        assert "1 result(s)" in output
+        assert "More results: --page-token t2" in output
+
+    def test_v1_page_with_totals_still_shows_next_token(self):
+        data = PaginatedProductResponse.model_validate(
+            {"hasNext": True, "nextPageToken": "t2", "totalResults": 5, "results": [product(UUID, "P1")]}
+        )
+        assert data.total_results is None
+        assert "More results: --page-token t2" in _capture(fmt_search_products, data)
+
+    def test_v1_next_token_is_shell_quoted(self):
+        data = PaginatedProductResponse(has_next=True, next_page_token="a b", results=[])
+        assert "More results: --page-token 'a b'" in _capture(fmt_search_products, data)
+
+    def test_v1_last_page_has_no_next_hint(self):
+        data = PaginatedProductResponse(has_next=False, results=[])
+        output = _capture(fmt_search_products, data)
+        assert "0 result(s)" in output
+        assert "--page-token" not in output
+
+    def test_legacy_page_keeps_offset_range(self):
+        data = _legacy(
+            PaginatedProductResponse,
+            timestamp="2024-01-01T00:00:00Z",
+            pageStartIndex=0,
+            pageSize=2,
+            totalResults=3,
+            results=[product(UUID, "P1"), product(UUID2, "P2")],
+        )
+        assert "Results 1-2 of 3" in _capture(fmt_search_products, data)
+
 
 class TestFmtSearchReleases:
     def test_renders_table(self):
-        data = PaginatedProductReleaseResponse(
+        data = _legacy(
+            PaginatedProductReleaseResponse,
             timestamp="2024-01-01T00:00:00Z",
             page_start_index=0,
             page_size=100,
+            has_next=False,
             total_results=1,
             results=[
-                ProductRelease(
-                    uuid=UUID, version="1.0.0", created_date="2024-01-01T00:00:00Z", components=[], pre_release=True
+                _legacy(
+                    ProductRelease,
+                    uuid=UUID,
+                    version="1.0.0",
+                    created_date="2024-01-01T00:00:00Z",
+                    components=[],
+                    pre_release=True,
                 )
             ],
         )
@@ -190,7 +244,8 @@ class TestFmtProduct:
 
 class TestFmtProductRelease:
     def test_renders_panel_and_components(self):
-        data = ProductRelease(
+        data = _legacy(
+            ProductRelease,
             uuid=UUID,
             version="2.0.0",
             product_name="My Product",
@@ -208,7 +263,7 @@ class TestFmtProductRelease:
         assert UUID2 in output
 
     def test_no_components(self):
-        data = ProductRelease(uuid=UUID, version="1.0.0", created_date="2024-01-01T00:00:00Z", components=[])
+        data = _legacy(ProductRelease, uuid=UUID, version="1.0.0", created_date="2024-01-01T00:00:00Z", components=[])
         output = _capture(fmt_product_release, data)
         assert "Product Release" in output
         assert "Components" not in output
@@ -216,15 +271,17 @@ class TestFmtProductRelease:
 
 class TestFmtComponentRelease:
     def test_renders_release_and_collection(self):
-        data = ComponentReleaseWithCollection(
-            release=Release(
+        data = _legacy(
+            ComponentReleaseWithCollection,
+            release=_legacy(
+                Release,
                 uuid=UUID,
                 version="1.0.0",
                 component_name="libfoo",
                 created_date="2024-01-01T00:00:00Z",
                 identifiers=[],
             ),
-            latest_collection=Collection(uuid=UUID, version=1, artifacts=[]),
+            latest_collection=_legacy(Collection, uuid=UUID, version=1, artifacts=[]),
         )
         output = _capture(fmt_component_release, data)
         assert "Component Release" in output
@@ -232,12 +289,14 @@ class TestFmtComponentRelease:
         assert "Latest Collection" in output
 
     def test_renders_artifacts(self):
-        data = ComponentReleaseWithCollection(
-            release=Release(uuid=UUID, version="1.0.0", created_date="2024-01-01T00:00:00Z"),
-            latest_collection=Collection(
+        data = _legacy(
+            ComponentReleaseWithCollection,
+            release=_legacy(Release, uuid=UUID, version="1.0.0", created_date="2024-01-01T00:00:00Z"),
+            latest_collection=_legacy(
+                Collection,
                 uuid=UUID,
                 version=1,
-                artifacts=[Artifact(uuid=UUID2, name="SBOM", type="BOM", formats=[])],
+                artifacts=[_legacy(Artifact, uuid=UUID2, name="SBOM", type="BOM", formats=[])],
             ),
         )
         output = _capture(fmt_component_release, data)
@@ -247,7 +306,8 @@ class TestFmtComponentRelease:
 
 class TestFmtCollection:
     def test_renders_panel(self):
-        data = Collection(
+        data = _legacy(
+            Collection,
             uuid=UUID,
             version=3,
             belongs_to=CollectionBelongsTo.PRODUCT_RELEASE,
@@ -263,14 +323,15 @@ class TestFmtCollection:
         assert "CVE-2024-1234 fixed" in output
 
     def test_no_update_reason(self):
-        data = Collection(uuid=UUID, version=1, artifacts=[])
+        data = _legacy(Collection, uuid=UUID, version=1, artifacts=[])
         output = _capture(fmt_collection, data)
         assert "Collection" in output
 
 
 class TestFmtArtifact:
     def test_renders_panel_and_formats(self):
-        data = Artifact(
+        data = _legacy(
+            Artifact,
             uuid=UUID,
             name="SBOM",
             type="BOM",
@@ -291,7 +352,7 @@ class TestFmtArtifact:
         assert "abcdef123456" in output
 
     def test_no_formats(self):
-        data = Artifact(uuid=UUID, name="VEX", type="VULNERABILITIES", formats=[])
+        data = _legacy(Artifact, uuid=UUID, name="VEX", type="VULNERABILITIES", formats=[])
         output = _capture(fmt_artifact, data)
         assert "Artifact" in output
         assert "Formats" not in output
@@ -472,6 +533,12 @@ class TestFormatOutputDispatch:
         output = _capture(format_output, product)
         assert "Product" in output
 
+    def test_dispatch_product_release_with_collection(self):
+        data = _legacy(
+            ProductReleaseWithCollection, uuid=UUID, version="1.0.0", created_date="2024-01-01", components=[]
+        )
+        assert "Product Release" in _capture(format_output, data)
+
     def test_dispatch_discover_via_command(self):
         data = [
             DiscoveryInfo(
@@ -528,15 +595,17 @@ class TestDistributionsTable:
     """Test display of release-distribution fields."""
 
     def test_component_release_with_distributions(self):
-        data = ComponentReleaseWithCollection(
-            release=Release(
+        data = _legacy(
+            ComponentReleaseWithCollection,
+            release=_legacy(
+                Release,
                 uuid=UUID,
                 version="11.0.7",
                 component_name="tomcat",
                 created_date="2024-01-01T00:00:00Z",
                 distributions=[
                     ReleaseDistribution(
-                        distribution_type="zip",
+                        distribution_id="zip",
                         description="Core binary distribution, zip archive",
                         url="https://repo.example.com/tomcat-11.0.7.zip",
                         signature_url="https://repo.example.com/tomcat-11.0.7.zip.asc",
@@ -545,13 +614,13 @@ class TestDistributionsTable:
                         ],
                     ),
                     ReleaseDistribution(
-                        distribution_type="tar.gz",
+                        distribution_id="tar.gz",
                         description="Core binary distribution, tar.gz archive",
                         url="https://repo.example.com/tomcat-11.0.7.tar.gz",
                     ),
                 ],
             ),
-            latest_collection=Collection(uuid=UUID, version=1, artifacts=[]),
+            latest_collection=_legacy(Collection, uuid=UUID, version=1, artifacts=[]),
         )
         output = _capture(fmt_component_release, data)
         assert "Distributions" in output
@@ -563,9 +632,10 @@ class TestDistributionsTable:
         assert "SHA-256:abcdef123456" in output
 
     def test_component_release_without_distributions(self):
-        data = ComponentReleaseWithCollection(
-            release=Release(uuid=UUID, version="1.0.0", created_date="2024-01-01T00:00:00Z"),
-            latest_collection=Collection(uuid=UUID, version=1, artifacts=[]),
+        data = _legacy(
+            ComponentReleaseWithCollection,
+            release=_legacy(Release, uuid=UUID, version="1.0.0", created_date="2024-01-01T00:00:00Z"),
+            latest_collection=_legacy(Collection, uuid=UUID, version=1, artifacts=[]),
         )
         output = _capture(fmt_component_release, data)
         assert "Distributions" not in output
@@ -584,7 +654,7 @@ class TestDistributionsTable:
                             "componentName": "tomcat",
                             "distributions": [
                                 {
-                                    "distributionType": "zip",
+                                    "distributionId": "zip",
                                     "description": "Zip archive",
                                     "url": "https://repo.example.com/tomcat.zip",
                                     "signatureUrl": "https://repo.example.com/tomcat.zip.asc",
@@ -607,10 +677,11 @@ class TestDistributionsTable:
 
 
 class TestArtifactFormatDetails:
-    """Test display of artifact-format description, signatureUrl, and distributionTypes."""
+    """Test display of artifact-format description, signatureUrl, and distributionIds."""
 
     def test_formats_table_shows_description_and_signature(self):
-        data = Artifact(
+        data = _legacy(
+            Artifact,
             uuid=UUID,
             name="Build SBOM",
             type="BOM",
@@ -629,35 +700,20 @@ class TestArtifactFormatDetails:
         assert "sbom.xml.asc" in output
         assert "application/vnd.cyclonedx+xml" in output
 
-    def test_artifacts_table_shows_distribution_types(self):
-        data = Collection(
-            uuid=UUID,
-            version=1,
-            artifacts=[
-                Artifact(
-                    uuid=UUID,
-                    name="Build SBOM",
-                    type="BOM",
-                    distribution_types=["zip", "tar.gz"],
-                    formats=[ArtifactFormat(media_type="application/xml", url="https://example.com/sbom.xml")],
-                )
-            ],
-        )
-        output = _capture(fmt_collection, data)
-        assert "zip, tar.gz" in output
-
     def test_artifacts_table_prefers_distribution_ids(self):
         """v0.4.0: distribution_ids should be displayed when present."""
-        data = Collection(
+        data = _legacy(
+            Collection,
             uuid=UUID,
             version=1,
             artifacts=[
-                Artifact(
+                _legacy(
+                    Artifact,
                     uuid=UUID,
                     name="Build SBOM",
                     type="BOM",
                     distribution_ids=["dist-1", "dist-2"],
-                    formats=[ArtifactFormat(media_type="application/xml", url="https://example.com/sbom.xml")],
+                    formats=[_legacy(ArtifactFormat, media_type="application/xml", url="https://example.com/sbom.xml")],
                 )
             ],
         )
@@ -666,8 +722,10 @@ class TestArtifactFormatDetails:
 
     def test_distributions_table_prefers_distribution_id(self):
         """v0.4.0: distribution_id should be displayed when present."""
-        data = ComponentReleaseWithCollection(
-            release=Release(
+        data = _legacy(
+            ComponentReleaseWithCollection,
+            release=_legacy(
+                Release,
                 uuid=UUID,
                 version="1.0.0",
                 created_date="2024-01-01T00:00:00Z",
@@ -675,45 +733,10 @@ class TestArtifactFormatDetails:
                     ReleaseDistribution(distribution_id="dist-abc", description="Primary"),
                 ],
             ),
-            latest_collection=Collection(uuid=UUID, version=1, artifacts=[]),
+            latest_collection=_legacy(Collection, uuid=UUID, version=1, artifacts=[]),
         )
         output = _capture(fmt_component_release, data)
         assert "dist-abc" in output
-
-    def test_distributions_table_falls_back_to_type(self):
-        """Legacy servers: distribution_type shown when distribution_id absent."""
-        data = ComponentReleaseWithCollection(
-            release=Release(
-                uuid=UUID,
-                version="1.0.0",
-                created_date="2024-01-01T00:00:00Z",
-                distributions=[
-                    ReleaseDistribution(distribution_type="tar.gz", description="Legacy"),
-                ],
-            ),
-            latest_collection=Collection(uuid=UUID, version=1, artifacts=[]),
-        )
-        output = _capture(fmt_component_release, data)
-        assert "tar.gz" in output
-
-    def test_artifacts_table_empty_distribution_ids_no_fallback(self):
-        """Empty distribution_ids=() must not fall back to legacy distribution_types."""
-        data = Collection(
-            uuid=UUID,
-            version=1,
-            artifacts=[
-                Artifact(
-                    uuid=UUID,
-                    name="Build SBOM",
-                    type="BOM",
-                    distribution_ids=(),
-                    distribution_types=("binary",),
-                    formats=[ArtifactFormat(media_type="application/xml", url="https://example.com/sbom.xml")],
-                )
-            ],
-        )
-        output = _capture(fmt_collection, data)
-        assert "binary" not in output
 
     def test_inspect_artifact_shows_description_and_signature(self):
         """Inspect output should show description and signatureUrl for artifact formats."""
@@ -735,7 +758,7 @@ class TestArtifactFormatDetails:
                                         "uuid": UUID2,
                                         "name": "VDR",
                                         "type": "VULNERABILITIES",
-                                        "distributionTypes": ["zip"],
+                                        "distributionIds": ["zip"],
                                         "formats": [
                                             {
                                                 "mediaType": "application/vnd.cyclonedx+xml",
@@ -779,7 +802,8 @@ class TestComponentFormatter:
 class TestReleasesFormatter:
     def test_fmt_releases(self):
         releases = [
-            Release(
+            _legacy(
+                Release,
                 uuid=UUID,
                 version="1.0.0",
                 component_name="App",
@@ -787,7 +811,8 @@ class TestReleasesFormatter:
                 release_date="2024-02-01T00:00:00Z",
                 pre_release=False,
             ),
-            Release(
+            _legacy(
+                Release,
                 uuid=UUID2,
                 version="2.0.0",
                 component_name="App",
@@ -802,7 +827,7 @@ class TestReleasesFormatter:
 
     def test_format_output_releases_command(self):
         releases = [
-            Release(uuid=UUID, version="1.0.0", created_date="2024-01-01T00:00:00Z"),
+            _legacy(Release, uuid=UUID, version="1.0.0", created_date="2024-01-01T00:00:00Z"),
         ]
         output = _capture(format_output, releases, command="releases")
         assert "Component Releases" in output
@@ -812,13 +837,21 @@ class TestReleasesFormatter:
 class TestCollectionsFormatter:
     def test_fmt_collections(self):
         cols = [
-            Collection(uuid=UUID, version=1, date="2024-01-01T00:00:00Z", belongs_to="COMPONENT_RELEASE", artifacts=[]),
-            Collection(
+            _legacy(
+                Collection,
+                uuid=UUID,
+                version=1,
+                created_date="2024-01-01T00:00:00Z",
+                belongs_to="COMPONENT_RELEASE",
+                artifacts=[],
+            ),
+            _legacy(
+                Collection,
                 uuid=UUID2,
                 version=2,
-                date="2024-06-01T00:00:00Z",
+                created_date="2024-06-01T00:00:00Z",
                 belongs_to="COMPONENT_RELEASE",
-                artifacts=[Artifact(uuid=UUID, name="SBOM", type="BOM", formats=[])],
+                artifacts=[_legacy(Artifact, uuid=UUID, name="SBOM", type="BOM", formats=[])],
             ),
         ]
         output = _capture(fmt_collections, cols)
@@ -829,7 +862,7 @@ class TestCollectionsFormatter:
         assert "1" in output
 
     def test_format_output_collections_command(self):
-        cols = [Collection(uuid=UUID, version=1, artifacts=[])]
+        cols = [_legacy(Collection, uuid=UUID, version=1, artifacts=[])]
         output = _capture(format_output, cols, command="collections")
         assert "Collections" in output
 
@@ -926,7 +959,8 @@ class TestCollectionUpdateReasonComment:
     """Cover the update_reason.comment branch at _cli_fmt.py:239."""
 
     def test_update_reason_without_comment(self):
-        data = Collection(
+        data = _legacy(
+            Collection,
             uuid=UUID,
             version=2,
             update_reason=CollectionUpdateReason(type=CollectionUpdateReasonType.VEX_UPDATED),
@@ -1030,7 +1064,8 @@ class TestArtifactVersionRendering:
     """Test that fmt_artifact renders version and created_date when present."""
 
     def test_artifact_with_version(self):
-        data = Artifact(
+        data = _legacy(
+            Artifact,
             uuid=UUID,
             name="SBOM",
             type="BOM",
@@ -1042,7 +1077,7 @@ class TestArtifactVersionRendering:
         assert "3" in output
 
     def test_artifact_without_version(self):
-        data = Artifact(uuid=UUID, name="SBOM", type="BOM", formats=[])
+        data = _legacy(Artifact, uuid=UUID, name="SBOM", type="BOM", formats=[])
         output = _capture(fmt_artifact, data)
         assert "Version" not in output
 
@@ -1053,6 +1088,7 @@ class TestFmtSearchComponents:
             timestamp="2024-01-01T00:00:00Z",
             page_start_index=0,
             page_size=100,
+            has_next=False,
             total_results=1,
             results=[Component(uuid=UUID, name="Test Component", identifiers=[])],
         )
@@ -1065,6 +1101,7 @@ class TestFmtSearchComponents:
             timestamp="2024-01-01T00:00:00Z",
             page_start_index=0,
             page_size=100,
+            has_next=False,
             total_results=0,
             results=[],
         )
@@ -1074,12 +1111,16 @@ class TestFmtSearchComponents:
 
 class TestFmtSearchComponentReleases:
     def test_renders_table(self):
-        data = PaginatedComponentReleaseResponse(
+        data = _legacy(
+            PaginatedComponentReleaseResponse,
             timestamp="2024-01-01T00:00:00Z",
             page_start_index=0,
             page_size=100,
+            has_next=False,
             total_results=1,
-            results=[Release(uuid=UUID, version="1.0.0", created_date="2024-01-01T00:00:00Z", pre_release=True)],
+            results=[
+                _legacy(Release, uuid=UUID, version="1.0.0", created_date="2024-01-01T00:00:00Z", pre_release=True)
+            ],
         )
         output = _capture(fmt_search_component_releases, data)
         assert "Component Releases" in output

@@ -21,6 +21,7 @@ from libtea.models import (
     ProductRelease,
     Release,
 )
+from tests.spec_data import LEGACY
 
 
 class TestSearchProducts:
@@ -62,7 +63,7 @@ class TestSearchProducts:
                 "results": [],
             },
         )
-        resp = client.search_products("CPE", "cpe:2.3:a:vendor:product", page_offset=10, page_size=25)
+        resp = client.search_products("CPE", "cpe:2.3:a:vendor:product", page_token="10", page_size=25)
         request = responses.calls[0].request
         assert "pageOffset=10" in str(request.url)
         assert "pageSize=25" in str(request.url)
@@ -129,7 +130,7 @@ class TestListProducts:
                 "results": [],
             },
         )
-        resp = client.list_products(page_offset=10, page_size=25)
+        resp = client.list_products(page_token="10", page_size=25)
         request = responses.calls[0].request
         assert "pageOffset=10" in str(request.url)
         assert "pageSize=25" in str(request.url)
@@ -141,7 +142,7 @@ class TestListProducts:
 
     def test_list_products_rejects_negative_offset(self, client):
         with pytest.raises(TeaValidationError):
-            client.list_products(page_offset=-1)
+            client.list_products(page_token="-1")
 
 
 class TestSearchProductReleases:
@@ -211,7 +212,7 @@ class TestListProductReleases:
                 "results": [],
             },
         )
-        client.list_product_releases(page_offset=5, page_size=50)
+        client.list_product_releases(page_token="5", page_size=50)
         request = responses.calls[0].request
         assert "pageOffset=5" in str(request.url)
         assert "pageSize=50" in str(request.url)
@@ -222,7 +223,7 @@ class TestListProductReleases:
 
     def test_list_product_releases_invalid_page_offset(self, client):
         with pytest.raises(TeaValidationError):
-            client.list_product_releases(page_offset=-1)
+            client.list_product_releases(page_token="-1")
 
 
 class TestSearchComponents:
@@ -264,7 +265,7 @@ class TestSearchComponents:
                 "results": [],
             },
         )
-        resp = client.search_components("CPE", "cpe:2.3:a:vendor:product", page_offset=10, page_size=25)
+        resp = client.search_components("CPE", "cpe:2.3:a:vendor:product", page_token="10", page_size=25)
         request = responses.calls[0].request
         assert "pageOffset=10" in str(request.url)
         assert "pageSize=25" in str(request.url)
@@ -331,7 +332,7 @@ class TestListComponents:
                 "results": [],
             },
         )
-        resp = client.list_components(page_offset=10, page_size=25)
+        resp = client.list_components(page_token="10", page_size=25)
         request = responses.calls[0].request
         assert "pageOffset=10" in str(request.url)
         assert "pageSize=25" in str(request.url)
@@ -343,7 +344,7 @@ class TestListComponents:
 
     def test_list_components_rejects_negative_offset(self, client):
         with pytest.raises(TeaValidationError):
-            client.list_components(page_offset=-1)
+            client.list_components(page_token="-1")
 
 
 class TestSearchComponentReleases:
@@ -421,7 +422,7 @@ class TestListComponentReleases:
 
     def test_list_component_releases_invalid_offset(self, client):
         with pytest.raises(TeaValidationError):
-            client.list_component_releases(page_offset=-1)
+            client.list_component_releases(page_token="-1")
 
 
 class TestProduct:
@@ -595,8 +596,9 @@ class TestComponentRelease:
 class TestArtifact:
     @responses.activate
     def test_get_artifact(self, client, base_url):
+        # TEA 0.4.0 has no /latest suffix: artifact metadata lives at /artifact/{uuid}
         responses.get(
-            f"{base_url}/artifact/e5f6a7b8-c9d0-1234-efab-345678901234/latest",
+            f"{base_url}/artifact/e5f6a7b8-c9d0-1234-efab-345678901234",
             json={
                 "uuid": "e5f6a7b8-c9d0-1234-efab-345678901234",
                 "name": "SBOM",
@@ -615,20 +617,10 @@ class TestArtifact:
         assert artifact.name == "SBOM"
 
     @responses.activate
-    def test_get_artifact_version(self, client, base_url):
-        responses.get(
-            f"{base_url}/artifact/e5f6a7b8-c9d0-1234-efab-345678901234/2",
-            json={
-                "uuid": "e5f6a7b8-c9d0-1234-efab-345678901234",
-                "name": "SBOM",
-                "type": "BOM",
-                "version": 2,
-                "formats": [],
-            },
-        )
-        artifact = client.get_artifact_version("e5f6a7b8-c9d0-1234-efab-345678901234", 2)
-        assert isinstance(artifact, Artifact)
-        assert artifact.version == 2
+    def test_get_artifact_version_requires_tea_1x(self, client):
+        with pytest.raises(TeaValidationError, match="TEA 1.x"):
+            client.get_artifact_version("e5f6a7b8-c9d0-1234-efab-345678901234", 2)
+        assert len(responses.calls) == 0
 
     def test_get_artifact_version_rejects_zero(self, client):
         with pytest.raises(TeaValidationError, match="Artifact version must be >= 1"):
@@ -648,20 +640,19 @@ class TestSpecV040Fields:
 
     def test_artifact_distribution_ids(self):
         art = Artifact.model_validate(
-            {"uuid": self._ART_UUID, "distributionIds": [self._DIST_UUID, self._DIST_UUID2], "formats": []}
+            {
+                "uuid": self._ART_UUID,
+                "type": "BOM",
+                "distributionIds": [self._DIST_UUID, self._DIST_UUID2],
+                "formats": [],
+            },
+            context=LEGACY,
         )
         assert art.distribution_ids == (self._DIST_UUID, self._DIST_UUID2)
 
     def test_artifact_distribution_ids_absent(self):
-        art = Artifact.model_validate({"uuid": self._ART_UUID, "formats": []})
+        art = Artifact.model_validate({"uuid": self._ART_UUID, "type": "BOM", "formats": []}, context=LEGACY)
         assert art.distribution_ids is None
-
-    def test_artifact_backward_compat_distribution_types(self):
-        """Older servers may still send distributionTypes — must not break."""
-        art = Artifact.model_validate(
-            {"uuid": self._ART_UUID, "distributionTypes": ["binary", "source"], "formats": []}
-        )
-        assert art.distribution_types == ("binary", "source")
 
     def test_release_distribution_id(self):
         from libtea.models import ReleaseDistribution
@@ -669,41 +660,12 @@ class TestSpecV040Fields:
         dist = ReleaseDistribution.model_validate({"distributionId": self._DIST_UUID, "description": "core binary"})
         assert dist.distribution_id == self._DIST_UUID
 
-    def test_release_distribution_backward_compat(self):
-        """Older servers may send distributionType instead of distributionId."""
-        from libtea.models import ReleaseDistribution
-
-        dist = ReleaseDistribution.model_validate({"distributionType": "binary", "description": "old format"})
-        assert dist.distribution_type == "binary"
-        assert dist.distribution_id is None
-
     def test_artifact_distribution_ids_empty_array(self):
         """Empty distributionIds array should parse to empty tuple, not None."""
-        art = Artifact.model_validate({"uuid": self._ART_UUID, "distributionIds": [], "formats": []})
-        assert art.distribution_ids == ()
-
-    def test_artifact_coexistence_old_and_new_fields(self):
-        """A server sending both old and new fields should preserve both."""
         art = Artifact.model_validate(
-            {
-                "uuid": self._ART_UUID,
-                "distributionIds": [self._DIST_UUID],
-                "distributionTypes": ["binary"],
-                "formats": [],
-            }
+            {"uuid": self._ART_UUID, "type": "BOM", "distributionIds": [], "formats": []}, context=LEGACY
         )
-        assert art.distribution_ids == (self._DIST_UUID,)
-        assert art.distribution_types == ("binary",)
-
-    def test_release_distribution_coexistence_old_and_new(self):
-        """Both distributionId and distributionType present — both preserved."""
-        from libtea.models import ReleaseDistribution
-
-        dist = ReleaseDistribution.model_validate(
-            {"distributionId": self._DIST_UUID, "distributionType": "binary", "description": "both fields"}
-        )
-        assert dist.distribution_id == self._DIST_UUID
-        assert dist.distribution_type == "binary"
+        assert art.distribution_ids == ()
 
 
 class TestDiscovery:
@@ -805,93 +767,93 @@ class TestFromWellKnown:
 class TestProbeEndpoint:
     @responses.activate
     def test_probe_success(self):
-        responses.head("https://api.example.com/v1", status=200)
-        probe_endpoint("https://api.example.com/v1")  # should not raise
+        responses.head("https://api.example.com/v0.4.0", status=200)
+        probe_endpoint("https://api.example.com/v0.4.0")  # should not raise
 
     @responses.activate
     def test_probe_404_triggers_failover(self):
         """404 means wrong path/version — probe should fail to trigger failover."""
-        responses.head("https://api.example.com/v1", status=404)
+        responses.head("https://api.example.com/v0.4.0", status=404)
         with pytest.raises(TeaConnectionError, match="HTTP 404"):
-            probe_endpoint("https://api.example.com/v1")
+            probe_endpoint("https://api.example.com/v0.4.0")
 
     @responses.activate
     def test_probe_410_triggers_failover(self):
         """410 Gone means endpoint removed — probe should fail to trigger failover."""
-        responses.head("https://api.example.com/v1", status=410)
+        responses.head("https://api.example.com/v0.4.0", status=410)
         with pytest.raises(TeaConnectionError, match="HTTP 410"):
-            probe_endpoint("https://api.example.com/v1")
+            probe_endpoint("https://api.example.com/v0.4.0")
 
     @responses.activate
     def test_probe_401_is_ok(self):
         """401 means auth required but server is reachable — probe should succeed."""
-        responses.head("https://api.example.com/v1", status=401)
-        probe_endpoint("https://api.example.com/v1")  # should not raise
+        responses.head("https://api.example.com/v0.4.0", status=401)
+        probe_endpoint("https://api.example.com/v0.4.0")  # should not raise
 
     @responses.activate
     def test_probe_405_is_ok(self):
         """405 means HEAD not allowed but server is reachable — probe should succeed."""
-        responses.head("https://api.example.com/v1", status=405)
-        probe_endpoint("https://api.example.com/v1")  # should not raise
+        responses.head("https://api.example.com/v0.4.0", status=405)
+        probe_endpoint("https://api.example.com/v0.4.0")  # should not raise
 
     @responses.activate
     def test_probe_trailing_slash_redirect_is_ok(self):
         """Trailing-slash redirect (e.g. Django APPEND_SLASH) should not fail the probe."""
-        responses.head("https://api.example.com/v1", status=301, headers={"Location": "/v1/"})
-        probe_endpoint("https://api.example.com/v1")  # should not raise
+        responses.head("https://api.example.com/v0.4.0", status=301, headers={"Location": "/v0.4.0/"})
+        probe_endpoint("https://api.example.com/v0.4.0")  # should not raise
 
     @responses.activate
     def test_probe_trailing_slash_redirect_absolute_url(self):
         """Trailing-slash redirect with absolute Location header."""
         responses.head(
-            "https://api.example.com/v1",
+            "https://api.example.com/v0.4.0",
             status=301,
-            headers={"Location": "https://api.example.com/v1/"},
+            headers={"Location": "https://api.example.com/v0.4.0/"},
         )
-        probe_endpoint("https://api.example.com/v1")  # should not raise
+        probe_endpoint("https://api.example.com/v0.4.0")  # should not raise
 
     @responses.activate
     def test_probe_cross_path_redirect_raises_connection_error(self):
         """Redirect to a different path should fail."""
-        responses.head("https://api.example.com/v1", status=302, headers={"Location": "/elsewhere"})
+        responses.head("https://api.example.com/v0.4.0", status=302, headers={"Location": "/elsewhere"})
         with pytest.raises(TeaConnectionError, match="redirect"):
-            probe_endpoint("https://api.example.com/v1")
+            probe_endpoint("https://api.example.com/v0.4.0")
 
     @responses.activate
     def test_probe_cross_origin_redirect_raises_connection_error(self):
         """Redirect to a different host should fail."""
         responses.head(
-            "https://api.example.com/v1",
+            "https://api.example.com/v0.4.0",
             status=301,
-            headers={"Location": "https://evil.example.com/v1/"},
+            headers={"Location": "https://evil.example.com/v0.4.0/"},
         )
         with pytest.raises(TeaConnectionError, match="redirect"):
-            probe_endpoint("https://api.example.com/v1")
+            probe_endpoint("https://api.example.com/v0.4.0")
 
     @responses.activate
     def test_probe_500_raises_server_error(self):
-        responses.head("https://api.example.com/v1", status=500)
+        responses.head("https://api.example.com/v0.4.0", status=500)
         with pytest.raises(TeaServerError):
-            probe_endpoint("https://api.example.com/v1")
+            probe_endpoint("https://api.example.com/v0.4.0")
 
     @responses.activate
     def test_probe_connection_error_raises(self):
-        responses.head("https://api.example.com/v1", body=requests.ConnectionError("refused"))
+        responses.head("https://api.example.com/v0.4.0", body=requests.ConnectionError("refused"))
         with pytest.raises(TeaConnectionError):
-            probe_endpoint("https://api.example.com/v1")
+            probe_endpoint("https://api.example.com/v0.4.0")
 
     @responses.activate
     def test_probe_timeout_raises(self):
-        responses.head("https://api.example.com/v1", body=requests.Timeout("timed out"))
+        responses.head("https://api.example.com/v0.4.0", body=requests.Timeout("timed out"))
         with pytest.raises(TeaConnectionError):
-            probe_endpoint("https://api.example.com/v1")
+            probe_endpoint("https://api.example.com/v0.4.0")
 
     @responses.activate
     def test_probe_request_exception_raises(self):
         """Generic RequestException (not ConnectionError/Timeout) also raises TeaConnectionError."""
-        responses.head("https://api.example.com/v1", body=requests.exceptions.TooManyRedirects("too many"))
+        responses.head("https://api.example.com/v0.4.0", body=requests.exceptions.TooManyRedirects("too many"))
         with pytest.raises(TeaConnectionError):
-            probe_endpoint("https://api.example.com/v1")
+            probe_endpoint("https://api.example.com/v0.4.0")
 
 
 class TestVersionNegotiation:
@@ -1062,7 +1024,7 @@ class TestPagination:
                 "results": [],
             },
         )
-        resp = client.get_product_releases("a1b2c3d4-e5f6-7890-abcd-ef1234567890", page_offset=50, page_size=25)
+        resp = client.get_product_releases("a1b2c3d4-e5f6-7890-abcd-ef1234567890", page_token="50", page_size=25)
         request = responses.calls[0].request
         assert "pageOffset=50" in str(request.url)
         assert "pageSize=25" in str(request.url)
@@ -1202,7 +1164,7 @@ class TestWeakChecksumWarning:
         content = b"test content"
         responses.get("https://artifacts.example.com/sbom.json", body=content)
         md5 = hashlib.md5(content).hexdigest()
-        checksums = [Checksum(algorithm_type=ChecksumAlgorithm.MD5, algorithm_value=md5)]
+        checksums = [Checksum.model_validate({"algType": "MD5", "algValue": md5}, context=LEGACY)]
         dest = tmp_path / "sbom.json"
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")

@@ -2,7 +2,7 @@ import responses
 
 from libtea.conformance import ConformanceResult, run_conformance
 
-BASE_URL = "https://api.example.com/tea/v1"
+BASE_URL = "https://api.example.com/tea/v0.4.0"
 
 _PAGINATED_EMPTY = {
     "timestamp": "2024-01-01T00:00:00Z",

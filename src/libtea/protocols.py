@@ -25,6 +25,7 @@ from libtea.models import (
     PaginatedProductResponse,
     Product,
     ProductRelease,
+    ProductReleaseWithCollection,
     Release,
 )
 
@@ -42,35 +43,38 @@ class TeaClientProtocol(Protocol):
     :func:`~libtea._http.probe_endpoint` instead.
     """
 
+    spec_version: str
+    is_legacy: bool
+
     # --- Discovery ---
 
-    def discover(self, tei: str) -> list[DiscoveryInfo]: ...
+    def discover(self, tei: str | None = None, *, purl: str | None = None) -> list[DiscoveryInfo]: ...
 
     # --- Products ---
 
-    def list_products(self, *, page_offset: int = 0, page_size: int = 100) -> PaginatedProductResponse: ...
+    def list_products(self, *, page_token: str | None = None, page_size: int = 100) -> PaginatedProductResponse: ...
 
     def search_products(
-        self, id_type: str, id_value: str, *, page_offset: int = 0, page_size: int = 100
+        self, id_type: str, id_value: str, *, page_token: str | None = None, page_size: int = 100
     ) -> PaginatedProductResponse: ...
 
     def get_product(self, uuid: str) -> Product: ...
 
     def get_product_releases(
-        self, uuid: str, *, page_offset: int = 0, page_size: int = 100
+        self, uuid: str, *, page_token: str | None = None, page_size: int = 100
     ) -> PaginatedProductReleaseResponse: ...
 
     # --- Product Releases ---
 
     def list_product_releases(
-        self, *, page_offset: int = 0, page_size: int = 100
+        self, *, page_token: str | None = None, page_size: int = 100
     ) -> PaginatedProductReleaseResponse: ...
 
     def search_product_releases(
-        self, id_type: str, id_value: str, *, page_offset: int = 0, page_size: int = 100
+        self, id_type: str, id_value: str, *, page_token: str | None = None, page_size: int = 100
     ) -> PaginatedProductReleaseResponse: ...
 
-    def get_product_release(self, uuid: str) -> ProductRelease: ...
+    def get_product_release(self, uuid: str) -> ProductReleaseWithCollection: ...
 
     def get_product_release_collection_latest(self, uuid: str) -> Collection: ...
 
@@ -84,10 +88,10 @@ class TeaClientProtocol(Protocol):
 
     def get_component_releases(self, uuid: str) -> list[Release]: ...
 
-    def list_components(self, *, page_offset: int = 0, page_size: int = 100) -> PaginatedComponentResponse: ...
+    def list_components(self, *, page_token: str | None = None, page_size: int = 100) -> PaginatedComponentResponse: ...
 
     def search_components(
-        self, id_type: str, id_value: str, *, page_offset: int = 0, page_size: int = 100
+        self, id_type: str, id_value: str, *, page_token: str | None = None, page_size: int = 100
     ) -> PaginatedComponentResponse: ...
 
     # --- Component Releases ---
@@ -101,11 +105,11 @@ class TeaClientProtocol(Protocol):
     def get_component_release_collection(self, uuid: str, version: int) -> Collection: ...
 
     def list_component_releases(
-        self, *, page_offset: int = 0, page_size: int = 100
+        self, *, page_token: str | None = None, page_size: int = 100
     ) -> PaginatedComponentReleaseResponse: ...
 
     def search_component_releases(
-        self, id_type: str, id_value: str, *, page_offset: int = 0, page_size: int = 100
+        self, id_type: str, id_value: str, *, page_token: str | None = None, page_size: int = 100
     ) -> PaginatedComponentReleaseResponse: ...
 
     # --- CLE ---
@@ -129,6 +133,17 @@ class TeaClientProtocol(Protocol):
         url: str,
         dest: Path,
         *,
+        verify_checksums: list[Checksum] | None = None,
+        max_download_bytes: int | None = None,
+    ) -> Path: ...
+
+    def download_artifact_content(
+        self,
+        uuid: str,
+        dest: Path,
+        *,
+        media_type: str,
+        version: int | None = None,
         verify_checksums: list[Checksum] | None = None,
         max_download_bytes: int | None = None,
     ) -> Path: ...

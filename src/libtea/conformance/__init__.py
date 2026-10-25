@@ -3,16 +3,21 @@
 Usage (programmatic)::
 
     from libtea.conformance import run_conformance
-    result = run_conformance(base_url="https://tea.example.com/v1", tei="urn:tei:...")
+    result = run_conformance(
+        base_url="https://tea.example.com/v1",
+        tei="tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1",
+    )
     print(f"{result.passed} passed, {result.failed} failed, {result.warned} warned, {result.skipped} skipped")
 
 Usage (CLI)::
 
-    tea-cli conformance --base-url https://tea.example.com/v1 --tei "urn:tei:..."
+    tea-cli conformance --base-url https://tea.example.com/v1 \\
+        --tei "tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
 
 Usage (pytest plugin)::
 
-    pytest --tea-base-url https://tea.example.com/v1 --tea-tei "urn:tei:..."
+    pytest --tea-base-url https://tea.example.com/v1 \\
+        --tea-tei "tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
 """
 
 from __future__ import annotations

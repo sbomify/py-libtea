@@ -20,6 +20,7 @@ from libtea.exceptions import (
     TeaServerError,
     TeaValidationError,
 )
+from tests.spec_data import LEGACY_BASE_URL
 
 
 class TestTeaHttpClient:
@@ -125,6 +126,13 @@ class TestTeaHttpClient:
     @responses.activate
     def test_get_json_non_json_response_raises_validation_error(self, http_client, base_url):
         responses.get(f"{base_url}/product/abc", body="not json", status=200)
+        with pytest.raises(TeaValidationError, match="Invalid JSON"):
+            http_client.get_json("/product/abc")
+
+    @responses.activate
+    def test_get_json_deeply_nested_body_raises_validation_error(self, http_client, base_url):
+        """json.loads raises RecursionError, not ValueError, when nesting exceeds the recursion limit."""
+        responses.get(f"{base_url}/product/abc", body=b"[" * 100_000, status=200)
         with pytest.raises(TeaValidationError, match="Invalid JSON"):
             http_client.get_json("/product/abc")
 
@@ -314,7 +322,85 @@ class TestEmptyBodyErrors:
         assert exc_info.value.error_type is None
 
 
-BASE_URL = "https://api.example.com/tea/v1"
+class TestErrorTypeFromBody:
+    """Every 4xx surfaces the TEA ``error`` value when the body is a JSON object with a string ``error``."""
+
+    @responses.activate
+    @pytest.mark.parametrize("status, error", [(400, "INVALID_PAGE_TOKEN"), (406, "NO_ACCEPTABLE_FORMAT")])
+    def test_4xx_carries_error_type(self, http_client, status, error):
+        responses.get(f"{LEGACY_BASE_URL}/products", status=status, json={"error": error})
+        with pytest.raises(TeaRequestError) as exc:
+            http_client.get_json("/products")
+        assert exc.value.error_type == error
+        assert error in str(exc.value)
+
+    @responses.activate
+    def test_400_deeply_nested_body_has_no_error_type(self, http_client):
+        """json.loads raises RecursionError (not ValueError) on deep nesting under Python 3.11."""
+        responses.get(f"{LEGACY_BASE_URL}/products", status=400, body=b"[" * 4000)
+        with pytest.raises(TeaRequestError) as exc:
+            http_client.get_json("/products")
+        assert exc.value.error_type is None
+
+    @responses.activate
+    def test_unknown_error_value_passes_through(self, http_client):
+        responses.get(f"{LEGACY_BASE_URL}/products", status=404, json={"error": "SOMETHING_NEW"})
+        with pytest.raises(TeaNotFoundError) as exc:
+            http_client.get_json("/products")
+        assert exc.value.error_type == "SOMETHING_NEW"
+
+    @responses.activate
+    def test_404_non_string_error_ignored(self, http_client):
+        responses.get(f"{LEGACY_BASE_URL}/products", status=404, json={"error": 5})
+        with pytest.raises(TeaNotFoundError) as exc:
+            http_client.get_json("/products")
+        assert exc.value.error_type is None
+
+    @responses.activate
+    def test_400_non_string_error_ignored(self, http_client):
+        responses.get(f"{LEGACY_BASE_URL}/products", status=400, json={"error": ["INVALID_REQUEST"]})
+        with pytest.raises(TeaRequestError) as exc:
+            http_client.get_json("/products")
+        assert exc.value.error_type is None
+
+    @responses.activate
+    def test_400_non_json_body_has_no_error_type(self, http_client):
+        responses.get(f"{LEGACY_BASE_URL}/products", status=400, body="Bad Request")
+        with pytest.raises(TeaRequestError, match="Bad Request") as exc:
+            http_client.get_json("/products")
+        assert exc.value.error_type is None
+
+    @responses.activate
+    @pytest.mark.parametrize("status, exc_type", [(400, TeaRequestError), (404, TeaNotFoundError)])
+    def test_long_message_keeps_error_type(self, http_client, status, exc_type):
+        """A body past the 200-char snippet limit still yields its error type; the message stays truncated."""
+        body = {"error": "INVALID_PAGE_TOKEN", "message": "m" * 500}
+        responses.get(f"{LEGACY_BASE_URL}/products", status=status, json=body)
+        with pytest.raises(exc_type) as exc:
+            http_client.get_json("/products")
+        assert exc.value.error_type == "INVALID_PAGE_TOKEN"
+        if exc_type is TeaRequestError:
+            assert "(truncated)" in str(exc.value)
+            assert "m" * 300 not in str(exc.value)
+
+    @responses.activate
+    def test_error_key_past_read_bound_not_found(self, http_client):
+        """Only the first 4 KiB of a 4xx body is read, so an ``error`` key after it is not seen."""
+        body = '{"padding": "' + "x" * 5000 + '", "error": "INVALID_REQUEST"}'
+        responses.get(f"{LEGACY_BASE_URL}/products", status=400, body=body)
+        with pytest.raises(TeaRequestError) as exc:
+            http_client.get_json("/products")
+        assert exc.value.error_type is None
+
+    @responses.activate
+    def test_3xx_has_no_error_type(self, http_client):
+        responses.get(f"{LEGACY_BASE_URL}/products", status=301)
+        with pytest.raises(TeaRequestError) as exc:
+            http_client.get_json("/products")
+        assert exc.value.error_type is None
+
+
+BASE_URL = "https://api.example.com/tea/v0.4.0"
 
 
 class TestBasicAuth:
@@ -492,10 +578,10 @@ class TestResponseSizeLimit:
     @responses.activate
     def test_rejects_oversized_content_length(self):
         """Content-Length header advertising oversized body triggers rejection."""
-        client = TeaHttpClient("https://api.example.com/v1")
+        client = TeaHttpClient("https://api.example.com/v0.4.0")
         client._max_response_bytes = 5  # Very small limit
         responses.get(
-            "https://api.example.com/v1/product/abc",
+            "https://api.example.com/v0.4.0/product/abc",
             json={"uuid": "abc"},
             status=200,
         )
@@ -506,10 +592,10 @@ class TestResponseSizeLimit:
     @responses.activate
     def test_rejects_oversized_body(self):
         """Body exceeding limit is rejected even without Content-Length."""
-        client = TeaHttpClient("https://api.example.com/v1")
+        client = TeaHttpClient("https://api.example.com/v0.4.0")
         client._max_response_bytes = 100
         large_body = b'{"data": "' + b"x" * 200 + b'"}'
-        responses.get("https://api.example.com/v1/product/abc", body=large_body, status=200)
+        responses.get("https://api.example.com/v0.4.0/product/abc", body=large_body, status=200)
         with pytest.raises(TeaValidationError, match="exceeds limit"):
             client.get_json("/product/abc")
         client.close()
@@ -517,8 +603,8 @@ class TestResponseSizeLimit:
     @responses.activate
     def test_normal_response_passes(self):
         """Normal-sized responses pass the size check."""
-        client = TeaHttpClient("https://api.example.com/v1")
-        responses.get("https://api.example.com/v1/product/abc", json={"uuid": "abc"}, status=200)
+        client = TeaHttpClient("https://api.example.com/v0.4.0")
+        responses.get("https://api.example.com/v0.4.0/product/abc", json={"uuid": "abc"}, status=200)
         result = client.get_json("/product/abc")
         assert result == {"uuid": "abc"}
         client.close()
@@ -536,12 +622,12 @@ class TestGzipDecoding:
         payload = json.dumps({"uuid": "abc", "name": "Gzipped"}).encode()
         compressed = gzip.compress(payload)
         responses.get(
-            "https://api.example.com/v1/product/abc",
+            "https://api.example.com/v0.4.0/product/abc",
             body=compressed,
             headers={"Content-Encoding": "gzip", "Content-Type": "application/json"},
             status=200,
         )
-        client = TeaHttpClient("https://api.example.com/v1")
+        client = TeaHttpClient("https://api.example.com/v0.4.0")
         result = client.get_json("/product/abc")
         assert result["name"] == "Gzipped"
         client.close()

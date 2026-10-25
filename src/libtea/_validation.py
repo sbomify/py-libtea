@@ -14,20 +14,26 @@ from libtea.exceptions import TeaValidationError
 _M = TypeVar("_M", bound=BaseModel)
 
 
-def _validate(model_cls: type[_M], data: Any) -> _M:
+def _context(legacy: bool) -> dict[str, bool] | None:
+    # No context means 1.0.0 rules; 0.4.0 compatibility shims key off ``tea_legacy``.
+    return {"tea_legacy": True} if legacy else None
+
+
+def _validate(model_cls: type[_M], data: Any, *, legacy: bool = False) -> _M:
     """Validate a JSON-decoded value against a Pydantic model.
 
     Wraps :meth:`pydantic.BaseModel.model_validate`, converting any
     :class:`~pydantic.ValidationError` into :class:`TeaValidationError`
-    so callers only need to catch the ``TeaError`` hierarchy.
+    so callers only need to catch the ``TeaError`` hierarchy. With
+    ``legacy=True`` the model is validated in the 0.4.0 compatibility context.
     """
     try:
-        return model_cls.model_validate(data)
+        return model_cls.model_validate(data, context=_context(legacy))
     except ValidationError as exc:
         raise TeaValidationError(f"Invalid {model_cls.__name__} response: {exc}") from exc
 
 
-def _validate_list(model_cls: type[_M], data: Any) -> list[_M]:
+def _validate_list(model_cls: type[_M], data: Any, *, legacy: bool = False) -> list[_M]:
     """Validate a JSON array where each element conforms to a Pydantic model.
 
     Raises :class:`TeaValidationError` if ``data`` is not a list or any
@@ -35,8 +41,9 @@ def _validate_list(model_cls: type[_M], data: Any) -> list[_M]:
     """
     if not isinstance(data, list):
         raise TeaValidationError(f"Expected list for {model_cls.__name__}, got {type(data).__name__}")
+    context = _context(legacy)
     try:
-        return [model_cls.model_validate(item) for item in data]
+        return [model_cls.model_validate(item, context=context) for item in data]
     except ValidationError as exc:
         raise TeaValidationError(f"Invalid {model_cls.__name__} response: {exc}") from exc
 
@@ -61,19 +68,14 @@ def _validate_path_segment(value: str, name: str = "uuid") -> str:
     return str(parsed)
 
 
-_MAX_PAGE_SIZE = 10000
+_MAX_PAGE_SIZE = 10000  # TEA 0.4.0
+_MAX_PAGE_SIZE_V1 = 100  # TEA 1.0.0 ``pageSize`` maximum
 
 
-def _validate_page_size(page_size: int) -> None:
+def _validate_page_size(page_size: int, max_size: int = _MAX_PAGE_SIZE) -> None:
     """Validate that page_size is within acceptable bounds."""
-    if page_size < 1 or page_size > _MAX_PAGE_SIZE:
-        raise TeaValidationError(f"page_size must be between 1 and {_MAX_PAGE_SIZE}, got {page_size}")
-
-
-def _validate_page_offset(page_offset: int) -> None:
-    """Validate that page_offset is non-negative."""
-    if page_offset < 0:
-        raise TeaValidationError(f"page_offset must be >= 0, got {page_offset}")
+    if page_size < 1 or page_size > max_size:
+        raise TeaValidationError(f"page_size must be between 1 and {max_size}, got {page_size}")
 
 
 def _validate_collection_version(version: int) -> None:

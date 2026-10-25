@@ -3,14 +3,23 @@
 All models use camelCase aliases for JSON serialization (matching the TEA wire
 format), are frozen (immutable after creation), and silently ignore unknown
 fields for forward-compatibility with future TEA spec versions.
+
+Fields required by both TEA 0.4.0 and 1.0.0 are non-optional types. Fields
+required only by 1.0.0 are optional types that are rejected when missing,
+unless the model is validated with ``context={"tea_legacy": True}``.
 """
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal, Self
+from typing import Any, ClassVar, Generic, Literal, Self, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 from pydantic.alias_generators import to_camel
+
+
+def _is_legacy(info: ValidationInfo) -> bool:
+    """Return ``True`` when validating in the TEA 0.4.0 compatibility context."""
+    return bool(info.context and info.context.get("tea_legacy"))
 
 
 class _TeaModel(BaseModel):
@@ -21,6 +30,11 @@ class _TeaModel(BaseModel):
         - ``populate_by_name=True``: Fields can be set by Python name or alias.
         - ``extra="ignore"``: Unknown fields from newer spec versions are silently dropped.
         - ``frozen=True``: Instances are immutable (hashable, safe to cache).
+
+    TEA 1.0.0 rules: fields named in ``_v1_required`` must not be ``None``.
+    Subclasses add other 1.0.0-only checks by overriding :meth:`_v1_problems`
+    and extending ``super()._v1_problems()``. The checks are skipped under the
+    legacy validation context.
     """
 
     model_config = ConfigDict(
@@ -29,6 +43,17 @@ class _TeaModel(BaseModel):
         extra="ignore",  # forward-compat: silently drop unknown fields from future spec versions
         frozen=True,
     )
+
+    _v1_required: ClassVar[tuple[str, ...]] = ()
+
+    def _v1_problems(self) -> list[str]:
+        return [f"missing required field {n!r}" for n in self._v1_required if getattr(self, n) is None]
+
+    @model_validator(mode="after")
+    def _enforce_v1(self, info: ValidationInfo) -> Self:
+        if not _is_legacy(info) and (problems := self._v1_problems()):
+            raise ValueError(f"{type(self).__name__}: {'; '.join(problems)} (TEA 1.0.0)")
+        return self
 
 
 # --- Enums ---
@@ -60,7 +85,7 @@ class ComplianceDocumentType(StrEnum):
     ISO_42001 = "ISO_42001"
     PCI_DSS = "PCI_DSS"
     HIPAA = "HIPAA"
-    FEDRAMP = "FedRAMP"
+    FEDRAMP = "FEDRAMP"
     GDPR = "GDPR"
     CSA_STAR = "CSA_STAR"
     NIST_800_53 = "NIST_800_53"
@@ -70,13 +95,15 @@ class ComplianceDocumentType(StrEnum):
     TISAX = "TISAX"
     CYBER_ESSENTIALS = "CYBER_ESSENTIALS"
     CYBER_ESSENTIALS_PLUS = "CYBER_ESSENTIALS_PLUS"
+    EU_DECLARATION_OF_CONFORMITY = "EU_DECLARATION_OF_CONFORMITY"
 
 
 class TeiType(StrEnum):
-    """TEI URN scheme types per TEA discovery specification.
+    """TEI types per TEA discovery specification.
 
-    These are the valid ``<type>`` values in a TEI URN
-    (``urn:tei:<type>:<domain>:<identifier>``).
+    These are the ``<type>`` values of a TEI. The 0.4.0 URN form
+    (``urn:tei:<type>:<domain>:<identifier>``) accepts only these; the 1.0.0 URI form
+    (``tei://<domain>/<type>/<identifier>``) also accepts other lowercase types.
     """
 
     UUID = "uuid"
@@ -94,6 +121,9 @@ class ChecksumAlgorithm(StrEnum):
 
     Values use hyphen form (e.g. ``SHA-256``). The Checksum model's validator
     normalizes underscore form (``SHA_256``) to hyphen form automatically.
+
+    ``MD5`` is 0.4.0 only: TEA 1.0.0 dropped it, so it is rejected unless the
+    model is validated with the legacy context.
     """
 
     MD5 = "MD5"
@@ -157,20 +187,33 @@ class CollectionUpdateReasonType(StrEnum):
 
 
 class ErrorType(StrEnum):
-    """TEA API error types returned in 404 responses."""
+    """TEA API error types carried in the ``error`` property of a 4xx response body.
+
+    Servers may send values not listed here; clients must not reject them, so
+    :attr:`ErrorResponse.error` is a plain ``str``. ``OBJECT_NOT_SHAREABLE`` is
+    0.4.0 only.
+    """
 
     OBJECT_UNKNOWN = "OBJECT_UNKNOWN"
-    OBJECT_NOT_SHAREABLE = "OBJECT_NOT_SHAREABLE"
+    OBJECT_NOT_SHAREABLE = "OBJECT_NOT_SHAREABLE"  # 0.4.0 only
+    NOT_IMPLEMENTED = "NOT_IMPLEMENTED"
+    NO_ACCEPTABLE_FORMAT = "NO_ACCEPTABLE_FORMAT"
+    SIGNATURE_NOT_FOUND = "SIGNATURE_NOT_FOUND"
+    INVALID_REQUEST = "INVALID_REQUEST"
+    INVALID_PAGE_TOKEN = "INVALID_PAGE_TOKEN"
 
 
 class ErrorResponse(_TeaModel):
-    """TEA API 404 error response body.
+    """TEA API error response body.
 
-    Per spec, 404 responses return ``{"error": "OBJECT_UNKNOWN"}`` or
-    ``{"error": "OBJECT_NOT_SHAREABLE"}`` with no additional fields.
+    ``error`` is typically one of :class:`ErrorType` (compare with ``==``) but
+    is kept as ``str``: the spec forbids rejecting a response over an
+    ``error`` value the client does not know. ``message`` is an optional
+    human-readable explanation for diagnostics only.
     """
 
-    error: ErrorType
+    error: str
+    message: str | None = None
 
 
 # --- Shared types ---
@@ -183,8 +226,10 @@ class Identifier(_TeaModel):
     future TEA spec versions. Compare against :class:`IdentifierType` members
     for known types (e.g. ``ident.id_type == IdentifierType.PURL``).
 
-    Per spec, neither field is required.
+    Both fields are required by TEA 1.0.0; 0.4.0 servers may omit either.
     """
+
+    _v1_required = ("id_type", "id_value")
 
     id_type: str | None = None
     id_value: str | None = None
@@ -194,14 +239,15 @@ class Checksum(_TeaModel):
     """A checksum with algorithm type and hex value.
 
     The ``algorithm_type`` validator normalizes both hyphen form (``SHA-256``) and
-    underscore form (``SHA_256``) to the canonical hyphen form.
+    underscore form (``SHA_256``) to the canonical hyphen form. TEA 1.0.0 does not
+    allow ``MD5``; 0.4.0 servers may still send it.
     """
 
     # Manual aliases because the TEA spec wire format uses abbreviated names
     # (algType/algValue) rather than the full algorithmType/algorithmValue
     # that to_camel would generate from the Python field names.
-    algorithm_type: ChecksumAlgorithm | None = Field(default=None, alias="algType")
-    algorithm_value: str | None = Field(default=None, alias="algValue")
+    algorithm_type: ChecksumAlgorithm = Field(alias="algType")
+    algorithm_value: str = Field(alias="algValue")
 
     @field_validator("algorithm_type", mode="before")
     @classmethod
@@ -217,21 +263,20 @@ class Checksum(_TeaModel):
                 return mapped
         return v
 
+    def _v1_problems(self) -> list[str]:
+        problems = super()._v1_problems()
+        if self.algorithm_type is ChecksumAlgorithm.MD5:
+            problems.append("MD5 is not a TEA 1.0.0 checksum algorithm")
+        return problems
+
 
 # --- Domain objects ---
 
 
 class ReleaseDistribution(_TeaModel):
-    """A distribution format for a component release (e.g. binary, source).
+    """A distribution format for a component release (e.g. binary, source)."""
 
-    As of spec v0.4.0, ``distribution_id`` is required and ``distribution_type``
-    has been removed.  Both fields are kept as **optional** in the model for
-    backward compatibility with older servers that still send
-    ``distributionType`` instead.
-    """
-
-    distribution_id: str | None = None
-    distribution_type: str | None = None
+    distribution_id: str
     description: str | None = None
     identifiers: tuple[Identifier, ...] = ()
     url: str | None = None
@@ -240,7 +285,13 @@ class ReleaseDistribution(_TeaModel):
 
 
 class ArtifactFormat(_TeaModel):
-    """A TEA artifact in a specific format with download URL and checksums."""
+    """A TEA artifact in a specific format with download URL and checksums.
+
+    TEA 1.0.0 requires ``media_type``, and at least one checksum when ``url`` is set.
+    ``checksums`` may be omitted but, when present, must not be empty.
+    """
+
+    _v1_required = ("media_type",)
 
     media_type: str | None = None
     description: str | None = None
@@ -248,39 +299,43 @@ class ArtifactFormat(_TeaModel):
     signature_url: str | None = None
     checksums: tuple[Checksum, ...] = ()
 
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize_mime_type(cls, data: dict) -> dict:  # type: ignore[type-arg]
-        """Accept ``mimeType`` as an alias for ``mediaType`` (older server compat)."""
-        if isinstance(data, dict) and "mimeType" in data and "mediaType" not in data:
-            data["mediaType"] = data.pop("mimeType")
-        return data
+    def _v1_problems(self) -> list[str]:
+        problems = super()._v1_problems()
+        if not self.checksums and (self.url is not None or "checksums" in self.model_fields_set):
+            problems.append("'checksums' must not be empty")
+        return problems
 
 
 class Artifact(_TeaModel):
     """A security-related artifact (e.g. SBOM, VEX, attestation) with available formats.
 
-    As of spec v0.4.0, ``uuid`` is required and ``distribution_ids`` replaces
-    ``distribution_types``.  All fields are kept as **optional** in the model
-    for backward compatibility with older servers that may omit ``uuid`` or
-    still send ``distributionTypes``.
+    TEA 1.0.0 also requires ``version``, ``created_date`` and at least one format.
     """
 
-    uuid: str | None = None
+    _v1_required = ("version", "created_date")
+
+    uuid: str
     name: str | None = None
-    type: ArtifactType | None = None
+    type: ArtifactType
     version: int | None = Field(default=None, ge=1)
     created_date: datetime | None = None
     distribution_ids: tuple[str, ...] | None = None
-    distribution_types: tuple[str, ...] | None = None
-    formats: tuple[ArtifactFormat, ...] = ()
+    formats: tuple[ArtifactFormat, ...]
+
+    def _v1_problems(self) -> list[str]:
+        problems = super()._v1_problems()
+        if not self.formats:
+            problems.append("'formats' must not be empty")
+        return problems
 
 
 class CollectionUpdateReason(_TeaModel):
     """Reason for a collection version update, with optional comment.
 
-    Per spec, no fields are required.
+    TEA 1.0.0 requires ``type``.
     """
+
+    _v1_required = ("type",)
 
     type: CollectionUpdateReasonType | None = None
     comment: str | None = None
@@ -291,23 +346,41 @@ class Collection(_TeaModel):
 
     The UUID matches the owning component or product release. The version
     integer starts at 1 and increments on each content change.
-    Per spec, all fields are optional.
+    TEA 1.0.0 requires ``uuid``, ``version``, ``created_date``, ``belongs_to``,
+    ``update_reason`` and the ``artifacts`` key (an empty list is valid); 0.4.0
+    requires none and names the creation timestamp ``date``.
 
     Attributes:
         uuid: UUID of the owning component or product release.
         version: Collection version number (starts at 1, increments on change).
-        date: Timestamp when this collection version was created.
+        created_date: Timestamp when this collection version was created.
         belongs_to: Whether this collection belongs to a component or product release.
         update_reason: Why this collection version was created.
         artifacts: The artifacts (SBOMs, VEX documents, etc.) in this collection.
     """
 
+    _v1_required = ("uuid", "version", "created_date", "belongs_to", "update_reason")
+
     uuid: str | None = None
     version: int | None = Field(default=None, ge=1)
-    date: datetime | None = None
+    created_date: datetime | None = None
     belongs_to: CollectionBelongsTo | None = None
     update_reason: CollectionUpdateReason | None = None
     artifacts: tuple[Artifact, ...] = ()
+
+    def _v1_problems(self) -> list[str]:
+        problems = super()._v1_problems()
+        if "artifacts" not in self.model_fields_set:
+            problems.append("missing required field 'artifacts'")
+        return problems
+
+    @model_validator(mode="before")
+    @classmethod
+    def _map_legacy_date(cls, data: Any, info: ValidationInfo) -> Any:
+        """Map the 0.4.0 ``date`` key to ``createdDate`` (legacy context only)."""
+        if _is_legacy(info) and isinstance(data, dict) and "date" in data:
+            return {"createdDate": data["date"], **data}
+        return data
 
 
 class ComponentRef(_TeaModel):
@@ -330,7 +403,7 @@ class Release(_TeaModel):
 
     Attributes:
         uuid: Server-assigned UUID.
-        component: UUID of the parent component (set when returned in context).
+        component: UUID of the parent component (required by TEA 1.0.0).
         component_name: Human-readable name of the parent component.
         version: Version string (e.g. ``"1.2.3"``).
         created_date: When the release record was created on the TEA server.
@@ -339,6 +412,8 @@ class Release(_TeaModel):
         identifiers: External identifiers (PURLs, CPEs, etc.).
         distributions: Available distribution formats (binary, source, etc.).
     """
+
+    _v1_required = ("component",)
 
     uuid: str
     component: str | None = None
@@ -354,11 +429,28 @@ class Release(_TeaModel):
 class ComponentReleaseWithCollection(_TeaModel):
     """A component release bundled with its latest collection.
 
-    Returned by ``GET /componentRelease/{uuid}``.
+    Returned by ``GET /componentRelease/{uuid}``. TEA 1.0.0 flattens the release
+    fields next to ``latestCollection``; TEA 0.4.0 nests them under ``release``.
+    Both parse into the same ``release`` / ``latest_collection`` shape.
     """
 
     release: Release
     latest_collection: Collection
+
+    @model_validator(mode="before")
+    @classmethod
+    def _unflatten(cls, data: Any, info: ValidationInfo) -> Any:
+        """Wrap the 1.0.0 flattened wire object into ``release`` + ``latestCollection``.
+
+        Skipped in the legacy context (already nested) and for Python-side
+        construction from a ``Release`` instance.
+        """
+        if _is_legacy(info) or not isinstance(data, dict) or isinstance(data.get("release"), Release):
+            return data
+        return {
+            "release": {k: v for k, v in data.items() if k != "latestCollection"},
+            "latestCollection": data.get("latestCollection"),
+        }
 
 
 class Product(_TeaModel):
@@ -377,7 +469,7 @@ class ProductRelease(_TeaModel):
 
     Attributes:
         uuid: Server-assigned UUID.
-        product: UUID of the parent product (set when returned in context).
+        product: UUID of the parent product (required by TEA 1.0.0).
         product_name: Human-readable name of the parent product.
         version: Version string (e.g. ``"2.0.0"``).
         created_date: When the release record was created on the TEA server.
@@ -386,6 +478,8 @@ class ProductRelease(_TeaModel):
         identifiers: External identifiers (PURLs, CPEs, etc.).
         components: References to the components included in this product release.
     """
+
+    _v1_required: ClassVar[tuple[str, ...]] = ("product",)  # widened so subclasses can extend it
 
     uuid: str
     product: str | None = None
@@ -396,6 +490,21 @@ class ProductRelease(_TeaModel):
     pre_release: bool | None = None
     identifiers: tuple[Identifier, ...] = ()
     components: tuple[ComponentRef, ...]
+
+
+class ProductReleaseWithCollection(ProductRelease):
+    """A product release bundled with its latest collection.
+
+    Returned by ``GET /productRelease/{uuid}``. TEA 1.0.0 requires
+    ``latest_collection``; 0.4.0 servers omit it.
+
+    Attributes:
+        latest_collection: The latest collection for this product release.
+    """
+
+    _v1_required = ProductRelease._v1_required + ("latest_collection",)
+
+    latest_collection: Collection | None = None
 
 
 # --- CLE (Common Lifecycle Enumeration) ---
@@ -497,45 +606,73 @@ class CLE(_TeaModel):
 
 # --- Pagination ---
 
+_R = TypeVar("_R")
+_LEGACY_PAGE_KEYS = ("timestamp", "pageStartIndex", "pageSize", "totalResults")
 
-class PaginatedProductResponse(_TeaModel):
+
+class _PaginatedResponse(_TeaModel, Generic[_R]):
+    """Common fields of a paginated TEA response.
+
+    TEA 1.0.0 pages carry ``has_next`` and an opaque ``next_page_token``. 0.4.0
+    pages carry offset metadata instead; under the legacy context ``has_next``
+    and ``next_page_token`` are derived from it, the token being the next
+    result offset as a string. Outside the legacy context the offset metadata
+    is dropped, so ``total_results is None`` exactly on TEA 1.x pages.
+    """
+
+    has_next: bool
+    next_page_token: str | None = None
+    # TEA 0.4.0 only.
+    timestamp: datetime | None = None
+    page_start_index: int | None = None
+    page_size: int | None = None
+    total_results: int | None = None
+    results: tuple[_R, ...] = ()
+
+    def _v1_problems(self) -> list[str]:
+        problems = super()._v1_problems()
+        if "results" not in self.model_fields_set:
+            problems.append("missing required field 'results'")
+        if self.has_next and not self.next_page_token:
+            problems.append("hasNext is true but nextPageToken is missing")
+        return problems
+
+    @model_validator(mode="before")
+    @classmethod
+    def _map_legacy_offsets(cls, data: Any, info: ValidationInfo) -> Any:
+        """Derive ``hasNext``/``nextPageToken`` from 0.4.0 offsets; drop the offsets outside the legacy context."""
+        if not isinstance(data, dict):
+            return data
+        if not _is_legacy(info):
+            return {k: v for k, v in data.items() if k not in _LEGACY_PAGE_KEYS}
+        if "totalResults" not in data:
+            return data
+        start, total, results = data.get("pageStartIndex"), data["totalResults"], data.get("results", [])
+        if not (isinstance(start, int) and isinstance(total, int) and isinstance(results, list)):
+            return data  # malformed offsets: leave hasNext missing so validation reports it
+        next_offset = start + len(results)
+        has_next = bool(results) and next_offset < total
+        return {**data, "hasNext": has_next, **({"nextPageToken": str(next_offset)} if has_next else {})}
+
+
+class PaginatedProductResponse(_PaginatedResponse[Product]):
     """Paginated response containing a list of products."""
 
-    timestamp: datetime
-    page_start_index: int
-    page_size: int
-    total_results: int
-    results: tuple[Product, ...] = ()
 
-
-class PaginatedProductReleaseResponse(_TeaModel):
+class PaginatedProductReleaseResponse(_PaginatedResponse[ProductRelease]):
     """Paginated response containing a list of product releases."""
 
-    timestamp: datetime
-    page_start_index: int
-    page_size: int
-    total_results: int
-    results: tuple[ProductRelease, ...] = ()
 
-
-class PaginatedComponentResponse(_TeaModel):
+class PaginatedComponentResponse(_PaginatedResponse[Component]):
     """Paginated response containing a list of components."""
 
-    timestamp: datetime
-    page_start_index: int
-    page_size: int
-    total_results: int
-    results: tuple[Component, ...] = ()
 
-
-class PaginatedComponentReleaseResponse(_TeaModel):
+class PaginatedComponentReleaseResponse(_PaginatedResponse[Release]):
     """Paginated response containing a list of component releases."""
 
-    timestamp: datetime
-    page_start_index: int
-    page_size: int
-    total_results: int
-    results: tuple[Release, ...] = ()
+
+class PaginatedCollectionResponse(_PaginatedResponse[Collection]):
+    """Paginated response containing a list of collections (TEA 1.0.0)."""
 
 
 # --- Discovery types ---
@@ -610,12 +747,14 @@ __all__ = [
     "DiscoveryInfo",
     "ErrorResponse",
     "Identifier",
+    "PaginatedCollectionResponse",
     "PaginatedComponentReleaseResponse",
     "PaginatedComponentResponse",
     "PaginatedProductReleaseResponse",
     "PaginatedProductResponse",
     "Product",
     "ProductRelease",
+    "ProductReleaseWithCollection",
     "Release",
     "ReleaseDistribution",
     "TeaEndpoint",

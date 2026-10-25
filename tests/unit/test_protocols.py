@@ -3,7 +3,7 @@
 from libtea.client import TeaClient
 from libtea.protocols import TeaClientProtocol
 
-BASE_URL = "https://api.example.com/tea/v1"
+BASE_URL = "https://api.example.com/tea/v0.4.0"
 
 
 class TestProtocol:

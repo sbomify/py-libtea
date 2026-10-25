@@ -10,7 +10,7 @@ tea-cli [GLOBAL OPTIONS] COMMAND [COMMAND OPTIONS]
 
 ## Description
 
-`tea-cli` is a command-line interface for the Transparency Exchange API (TEA) v0.4.0. It discovers, searches, and retrieves software transparency artifacts (SBOMs, VEX, build metadata) from TEA-compliant servers.
+`tea-cli` is a command-line interface for the Transparency Exchange API (TEA) 1.0.0, with compatibility for 0.4.0 servers. It discovers, searches, and retrieves software transparency artifacts (SBOMs, VEX, build metadata) from TEA-compliant servers.
 
 Output is rich-formatted by default (tables, panels) for interactive use. Use `--json` for machine-readable JSON output suitable for piping.
 
@@ -41,8 +41,8 @@ Every command accepts the following options for server selection and authenticat
 
 | Option | Description |
 |--------|-------------|
-| `--base-url` *URL* | TEA server base URL (e.g. `https://trust.sbomify.com/tea/v0.4.0`). Can also be set via the `TEA_BASE_URL` environment variable. Mutually exclusive with `--domain`. |
-| `--domain` *DOMAIN* | Discover server from the domain's `.well-known/tea` endpoint. The domain can also be auto-extracted from a TEI URN argument. |
+| `--base-url` *URL* | TEA server base URL (e.g. `https://trust.sbomify.com/tea/v0.4.0`, a TEA 0.4.0 server, or `https://tea.example.com/tea/v1.0.0`). A `/v<semver>` suffix selects the spec version; without one, TEA 1.0.0 is assumed. Can also be set via the `TEA_BASE_URL` environment variable. Mutually exclusive with `--domain`. |
+| `--domain` *DOMAIN* | Discover server from the domain's `.well-known/tea` endpoint. TEA 1.0.0 is preferred, falling back to 0.4.0. The domain can also be auto-extracted from a TEI argument. |
 | `--token` *TOKEN* | Bearer token for authentication. Prefer the `TEA_TOKEN` environment variable to avoid exposing the token in shell history. |
 | `--auth` *USER:PASSWORD* | HTTP basic authentication credentials. Prefer the `TEA_AUTH` environment variable to avoid exposing credentials in shell history. Mutually exclusive with `--token`. |
 | `--timeout` *SECONDS* | Request timeout in seconds (default: 30). |
@@ -54,29 +54,31 @@ Every command accepts the following options for server selection and authenticat
 
 ### discover
 
-Resolve a TEI URN to product release UUID(s).
+Resolve a TEI, or a PURL, to product release UUID(s). Give exactly one of `TEI` and `--purl`.
 
 ```
 tea-cli discover [--quiet | -q] TEI
+tea-cli discover [--quiet | -q] --purl PURL --base-url URL
 ```
 
 **Arguments:**
 
 | Argument | Description |
 |----------|-------------|
-| *TEI* | A TEI URN (e.g. `urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify`). The domain is auto-extracted for server discovery when `--base-url` and `--domain` are omitted. |
+| *TEI* | A TEI (e.g. `tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1`). The domain is auto-extracted for server discovery when `--base-url` and `--domain` are omitted. TEA 0.4.0 servers expect the legacy URN form, which is also accepted (see Upgrading in the README). |
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
+| `--purl` *PURL* | Resolve a Package URL in the inventory of the server given by `--base-url` (required), instead of a TEI. Needs a TEA 1.x server. |
 | `--quiet`, `-q` | Output only UUIDs, one per line. Useful for scripting. |
 
 ---
 
 ### inspect
 
-Full flow: TEI -> discovery -> product releases -> components -> artifacts. Resolves a TEI and fetches the full object graph in one shot.
+Full flow: TEI -> discovery -> product releases -> components -> artifacts. Resolves a TEI (`tei://` or the legacy URN form) and fetches the full object graph in one shot.
 
 ```
 tea-cli inspect [--max-components N] TEI
@@ -95,7 +97,7 @@ tea-cli inspect [--max-components N] TEI
 Search for products by identifier.
 
 ```
-tea-cli search-products --id-type TYPE --id-value VALUE [--page-offset N] [--page-size N]
+tea-cli search-products --id-type TYPE --id-value VALUE [--page-token TOKEN] [--page-size N]
 ```
 
 **Options:**
@@ -104,8 +106,8 @@ tea-cli search-products --id-type TYPE --id-value VALUE [--page-offset N] [--pag
 |--------|-------------|
 | `--id-type` *TYPE* | Identifier type: `CPE`, `TEI`, or `PURL`. |
 | `--id-value` *VALUE* | Identifier value to search for. |
-| `--page-offset` *N* | Page offset for pagination (default: 0). |
-| `--page-size` *N* | Page size for pagination (default: 100). |
+| `--page-token` *TOKEN* | `nextPageToken` from the previous page; an integer offset on TEA 0.x servers (default: first page). |
+| `--page-size` *N* | Page size for pagination (default: 100; max 100 on TEA 1.x). |
 
 ---
 
@@ -114,7 +116,7 @@ tea-cli search-products --id-type TYPE --id-value VALUE [--page-offset N] [--pag
 Search for product releases by identifier.
 
 ```
-tea-cli search-releases --id-type TYPE --id-value VALUE [--page-offset N] [--page-size N]
+tea-cli search-releases --id-type TYPE --id-value VALUE [--page-token TOKEN] [--page-size N]
 ```
 
 Options are the same as `search-products`.
@@ -136,15 +138,15 @@ tea-cli get-product UUID
 List releases for a product UUID.
 
 ```
-tea-cli get-product-releases UUID [--page-offset N] [--page-size N]
+tea-cli get-product-releases UUID [--page-token TOKEN] [--page-size N]
 ```
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
-| `--page-offset` *N* | Page offset for pagination (default: 0). |
-| `--page-size` *N* | Page size for pagination (default: 100). |
+| `--page-token` *TOKEN* | `nextPageToken` from the previous page; an integer offset on TEA 0.x servers (default: first page). |
+| `--page-size` *N* | Page size for pagination (default: 100; max 100 on TEA 1.x). |
 
 ---
 
@@ -161,6 +163,8 @@ tea-cli get-release [--component] UUID
 | Option | Description |
 |--------|-------------|
 | `--component` | Get a component release instead of a product release. |
+
+With `--json`, a product release also carries `latestCollection`: its latest collection on TEA 1.x servers, `null` on 0.4.0 servers.
 
 ---
 
@@ -222,7 +226,7 @@ tea-cli list-collections [--component] UUID
 Search for components by identifier.
 
 ```
-tea-cli search-components --id-type TYPE --id-value VALUE [--page-offset N] [--page-size N]
+tea-cli search-components --id-type TYPE --id-value VALUE [--page-token TOKEN] [--page-size N]
 ```
 
 Options are the same as `search-products`.
@@ -234,7 +238,7 @@ Options are the same as `search-products`.
 Search for component releases by identifier.
 
 ```
-tea-cli search-component-releases --id-type TYPE --id-value VALUE [--page-offset N] [--page-size N]
+tea-cli search-component-releases --id-type TYPE --id-value VALUE [--page-token TOKEN] [--page-size N]
 ```
 
 Options are the same as `search-products`.
@@ -253,7 +257,7 @@ tea-cli get-artifact UUID
 
 ### get-artifact-version
 
-Get a specific version of artifact metadata by UUID.
+Get a specific version of artifact metadata by UUID. Needs a TEA 1.x server: TEA 0.4.0 has no versioned artifact endpoint.
 
 ```
 tea-cli get-artifact-version UUID VERSION
@@ -270,25 +274,33 @@ tea-cli get-artifact-version UUID VERSION
 
 ### download
 
-Download an artifact file with optional checksum verification.
+Download an artifact file with optional checksum verification, or every artifact of a TEI.
 
 ```
 tea-cli download URL DEST [--checksum ALG:VALUE]... [--max-download-bytes N]
+tea-cli download TEI [DEST_DIR] [--max-download-bytes N] [-y] [-n] [-q]
 ```
 
 **Arguments:**
 
 | Argument | Description |
 |----------|-------------|
-| *URL* | Artifact download URL. |
-| *DEST* | Local file path to save the downloaded artifact. |
+| *URL* | Artifact download URL (URL mode). |
+| *TEI* | A TEI (`tei://` or the legacy URN form). Resolves it and downloads every artifact format of the latest collection into `DEST_DIR` (TEI mode). Checksums come from the server metadata. |
+| *DEST* | Local file path to save the downloaded artifact (URL mode). |
+| *DEST_DIR* | Directory for the downloaded artifacts (TEI mode). If omitted, you are asked to confirm downloading into the current directory; `-y` skips the prompt. |
+
+On a TEA 1.x server, a format without a `url` is hosted by the server itself and is fetched through its download endpoint; the bearer token is sent only to the API server, never on a redirect.
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
-| `--checksum` *ALG:VALUE* | Checksum to verify, as `ALGORITHM:HEX_VALUE`. Can be specified multiple times. Supported algorithms: MD5, SHA-1, SHA-256, SHA-384, SHA-512, SHA3-256, SHA3-384, SHA3-512, BLAKE2b-256, BLAKE2b-384, BLAKE2b-512. |
+| `--checksum` *ALG:VALUE* | Checksum to verify, as `ALGORITHM:HEX_VALUE` (URL mode only). Can be specified multiple times. Supported algorithms: MD5, SHA-1, SHA-256, SHA-384, SHA-512, SHA3-256, SHA3-384, SHA3-512, BLAKE2b-256, BLAKE2b-384, BLAKE2b-512. MD5 is accepted here because you supply the hash. |
 | `--max-download-bytes` *N* | Maximum download size in bytes. The download is aborted if the response exceeds this limit. |
+| `-y`, `--yes` | TEI mode: skip the confirmation prompt for downloading into the current directory. |
+| `-n`, `--dry-run` | TEI mode: show what would be downloaded without downloading. |
+| `-q`, `--quiet` | Suppress progress output (errors still shown). |
 
 ---
 
@@ -308,7 +320,7 @@ tea-cli get-cle [--entity TYPE] UUID
 
 ### conformance
 
-Run conformance checks against a TEA server. Validates that the server correctly implements the TEA specification by running 27 checks covering discovery, products, releases, components, artifacts, CLE, and cross-cutting concerns.
+Run conformance checks against a TEA server. Validates that the server correctly implements the TEA specification by running 28 checks covering discovery, products, releases, components, artifacts, CLE, and cross-cutting concerns.
 
 ```
 tea-cli conformance --base-url URL [OPTIONS]
@@ -319,7 +331,7 @@ tea-cli conformance --base-url URL [OPTIONS]
 | Option | Description |
 |--------|-------------|
 | `--base-url` *URL* | TEA server base URL (required). Can also be set via `TEA_BASE_URL`. |
-| `--tei` *TEI* | TEI URN for discovery-driven testing. Seeds the check context with a product release UUID discovered from the TEI. |
+| `--tei` *TEI* | TEI for discovery-driven testing. Seeds the check context with a product release UUID discovered from the TEI. |
 | `--product-uuid` *UUID* | Explicit product UUID for direct testing. |
 | `--release-uuid` *UUID* | Explicit product release UUID. |
 | `--component-uuid` *UUID* | Explicit component UUID. |
@@ -362,13 +374,20 @@ Using credentials over plaintext HTTP raises an error. Use `--use-http` only for
 Discover sbomify product releases:
 
 ```bash
-tea-cli discover "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify"
+tea-cli discover "tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+```
+
+Resolve a PURL on a TEA 1.x server:
+
+```bash
+tea-cli discover --purl "pkg:github/sbomify/sbomify" \
+    --base-url https://tea.example.com/tea/v1.0.0
 ```
 
 Full inspection with JSON output:
 
 ```bash
-tea-cli --json inspect "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify"
+tea-cli --json inspect "tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
 ```
 
 Search for a product by PURL:
@@ -398,18 +417,18 @@ tea-cli download "https://cdn.example.com/sbom.json" ./sbom.json \
 Pipe UUIDs to another tool:
 
 ```bash
-tea-cli discover -q "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify" | \
-    xargs -I {} tea-cli --json get-release {} --domain trust.sbomify.com
+tea-cli discover -q "tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1" | \
+    xargs -I {} tea-cli --json get-release {} --domain example.com
 ```
 
 Verbose logging to diagnose issues:
 
 ```bash
 # libtea debug logs only (no urllib3 noise)
-tea-cli -v discover "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify"
+tea-cli -v discover "tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
 
 # Full HTTP firehose
-tea-cli -d discover "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify"
+tea-cli -d discover "tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
 ```
 
 Local development with private IPs:
@@ -417,7 +436,7 @@ Local development with private IPs:
 ```bash
 # Allow downloads from a local TEA server
 tea-cli download "http://192.168.1.100:8080/sbom.json" ./sbom.json \
-    --allow-private-ips --base-url "http://192.168.1.100:8080/tea/v0.4.0"
+    --allow-private-ips --base-url "http://192.168.1.100:8080/tea/v1.0.0"
 ```
 
 Using environment variables to avoid repeating credentials:
@@ -425,7 +444,7 @@ Using environment variables to avoid repeating credentials:
 ```bash
 export TEA_TOKEN="your-bearer-token"
 export TEA_BASE_URL="https://trust.sbomify.com/tea/v0.4.0"
-tea-cli discover "urn:tei:purl:trust.sbomify.com:pkg:github/sbomify/sbomify"
+tea-cli search-products --id-type PURL --id-value "pkg:github/sbomify/sbomify"
 tea-cli get-product <product-uuid>
 ```
 
