@@ -240,6 +240,8 @@ def _build_client(
             token=token,
             basic_auth=basic_auth,
             timeout=timeout,
+            # Only TEA 0.4.0 defines the legacy URN form, so a URN TEI must not be sent to a 1.x /discovery.
+            version="0.4.0" if tei and tei.startswith("urn:tei:") else None,
             scheme=scheme,
             port=port,
             allow_private_ips=allow_private_ips,

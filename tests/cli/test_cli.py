@@ -934,6 +934,31 @@ class TestCLITeiAutoDiscovery:
         assert len(data) == 1
 
     @responses.activate
+    def test_urn_tei_uses_legacy_endpoint(self):
+        # Only TEA 0.4.0 defines the URN form, so the 1.0.0 endpoint the server also offers is not used.
+        tei = "urn:tei:uuid:example.com:d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+        responses.get(
+            "https://example.com/.well-known/tea",
+            json={
+                "schemaVersion": 1,
+                "endpoints": [{"url": "https://api.example.com", "versions": ["1.0.0", "0.4.0"]}],
+            },
+        )
+        responses.head("https://api.example.com/v0.4.0", status=200)
+        responses.get(
+            "https://api.example.com/v0.4.0/discovery",
+            json=[
+                {
+                    "productReleaseUuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                    "servers": [{"rootUrl": "https://api.example.com", "versions": ["0.4.0"]}],
+                }
+            ],
+        )
+        result = runner.invoke(app, ["--json", "discover", tei])
+        assert result.exit_code == 0, _all_output(result)
+        assert all("/v1.0.0" not in c.request.url for c in responses.calls)
+
+    @responses.activate
     def test_discover_auto_extracts_domain_from_tei_uri(self):
         tei = "tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
         responses.get(

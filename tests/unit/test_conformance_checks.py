@@ -1,3 +1,4 @@
+import pytest
 import responses
 from responses import matchers
 
@@ -406,6 +407,28 @@ class TestCheckListProducts:
         ctx = CheckContext()
         result = check_list_products(client, ctx)
         assert result.status == CheckStatus.FAIL
+
+    @responses.activate
+    @pytest.mark.parametrize(
+        ("check", "path", "page_size", "item"),
+        [
+            (check_list_products, "/products", "10", product(PRODUCT, "A")),
+            (check_product_releases, f"/product/{PRODUCT}/releases", "100", V1_PRODUCT_RELEASE),
+            (check_list_product_releases, "/productReleases", "10", V1_PRODUCT_RELEASE),
+        ],
+    )
+    def test_v1_follows_token_past_empty_first_page(self, v1, check, path, page_size, item):
+        responses.get(
+            f"{V1_BASE_URL}{path}",
+            match=[matchers.query_param_matcher({"pageSize": page_size})],
+            json={"hasNext": True, "nextPageToken": "t2", "results": []},
+        )
+        responses.get(
+            f"{V1_BASE_URL}{path}",
+            match=[matchers.query_param_matcher({"pageSize": page_size, "pageToken": "t2"})],
+            json={"hasNext": False, "results": [item]},
+        )
+        assert check(v1, CheckContext(product_uuid=PRODUCT)).status == CheckStatus.PASS
 
 
 class TestCheckGetProduct:

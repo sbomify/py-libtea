@@ -65,6 +65,7 @@ SUPPORTED_SPEC_VERSIONS: tuple[str, ...] = ("1.0.0", "0.4.0")
 _SUPPORTED_MAJORS = frozenset(Version.parse(v).major for v in SUPPORTED_SPEC_VERSIONS)
 
 _T = TypeVar("_T")
+_P = TypeVar("_P", bound=_PaginatedResponse[typing.Any])
 
 # ponytail: hard ceiling of 10,000 pages per pagination run (1M results at pageSize 100) so a server
 # minting endless distinct tokens cannot loop forever; make it a parameter if real catalogs get that big.
@@ -178,9 +179,10 @@ class TeaClient:
             timeout: Request timeout in seconds (default 30).
             version: TEA spec SemVer to match against. The default (``None``) negotiates
                 the highest of :data:`SUPPORTED_SPEC_VERSIONS` the server advertises:
-                ``1.0.0`` first, then ``0.4.0``. Only when neither is advertised exactly does it
-                downgrade to a compatible version (e.g. ``0.3.0``), with a warning.
-            scheme: URL scheme for discovery — ``"https"`` (default) or ``"http"``.
+                ``1.0.0`` first, then ``0.4.0``. Endpoints of another compatible version (e.g. ``0.3.0``)
+                are tried, with a warning, only after every exactly matching endpoint has failed.
+            scheme: URL scheme for discovery — ``"https"`` (default) or ``"http"``. With ``"https"``,
+                ``http://`` endpoints listed in ``.well-known`` are rejected (TEA 1.0.0).
             port: Optional port for ``.well-known`` resolution.
             max_retries: Retry count on 5xx (default 3).
             backoff_factor: Backoff multiplier (default 0.5).
@@ -201,18 +203,19 @@ class TeaClient:
         # Ordered (endpoint URL, advertised version) attempts: highest version first, then endpoint priority.
         # Without an explicit ``version`` every supported version contributes, so failover can cross versions.
         wanted_versions = (version,) if version is not None else SUPPORTED_SPEC_VERSIONS
-        attempts: dict[tuple[str, str], None] = {}  # insertion-ordered set
-        if version is None:
-            # Exact matches first: a prerelease such as ``1.0.0-rc.1`` is not a version this client supports,
-            # so a compatible downgrade is only a fallback when no supported version is advertised as-is.
-            for wanted in SUPPORTED_SPEC_VERSIONS:
-                try:
-                    exact = select_endpoints(well_known, wanted)
-                except TeaDiscoveryError:
-                    continue
-                for endpoint in exact:
-                    attempts[(endpoint.url, _advertised_version(endpoint, wanted))] = None
-        if not attempts:
+
+        def candidates() -> Iterator[tuple[str, str]]:
+            # Lazy, so a compatible downgrade is negotiated (and warned about) only once every exact endpoint failed.
+            if version is None:
+                # Exact matches first: a prerelease such as ``1.0.0-rc.1`` is not a version this client supports,
+                # so a compatible downgrade is only a fallback after every supported version advertised as-is.
+                for wanted in SUPPORTED_SPEC_VERSIONS:
+                    try:
+                        exact = select_endpoints(well_known, wanted)
+                    except TeaDiscoveryError:
+                        continue
+                    for endpoint in exact:
+                        yield endpoint.url, _advertised_version(endpoint, wanted)
             for wanted in wanted_versions:
                 try:
                     best = select_best_endpoint(well_known, wanted)
@@ -228,35 +231,43 @@ class TeaClient:
                     raise TeaDiscoveryError(f"Cannot use negotiated version {matched_version!r}: {exc}") from exc
                 for endpoint in select_endpoints(well_known, matched_version):
                     # Build metadata does not affect precedence, so each endpoint may spell the version differently.
-                    attempts[(endpoint.url, _advertised_version(endpoint, matched_version))] = None
-        if not attempts:
-            offered = sorted({v for ep in well_known.endpoints for v in ep.versions})
-            raise TeaDiscoveryError(
-                f"No compatible endpoint found for any version tried {list(SUPPORTED_SPEC_VERSIONS)}. "
-                f"Available versions: {offered}"
-            )
+                    yield endpoint.url, _advertised_version(endpoint, matched_version)
 
+        tried: set[tuple[str, str]] = set()
         errors: list[tuple[str, Exception]] = []
-        for url, advertised in attempts:
+        for url, advertised in candidates():
+            if (url, advertised) in tried:
+                continue
+            tried.add((url, advertised))
             base_url = f"{url.rstrip('/')}/v{advertised}"
+            if scheme == "https" and urlsplit(base_url).scheme != "https":
+                # TEA 1.0.0: a client shall reject an http base URL learned from discovery.
+                errors.append((base_url, TeaDiscoveryError("non-HTTPS endpoint learned from .well-known rejected")))
+                logger.warning("Endpoint %s is not HTTPS, trying next", base_url)
+                continue
             try:
                 probe_endpoint(base_url, timeout=min(timeout, 5.0))
-            except (TeaConnectionError, TeaServerError) as exc:
-                logger.warning("Endpoint %s unreachable, trying next: %s", base_url, exc)
+                return cls(
+                    base_url=base_url,
+                    token=token,
+                    basic_auth=basic_auth,
+                    timeout=timeout,
+                    max_retries=max_retries,
+                    backoff_factor=backoff_factor,
+                    allow_private_ips=allow_private_ips,
+                    cache_ttl=cache_ttl,
+                    spec_version=advertised,
+                )
+            except (TeaConnectionError, TeaServerError, ValueError) as exc:  # ValueError: credentials over http
+                logger.warning("Endpoint %s unusable, trying next: %s", base_url, exc)
                 errors.append((base_url, exc))
-                continue
-            return cls(
-                base_url=base_url,
-                token=token,
-                basic_auth=basic_auth,
-                timeout=timeout,
-                max_retries=max_retries,
-                backoff_factor=backoff_factor,
-                allow_private_ips=allow_private_ips,
-                cache_ttl=cache_ttl,
-                spec_version=advertised,
-            )
 
+        if not errors:
+            offered = sorted({v for ep in well_known.endpoints for v in ep.versions})
+            raise TeaDiscoveryError(
+                f"No compatible endpoint found for any version tried {list(wanted_versions)}. "
+                f"Available versions: {offered}"
+            )
         summary = "; ".join(f"{url}: {exc}" for url, exc in errors)
         raise TeaDiscoveryError(f"All {len(errors)} endpoint(s) failed: {summary}") from errors[-1][1]
 
@@ -310,12 +321,17 @@ class TeaClient:
             )
         return {"pageOffset": int(page_token or 0), "pageSize": page_size}
 
+    def _get_page(self, model_cls: type[_P], path: str, page_token: str | None, page_size: int, **query: str) -> _P:
+        """GET one page; on 0.x the next offset counts from the requested ``pageOffset``, not ``pageStartIndex``."""
+        params = self._page_params(page_token, page_size)
+        data = self._http.get_json(path, params={**query, **params})
+        return _validate(model_cls, data, legacy=self.is_legacy, page_offset=params.get("pageOffset"))
+
     def _all_pages(self, path: str, model_cls: type[_PaginatedResponse[_T]]) -> list[_T]:
         """Fetch every page of a TEA 1.x list endpoint that 0.4.0 served as a bare array."""
 
         def fetch_page(*, page_token: str | None, page_size: int) -> _PaginatedResponse[_T]:
-            data = self._http.get_json(path, params=self._page_params(page_token, page_size))
-            return _validate(model_cls, data, legacy=self.is_legacy)
+            return self._get_page(model_cls, path, page_token, page_size)
 
         # ponytail: drains every page into memory; expose an iterator if lists get large
         return list(self._paginate(fetch_page, _MAX_PAGE_SIZE_V1))
@@ -332,11 +348,7 @@ class TeaClient:
         Returns:
             Paginated response containing products.
         """
-        data = self._http.get_json(
-            "/products",
-            params=self._page_params(page_token, page_size),
-        )
-        return _validate(PaginatedProductResponse, data, legacy=self.is_legacy)
+        return self._get_page(PaginatedProductResponse, "/products", page_token, page_size)
 
     def search_products(
         self, id_type: str, id_value: str, *, page_token: str | None = None, page_size: int = 100
@@ -352,11 +364,9 @@ class TeaClient:
         Returns:
             Paginated response containing matching products.
         """
-        data = self._http.get_json(
-            "/products",
-            params={"idType": id_type, "idValue": id_value, **self._page_params(page_token, page_size)},
+        return self._get_page(
+            PaginatedProductResponse, "/products", page_token, page_size, idType=id_type, idValue=id_value
         )
-        return _validate(PaginatedProductResponse, data, legacy=self.is_legacy)
 
     def get_product(self, uuid: str) -> Product:
         """Get a TEA product by UUID.
@@ -383,11 +393,9 @@ class TeaClient:
         Returns:
             Paginated response containing product releases.
         """
-        data = self._http.get_json(
-            f"/product/{_validate_path_segment(uuid)}/releases",
-            params=self._page_params(page_token, page_size),
+        return self._get_page(
+            PaginatedProductReleaseResponse, f"/product/{_validate_path_segment(uuid)}/releases", page_token, page_size
         )
-        return _validate(PaginatedProductReleaseResponse, data, legacy=self.is_legacy)
 
     # --- Product Releases ---
 
@@ -403,11 +411,7 @@ class TeaClient:
         Returns:
             Paginated response containing product releases.
         """
-        data = self._http.get_json(
-            "/productReleases",
-            params=self._page_params(page_token, page_size),
-        )
-        return _validate(PaginatedProductReleaseResponse, data, legacy=self.is_legacy)
+        return self._get_page(PaginatedProductReleaseResponse, "/productReleases", page_token, page_size)
 
     def search_product_releases(
         self, id_type: str, id_value: str, *, page_token: str | None = None, page_size: int = 100
@@ -423,11 +427,9 @@ class TeaClient:
         Returns:
             Paginated response containing matching product releases.
         """
-        data = self._http.get_json(
-            "/productReleases",
-            params={"idType": id_type, "idValue": id_value, **self._page_params(page_token, page_size)},
+        return self._get_page(
+            PaginatedProductReleaseResponse, "/productReleases", page_token, page_size, idType=id_type, idValue=id_value
         )
-        return _validate(PaginatedProductReleaseResponse, data, legacy=self.is_legacy)
 
     def get_product_release(self, uuid: str) -> ProductReleaseWithCollection:
         """Get a product release by UUID.
@@ -522,11 +524,7 @@ class TeaClient:
         Returns:
             Paginated response containing components.
         """
-        data = self._http.get_json(
-            "/components",
-            params=self._page_params(page_token, page_size),
-        )
-        return _validate(PaginatedComponentResponse, data, legacy=self.is_legacy)
+        return self._get_page(PaginatedComponentResponse, "/components", page_token, page_size)
 
     def search_components(
         self, id_type: str, id_value: str, *, page_token: str | None = None, page_size: int = 100
@@ -542,11 +540,9 @@ class TeaClient:
         Returns:
             Paginated response containing matching components.
         """
-        data = self._http.get_json(
-            "/components",
-            params={"idType": id_type, "idValue": id_value, **self._page_params(page_token, page_size)},
+        return self._get_page(
+            PaginatedComponentResponse, "/components", page_token, page_size, idType=id_type, idValue=id_value
         )
-        return _validate(PaginatedComponentResponse, data, legacy=self.is_legacy)
 
     # --- Component Releases ---
 
@@ -614,11 +610,7 @@ class TeaClient:
         Returns:
             Paginated response containing component releases.
         """
-        data = self._http.get_json(
-            "/componentReleases",
-            params=self._page_params(page_token, page_size),
-        )
-        return _validate(PaginatedComponentReleaseResponse, data, legacy=self.is_legacy)
+        return self._get_page(PaginatedComponentReleaseResponse, "/componentReleases", page_token, page_size)
 
     def search_component_releases(
         self, id_type: str, id_value: str, *, page_token: str | None = None, page_size: int = 100
@@ -634,11 +626,14 @@ class TeaClient:
         Returns:
             Paginated response containing matching component releases.
         """
-        data = self._http.get_json(
+        return self._get_page(
+            PaginatedComponentReleaseResponse,
             "/componentReleases",
-            params={"idType": id_type, "idValue": id_value, **self._page_params(page_token, page_size)},
+            page_token,
+            page_size,
+            idType=id_type,
+            idValue=id_value,
         )
-        return _validate(PaginatedComponentReleaseResponse, data, legacy=self.is_legacy)
 
     # --- CLE ---
 
@@ -858,7 +853,8 @@ class TeaClient:
                     actual=None,
                 )
             actual = computed[alg_name].lower()
-            if not hmac.compare_digest(actual, expected):
+            # compare_digest raises TypeError on non-ASCII str; such a value cannot be a hex digest anyway.
+            if not (expected.isascii() and hmac.compare_digest(actual, expected)):
                 dest.unlink(missing_ok=True)
                 logger.error(
                     "Checksum mismatch for %s: algorithm=%s expected=%s actual=%s",

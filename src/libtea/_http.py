@@ -12,7 +12,7 @@ import warnings
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Self, cast
-from urllib.parse import urljoin, urlparse
+from urllib.parse import unquote, urljoin, urlparse, urlsplit
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -302,7 +302,9 @@ class TeaHttpClient:
                 downgrades HTTPS to HTTP.
         """
         if authenticated:
-            if not url.startswith(f"{self._base_url}/"):
+            # Dot segments (also percent-encoded) are resolved by urllib3, so they could leave the API base.
+            segments = unquote(urlsplit(url).path).split("/")
+            if not url.startswith(f"{self._base_url}/") or "." in segments or ".." in segments:
                 raise ValueError(f"Authenticated download URL must be under the API base {self._base_url}")
         else:
             _validate_download_url(url, allow_private_ips=allow_private_ips)

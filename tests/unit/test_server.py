@@ -131,6 +131,25 @@ class TestToWire:
             }
         ]
 
+    def test_keyword_built_legacy_page(self):
+        """A 0.4.0 server's page built by field name keeps every offset field; a 1.0.0 page carries none."""
+        page = PaginatedProductResponse(
+            has_next=False,
+            timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            page_start_index=0,
+            page_size=100,
+            total_results=0,
+            results=(),
+        )
+        legacy = to_wire(page, legacy=True)
+        assert (legacy["timestamp"], legacy["pageStartIndex"], legacy["pageSize"], legacy["totalResults"]) == (
+            "2024-01-01T00:00:00Z",
+            0,
+            100,
+            0,
+        )
+        assert to_wire(page) == {"hasNext": False, "results": []}
+
 
 class TestTeaDatetimeSerializer:
     def test_utc_datetime(self):

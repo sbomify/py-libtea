@@ -14,21 +14,24 @@ from libtea.exceptions import TeaValidationError
 _M = TypeVar("_M", bound=BaseModel)
 
 
-def _context(legacy: bool) -> dict[str, bool] | None:
+def _context(legacy: bool, page_offset: int | None = None) -> dict[str, Any] | None:
     # No context means 1.0.0 rules; 0.4.0 compatibility shims key off ``tea_legacy``.
-    return {"tea_legacy": True} if legacy else None
+    if not legacy:
+        return None
+    return {"tea_legacy": True} if page_offset is None else {"tea_legacy": True, "tea_page_offset": page_offset}
 
 
-def _validate(model_cls: type[_M], data: Any, *, legacy: bool = False) -> _M:
+def _validate(model_cls: type[_M], data: Any, *, legacy: bool = False, page_offset: int | None = None) -> _M:
     """Validate a JSON-decoded value against a Pydantic model.
 
     Wraps :meth:`pydantic.BaseModel.model_validate`, converting any
     :class:`~pydantic.ValidationError` into :class:`TeaValidationError`
     so callers only need to catch the ``TeaError`` hierarchy. With
-    ``legacy=True`` the model is validated in the 0.4.0 compatibility context.
+    ``legacy=True`` the model is validated in the 0.4.0 compatibility context;
+    ``page_offset`` is the ``pageOffset`` a 0.4.0 page was requested with.
     """
     try:
-        return model_cls.model_validate(data, context=_context(legacy))
+        return model_cls.model_validate(data, context=_context(legacy, page_offset))
     except ValidationError as exc:
         raise TeaValidationError(f"Invalid {model_cls.__name__} response: {exc}") from exc
 

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from libtea.models import (
     CLE,
@@ -410,9 +410,45 @@ class TestPagination:
 
     def test_v1_drops_legacy_offsets(self):
         p = PaginatedProductResponse.model_validate(
-            {"hasNext": False, "totalResults": 5, "pageStartIndex": 0, "pageSize": 2, "timestamp": "x", "results": []}
+            {"hasNext": False, "totalResults": 5, "pageStartIndex": 0, "pageSize": 2, "results": []}
         )
-        assert (p.total_results, p.page_start_index, p.page_size, p.timestamp) == (None, None, None, None)
+        assert (p.total_results, p.page_start_index, p.page_size) == (None, None, None)
+
+    def test_keyword_built_page_keeps_legacy_offsets(self):
+        # A 0.4.0 server builds its page by field name; every offset field, timestamp included, survives.
+        now = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        p = PaginatedProductResponse(
+            has_next=False, timestamp=now, page_start_index=0, page_size=100, total_results=0, results=()
+        )
+        assert (p.timestamp, p.page_start_index, p.page_size, p.total_results) == (now, 0, 100, 0)
+
+    @pytest.mark.parametrize(("start", "total"), [(0.0, 3.0), ("0", "3")])
+    def test_legacy_offsets_lax_ints(self, start, total):
+        p = PaginatedProductResponse.model_validate(
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "pageStartIndex": start,
+                "pageSize": 1,
+                "totalResults": total,
+                "results": [{"uuid": "u", "name": "n", "identifiers": []}],
+            },
+            context={"tea_legacy": True},
+        )
+        assert (p.has_next, p.next_page_token) == (True, "1")
+
+    def test_legacy_next_offset_counts_from_requested_offset(self):
+        # The server reports pageStartIndex 0 although the client asked for offset 2.
+        p = PaginatedProductResponse.model_validate(
+            {
+                "timestamp": "2024-01-01T00:00:00Z",
+                "pageStartIndex": 0,
+                "pageSize": 2,
+                "totalResults": 5,
+                "results": [{"uuid": "u", "name": "n", "identifiers": []}] * 2,
+            },
+            context={"tea_legacy": True, "tea_page_offset": 2},
+        )
+        assert (p.has_next, p.next_page_token) == (True, "4")
 
     def test_non_object_rejected(self):
         with pytest.raises(ValidationError):
@@ -893,6 +929,17 @@ class TestV1RequiredFields:
         cs = Checksum.model_validate({"algType": "MD5", "algValue": MD5_HEX}, context=LEGACY)
         assert cs.algorithm_type is ChecksumAlgorithm.MD5
 
+    def test_legacy_instance_nests_without_context(self):
+        """An instance validated in the legacy context is not re-checked under 1.0.0 rules when reused."""
+        cs = Checksum.model_validate({"algType": "MD5", "algValue": MD5_HEX}, context=LEGACY)
+
+        class Report(BaseModel):
+            checksums: list[Checksum]
+
+        assert Report(checksums=[cs]).checksums == [cs]
+        assert TypeAdapter(list[Checksum]).validate_python([cs]) == [cs]
+        assert Checksum.model_validate(cs) is cs
+
     def test_fedramp_value(self):
         assert ComplianceDocumentType.FEDRAMP == "FEDRAMP"
 
@@ -902,9 +949,15 @@ class TestReleaseWithCollection:
         r = ComponentReleaseWithCollection.model_validate({**V1_RELEASE, "latestCollection": V1_COLLECTION})
         assert (r.release.version, r.latest_collection.version) == ("2.24.3", 2)
 
-    def test_component_release_nested_rejected_on_v1(self):
-        with pytest.raises(ValidationError):
-            ComponentReleaseWithCollection.model_validate({"release": V1_RELEASE, "latestCollection": V1_COLLECTION})
+    def test_component_release_round_trips_on_v1(self):
+        r = ComponentReleaseWithCollection.model_validate({**V1_RELEASE, "latestCollection": V1_COLLECTION})
+        assert ComponentReleaseWithCollection.model_validate(r.model_dump(by_alias=True)) == r
+        assert ComponentReleaseWithCollection.model_validate_json(r.model_dump_json()) == r
+
+    def test_component_release_flattened_keywords(self):
+        flat = {k: v for k, v in V1_RELEASE.items()}
+        r = ComponentReleaseWithCollection(**flat, latest_collection=Collection.model_validate(V1_COLLECTION))
+        assert (r.release.uuid, r.latest_collection.version) == (COMPONENT_RELEASE, 2)
 
     def test_component_release_nested_legacy(self):
         r = ComponentReleaseWithCollection.model_validate(

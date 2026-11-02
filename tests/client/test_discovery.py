@@ -152,9 +152,6 @@ class TestPurlTei:
     def test_decodes_spec_example(self):
         assert purl_from_tei(self.TEI) == self.PURL
 
-    def test_padded_identifier_accepted(self):
-        assert purl_from_tei(self.TEI + "=") == self.PURL
-
     def test_legacy_urn_returned_verbatim(self):
         assert purl_from_tei("urn:tei:purl:example.com:pkg:pypi/libtea@0.4.0") == "pkg:pypi/libtea@0.4.0"
 
@@ -166,6 +163,8 @@ class TestPurlTei:
             "tei://example.com/purl/aGVsbG8",  # decodes to "hello", not a PURL
             "tei://example.com/purl/__4",  # decodes to bytes that aren't UTF-8
             "tei://example.com/purl/a",  # impossible Base64 length
+            TEI + "=",  # padded: TEA 1.0.0 identifiers are unpadded
+            TEI[:-1] + "B",  # same PURL, but non-zero discarded bits: a distinct, non-canonical TEI
         ],
     )
     def test_rejects(self, tei):

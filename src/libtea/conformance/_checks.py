@@ -10,10 +10,12 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any, TypeVar
 
 from libtea.client import TeaClient
 from libtea.conformance._types import CheckResult, CheckStatus
 from libtea.exceptions import TeaError, TeaNotFoundError, TeaValidationError
+from libtea.models import PaginatedProductReleaseResponse, PaginatedProductResponse
 
 # Canonical zero UUID used for 404 tests.
 _ZERO_UUID = "00000000-0000-0000-0000-000000000000"
@@ -128,12 +130,26 @@ def check_discovery_404(client: TeaClient, ctx: CheckContext) -> CheckResult:
 # Product checks
 # ---------------------------------------------------------------------------
 
+_Page = TypeVar("_Page", PaginatedProductResponse, PaginatedProductReleaseResponse)
+# ponytail: a TEA 1.x page may be empty and still have more; follow at most this many empty pages
+_MAX_EMPTY_PAGES = 10
+
+
+def _first_nonempty_page(fetch: Callable[..., _Page], *args: Any, **kwargs: Any) -> _Page:
+    """Return the first page with results, following ``hasNext`` past empty pages (bounded)."""
+    page = fetch(*args, **kwargs)
+    for _ in range(_MAX_EMPTY_PAGES):
+        if page.results or not page.has_next:
+            break
+        page = fetch(*args, **kwargs, page_token=page.next_page_token)
+    return page
+
 
 def check_list_products(client: TeaClient, ctx: CheckContext) -> CheckResult:
     """List products and populate product_uuid from the first result."""
     name = "list_products"
     try:
-        resp = client.list_products(page_size=10)
+        resp = _first_nonempty_page(client.list_products, page_size=10)
     except TeaError as exc:
         return _fail(name, f"list_products() failed: {exc}", details=str(exc))
     if not resp.results:
@@ -199,7 +215,7 @@ def check_product_releases(client: TeaClient, ctx: CheckContext) -> CheckResult:
     if not ctx.product_uuid:
         return _skip(name, "No product UUID available")
     try:
-        resp = client.get_product_releases(ctx.product_uuid)
+        resp = _first_nonempty_page(client.get_product_releases, ctx.product_uuid)
     except TeaError as exc:
         return _fail(name, f"get_product_releases() failed: {exc}", details=str(exc))
     if not resp.results:
@@ -219,7 +235,7 @@ def check_list_product_releases(client: TeaClient, ctx: CheckContext) -> CheckRe
     """List product releases and populate product_release_uuid."""
     name = "list_product_releases"
     try:
-        resp = client.list_product_releases(page_size=10)
+        resp = _first_nonempty_page(client.list_product_releases, page_size=10)
     except TeaError as exc:
         return _fail(name, f"list_product_releases() failed: {exc}", details=str(exc))
     if not resp.results:

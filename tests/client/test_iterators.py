@@ -5,7 +5,6 @@ import responses
 from responses import matchers
 
 from libtea.client import TeaClient
-from libtea.exceptions import TeaServerError
 from libtea.models import Component, Product, ProductRelease, Release
 
 BASE_URL = "https://api.example.com/tea/v0.4.0"
@@ -54,10 +53,27 @@ class TestLegacyOffsetTokens:
         assert len(responses.calls) == 2
 
     @responses.activate
-    def test_server_ignoring_offset_raises(self):
+    def test_server_ignoring_offset_stops_at_total(self):
+        # The next offset counts from the requested pageOffset, so iteration ends once totalResults is reached.
         responses.get(f"{BASE_URL}/products", json=_legacy_page(0, 3, ["P1", "P2"]))
-        with TeaClient(BASE_URL) as client, pytest.raises(TeaServerError, match="repeated"):
-            list(client.iter_products("PURL", "pkg:pypi/foo", page_size=2))
+        with TeaClient(BASE_URL) as client:
+            assert len(list(client.iter_products("PURL", "pkg:pypi/foo", page_size=2))) == 4
+        assert [c.request.params.get("pageOffset") for c in responses.calls] == ["0", "2"]
+
+    @responses.activate
+    def test_server_reporting_wrong_start_index(self):
+        # Honours pageOffset but always reports pageStartIndex 0: every item is still returned once.
+        pages = [_legacy_page(0, 5, ["P1", "P2"]), _legacy_page(0, 5, ["P3", "P4"]), _legacy_page(0, 5, ["P5"])]
+        for page in pages:
+            responses.get(f"{BASE_URL}/products", json=page)
+        with TeaClient(BASE_URL) as client:
+            assert [p.name for p in client.iter_products("PURL", "pkg:pypi/foo", page_size=2)] == [
+                "P1",
+                "P2",
+                "P3",
+                "P4",
+                "P5",
+            ]
 
 
 class TestIterProducts:

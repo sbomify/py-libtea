@@ -123,9 +123,27 @@ class TestDownloadArtifact:
 
 
 @responses.activate
+def test_non_ascii_checksum_is_a_mismatch(client, tmp_path):
+    responses.get(ARTIFACT_URL, body=ARTIFACT_CONTENT)
+    checksums = [Checksum(algorithm_type=ChecksumAlgorithm.SHA_256, algorithm_value="é" * 64)]
+    dest = tmp_path / "sbom.json"
+    with pytest.raises(TeaChecksumError, match="SHA-256"):
+        client.download_artifact(ARTIFACT_URL, dest, verify_checksums=checksums)
+    assert not dest.exists()
+
+
+@responses.activate
 def test_authenticated_off_base_rejected(tmp_path):
     with TeaHttpClient(base_url=V1_BASE_URL, token="secret") as h, pytest.raises(ValueError, match="API base"):
         h.download_with_hashes("https://evil.example.com/x", tmp_path / "x", authenticated=True)
+    assert len(responses.calls) == 0
+
+
+@pytest.mark.parametrize("path", ["/../../other-app/x", "/%2e%2e/%2E%2E/other-app/x", "/./x"])
+@responses.activate
+def test_authenticated_dot_segments_rejected(tmp_path, path):
+    with TeaHttpClient(base_url=V1_BASE_URL, token="secret") as h, pytest.raises(ValueError, match="API base"):
+        h.download_with_hashes(f"{V1_BASE_URL}{path}", tmp_path / "x", authenticated=True)
     assert len(responses.calls) == 0
 
 

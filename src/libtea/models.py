@@ -13,7 +13,17 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, ClassVar, Generic, Literal, Self, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ModelWrapValidatorHandler,
+    TypeAdapter,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 from pydantic.alias_generators import to_camel
 
 
@@ -49,11 +59,15 @@ class _TeaModel(BaseModel):
     def _v1_problems(self) -> list[str]:
         return [f"missing required field {n!r}" for n in self._v1_required if getattr(self, n) is None]
 
-    @model_validator(mode="after")
-    def _enforce_v1(self, info: ValidationInfo) -> Self:
-        if not _is_legacy(info) and (problems := self._v1_problems()):
-            raise ValueError(f"{type(self).__name__}: {'; '.join(problems)} (TEA 1.0.0)")
-        return self
+    @model_validator(mode="wrap")
+    @classmethod
+    def _enforce_v1(cls, data: Any, handler: ModelWrapValidatorHandler[Self], info: ValidationInfo) -> Self:
+        model = handler(data)
+        # An existing instance was checked when it was built (possibly in the legacy context); nesting it
+        # in another model or TypeAdapter must not re-check it under 1.0.0 rules.
+        if not isinstance(data, cls) and not _is_legacy(info) and (problems := model._v1_problems()):
+            raise ValueError(f"{cls.__name__}: {'; '.join(problems)} (TEA 1.0.0)")
+        return model
 
 
 # --- Enums ---
@@ -442,14 +456,14 @@ class ComponentReleaseWithCollection(_TeaModel):
     def _unflatten(cls, data: Any, info: ValidationInfo) -> Any:
         """Wrap the 1.0.0 flattened wire object into ``release`` + ``latestCollection``.
 
-        Skipped in the legacy context (already nested) and for Python-side
-        construction from a ``Release`` instance.
+        Skipped in the legacy context and for input that is already nested under
+        ``release`` (``model_dump()`` output, keyword construction).
         """
-        if _is_legacy(info) or not isinstance(data, dict) or isinstance(data.get("release"), Release):
+        if _is_legacy(info) or not isinstance(data, dict) or "release" in data:
             return data
         return {
-            "release": {k: v for k, v in data.items() if k != "latestCollection"},
-            "latestCollection": data.get("latestCollection"),
+            "release": {k: v for k, v in data.items() if k not in ("latestCollection", "latest_collection")},
+            "latestCollection": data.get("latestCollection", data.get("latest_collection")),
         }
 
 
@@ -608,6 +622,7 @@ class CLE(_TeaModel):
 
 _R = TypeVar("_R")
 _LEGACY_PAGE_KEYS = ("timestamp", "pageStartIndex", "pageSize", "totalResults")
+_LAX_INT = TypeAdapter(int)  # the lax coercion the plain 0.4.0 ``int`` fields applied (``3.0``, ``"3"``)
 
 
 class _PaginatedResponse(_TeaModel, Generic[_R]):
@@ -616,8 +631,11 @@ class _PaginatedResponse(_TeaModel, Generic[_R]):
     TEA 1.0.0 pages carry ``has_next`` and an opaque ``next_page_token``. 0.4.0
     pages carry offset metadata instead; under the legacy context ``has_next``
     and ``next_page_token`` are derived from it, the token being the next
-    result offset as a string. Outside the legacy context the offset metadata
-    is dropped, so ``total_results is None`` exactly on TEA 1.x pages.
+    result offset as a string. That offset counts from the requested offset
+    (context key ``tea_page_offset``) when the client supplies it, else from
+    ``pageStartIndex``. Outside the legacy context the camelCase offset keys of
+    a wire page are dropped, so ``total_results is None`` on TEA 1.x pages; a page
+    built by field name (a 0.4.0 server's response) keeps them.
     """
 
     has_next: bool
@@ -647,12 +665,19 @@ class _PaginatedResponse(_TeaModel, Generic[_R]):
         if not isinstance(data, dict):
             return data
         if not _is_legacy(info):
-            return {k: v for k, v in data.items() if k not in _LEGACY_PAGE_KEYS}
+            # ``timestamp`` is kept: it is also the field name, so dropping it would strip it from a page built
+            # by field name, while the other keys are dropped only in their wire spelling.
+            return {k: v for k, v in data.items() if k == "timestamp" or k not in _LEGACY_PAGE_KEYS}
         if "totalResults" not in data:
             return data
-        start, total, results = data.get("pageStartIndex"), data["totalResults"], data.get("results", [])
-        if not (isinstance(start, int) and isinstance(total, int) and isinstance(results, list)):
+        start = (info.context or {}).get("tea_page_offset", data.get("pageStartIndex"))
+        results = data.get("results", [])
+        try:
+            start, total = _LAX_INT.validate_python(start), _LAX_INT.validate_python(data["totalResults"])
+        except ValidationError:
             return data  # malformed offsets: leave hasNext missing so validation reports it
+        if not isinstance(results, list):
+            return data
         next_offset = start + len(results)
         has_next = bool(results) and next_offset < total
         return {**data, "hasNext": has_next, **({"nextPageToken": str(next_offset)} if has_next else {})}

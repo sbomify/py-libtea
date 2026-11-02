@@ -41,10 +41,10 @@ class TeaClientProtocol(Protocol):
     and is intentionally not included in this instance-level protocol. To mock the
     discovery flow, patch :func:`~libtea.discovery.fetch_well_known` and
     :func:`~libtea._http.probe_endpoint` instead.
-    """
 
-    spec_version: str
-    is_legacy: bool
+    ``spec_version`` and ``is_legacy`` are left out on purpose: data members would make
+    ``issubclass()`` raise and hide the protocol from ``Mock(spec=TeaClient)`` doubles.
+    """
 
     # --- Discovery ---
 

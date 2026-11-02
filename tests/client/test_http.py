@@ -337,7 +337,7 @@ class TestErrorTypeFromBody:
     @responses.activate
     def test_400_deeply_nested_body_has_no_error_type(self, http_client):
         """json.loads raises RecursionError (not ValueError) on deep nesting under Python 3.11."""
-        responses.get(f"{LEGACY_BASE_URL}/products", status=400, body=b"[" * 4000)
+        responses.get(f"{LEGACY_BASE_URL}/products", status=400, body=b"[" * 4000, content_type="application/json")
         with pytest.raises(TeaRequestError) as exc:
             http_client.get_json("/products")
         assert exc.value.error_type is None
@@ -387,7 +387,7 @@ class TestErrorTypeFromBody:
 
     @responses.activate
     def test_400_non_json_body_has_no_error_type(self, http_client):
-        responses.get(f"{LEGACY_BASE_URL}/products", status=400, body="Bad Request")
+        responses.get(f"{LEGACY_BASE_URL}/products", status=400, body="Bad Request", content_type="application/json")
         with pytest.raises(TeaRequestError, match="Bad Request") as exc:
             http_client.get_json("/products")
         assert exc.value.error_type is None
@@ -409,7 +409,7 @@ class TestErrorTypeFromBody:
     def test_error_key_past_read_bound_not_found(self, http_client):
         """Only the first 4 KiB of a 4xx body is read, so an ``error`` key after it is not seen."""
         body = '{"padding": "' + "x" * 5000 + '", "error": "INVALID_REQUEST"}'
-        responses.get(f"{LEGACY_BASE_URL}/products", status=400, body=body)
+        responses.get(f"{LEGACY_BASE_URL}/products", status=400, body=body, content_type="application/json")
         with pytest.raises(TeaRequestError) as exc:
             http_client.get_json("/products")
         assert exc.value.error_type is None

@@ -134,24 +134,28 @@ def purl_tei(domain: str, purl: str) -> str:
 def purl_from_tei(tei: str) -> str:
     """Return the PURL carried by a ``purl`` TEI.
 
-    A TEA 1.0.0 ``tei://`` TEI carries it Base64URL-encoded (padding optional) and is decoded; a legacy
+    A TEA 1.0.0 ``tei://`` TEI carries it as unpadded Base64URL and is decoded; a legacy
     ``urn:tei:purl:`` TEI carries it verbatim.
 
     Raises:
-        TeaDiscoveryError: If the TEI is invalid, not of type ``purl``, or does not decode to a PURL.
+        TeaDiscoveryError: If the TEI is invalid, not of type ``purl``, not the canonical unpadded
+            Base64URL encoding of its PURL, or does not decode to a PURL.
     """
     tei_type, _domain, identifier = parse_tei(tei)
     if tei_type != "purl":
         raise TeaDiscoveryError(f"Not a purl TEI: {tei!r}")
     if not tei.startswith(_TEI_URI_PREFIX):
         return identifier
-    encoded = identifier.rstrip("=")
-    if not _BASE64URL.fullmatch(encoded):
-        raise TeaDiscoveryError(f"purl TEI identifier is not Base64URL: {tei!r}")
+    if not _BASE64URL.fullmatch(identifier):  # also rejects '=' padding
+        raise TeaDiscoveryError(f"purl TEI identifier is not unpadded Base64URL: {tei!r}")
     try:
-        purl = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode()
+        purl = base64.urlsafe_b64decode(identifier + "=" * (-len(identifier) % 4)).decode()
     except (binascii.Error, UnicodeDecodeError) as exc:
         raise TeaDiscoveryError(f"purl TEI identifier does not decode: {tei!r}") from exc
+    # TEIs compare by their encoded form, and lenient decoding ignores the discarded bits, so only the
+    # canonical encoding names this PURL.
+    if base64.urlsafe_b64encode(purl.encode()).rstrip(b"=").decode() != identifier:
+        raise TeaDiscoveryError(f"purl TEI identifier is not canonical Base64URL: {tei!r}")
     if not purl.startswith("pkg:"):
         raise TeaDiscoveryError(f"purl TEI identifier does not decode to a PURL: {tei!r}")
     return purl

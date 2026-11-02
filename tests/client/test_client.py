@@ -916,6 +916,44 @@ class TestVersionNegotiation:
         assert responses.calls[1].request.url == "https://api.example.com/v0.4.0"
         client.close()
 
+    @responses.activate
+    def test_unreachable_exact_fails_over_to_compatible(self):
+        responses.get(
+            "https://example.com/.well-known/tea",
+            json={
+                "schemaVersion": 1,
+                "endpoints": [
+                    {"url": "https://a.example.com", "versions": ["1.0.0"]},
+                    {"url": "https://b.example.com", "versions": ["0.3.0"]},
+                ],
+            },
+        )
+        responses.head("https://a.example.com/v1.0.0", body=requests.ConnectionError("down"))
+        responses.head("https://b.example.com/v0.3.0", status=200)
+        with pytest.warns(UserWarning, match="negotiated to server version 0.3.0"):
+            client = TeaClient.from_well_known("example.com")
+        assert client.spec_version == "0.3.0"
+        client.close()
+
+    @pytest.mark.parametrize("token", [None, "secret"])
+    @responses.activate
+    def test_http_endpoint_from_https_discovery_rejected(self, token):
+        """TEA 1.0.0: an http base learned from discovery is rejected; the https endpoint is used instead."""
+        responses.get(
+            "https://example.com/.well-known/tea",
+            json={
+                "schemaVersion": 1,
+                "endpoints": [
+                    {"url": "http://a.example.com", "versions": ["1.0.0"], "priority": 1},
+                    {"url": "https://b.example.com", "versions": ["1.0.0"], "priority": 0.5},
+                ],
+            },
+        )
+        responses.head("https://b.example.com/v1.0.0", status=200)
+        with TeaClient.from_well_known("example.com", token=token) as client:
+            assert client._http._base_url == "https://b.example.com/v1.0.0"
+        assert all(not c.request.url.startswith("http://") for c in responses.calls)
+
 
 class TestEndpointFailover:
     """Multi-endpoint failover in from_well_known."""

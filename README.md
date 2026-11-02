@@ -649,14 +649,14 @@ libtea now targets TEA 1.0.0 and still talks to 0.4.0 servers. These Python API 
 **Spec versions**
 
 - A base URL without a `/v<semver>` suffix (and no `spec_version=`) is now TEA 1.0.0, not 0.4.0. `TEA_SPEC_VERSION` is `"1.0.0"`. To keep talking to a 0.4.0 server, pass `spec_version="0.4.0"` or end the base URL in `/v0.4.0`.
-- `TeaClient.from_well_known(version=None)` now negotiates: it prefers 1.0.0, falls back to 0.4.0, and fails over across both. It used to default to `"0.4.0"`. Pass `version="0.4.0"` to pin the old behaviour. It downgrades to another compatible version (with a warning) only when neither is advertised exactly; a prerelease such as `1.0.0-rc.1` does not count as 1.0.0. The API path uses the version spelling exactly as the server advertises it (for example `/v1.0.0+build.5`).
+- `TeaClient.from_well_known(version=None)` now negotiates: it prefers 1.0.0, falls back to 0.4.0, and fails over across both. It used to default to `"0.4.0"`. Pass `version="0.4.0"` to pin the old behaviour. Endpoints of another compatible version (for example `0.3.0`) are tried, with a warning, only after every endpoint advertising 1.0.0 or 0.4.0 exactly has failed; a prerelease such as `1.0.0-rc.1` does not count as 1.0.0. With the default `scheme="https"`, an `http://` endpoint listed in `.well-known` is rejected and the next one is tried. The API path uses the version spelling exactly as the server advertises it (for example `/v1.0.0+build.5`).
 - A base URL ending in `/v<semver>` with a major version other than 0 or 1 (for example `/v2.0.0`) now raises `ValueError`.
 - On 0.4.0 servers `get_artifact` now calls the 0.4.0 path `/artifact/{uuid}` (libtea 0.5.1 called `/artifact/{uuid}/latest`, which 0.4.0 servers answer with 404), and `get_artifact_version` raises `TeaValidationError` before any request, since 0.4.0 has no versioned artifact endpoint.
-- `TeaClient` gains `spec_version` and `is_legacy`. `TeaClientProtocol` gains them too, plus `download_artifact_content` and the new `discover` signature, so test doubles that implement the protocol need updating.
+- `TeaClient` gains `spec_version` and `is_legacy` (not part of `TeaClientProtocol`, which stays method-only so `issubclass()` and `Mock(spec=TeaClient)` keep working). `TeaClientProtocol` gains `download_artifact_content` and the new `discover` signature, so test doubles that implement the protocol need updating.
 
 **Discovery and TEIs**
 
-- TEIs are now `tei://<domain>/<type>/<identifier>`. `parse_tei` and the CLI still accept the legacy `urn:tei:<type>:<domain>:<identifier>` form, and `TeaClient.discover` sends whatever TEI you give it verbatim; use the legacy form with 0.4.0 servers.
+- TEIs are now `tei://<domain>/<type>/<identifier>`. `parse_tei` and the CLI still accept the legacy `urn:tei:<type>:<domain>:<identifier>` form, and `TeaClient.discover` sends whatever TEI you give it verbatim; use the legacy form with 0.4.0 servers. When the CLI discovers the server from a legacy-form TEI, it connects to a 0.4.0 endpoint, since only 0.4.0 defines that form.
 - `discover(tei=None, *, purl=None)` takes exactly one of the two, otherwise `TeaValidationError`. PURL lookup needs a 1.x server. On a 1.x server an empty discovery array also raises `TeaValidationError`; an unknown TEI is a 404.
 
 **Pagination**

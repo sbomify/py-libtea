@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from libtea.models import Collection, ComponentReleaseWithCollection
+from libtea.models import _LEGACY_PAGE_KEYS, Collection, ComponentReleaseWithCollection, _PaginatedResponse
 
 __all__ = ["tea_datetime_serializer", "to_wire"]
 
@@ -67,6 +67,8 @@ def to_wire(data: BaseModel | Sequence[BaseModel], *, legacy: bool = False) -> A
         _legacy_collection_dates(data, wire)
     elif isinstance(data, ComponentReleaseWithCollection):
         wire = {**wire.pop("release"), **wire}
+    elif isinstance(data, _PaginatedResponse):
+        wire = {k: v for k, v in wire.items() if k not in _LEGACY_PAGE_KEYS}  # TEA 1.0.0 pages carry no offsets
     return wire
 
 
