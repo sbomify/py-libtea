@@ -17,7 +17,6 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    ModelWrapValidatorHandler,
     TypeAdapter,
     ValidationError,
     ValidationInfo,
@@ -25,6 +24,9 @@ from pydantic import (
     model_validator,
 )
 from pydantic.alias_generators import to_camel
+
+# Not exported from the top-level ``pydantic`` package before 2.10; this module has it since 2.0.
+from pydantic.functional_validators import ModelWrapValidatorHandler
 
 
 def _is_legacy(info: ValidationInfo) -> bool:
