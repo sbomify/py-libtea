@@ -55,7 +55,8 @@ dev = [
     "responses>=0.26.0,<1",
     "mypy>=1.15.0,<3",
     "types-requests>=2.32.0",
-    "click>=8.0,<9",
+    # Test-only floor: CliRunner before 8.2.1 loses stderr; the cli extra still allows click 8.0.
+    "click>=8.2.1,<9",
     "rich>=13.0.0",
 ]
 

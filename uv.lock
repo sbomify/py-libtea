@@ -599,7 +599,7 @@ provides-extras = ["cli", "conformance", "server"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "click", specifier = ">=8.0,<9" },
+    { name = "click", specifier = ">=8.2.1,<9" },
     { name = "mypy", specifier = ">=1.15.0,<3" },
     { name = "pre-commit", specifier = ">=4.5.0,<5" },
     { name = "pytest", specifier = ">=9.0.0,<10" },

@@ -535,7 +535,7 @@ class TestFormatOutputDispatch:
 
     def test_dispatch_product_release_with_collection(self):
         data = _legacy(
-            ProductReleaseWithCollection, uuid=UUID, version="1.0.0", created_date="2024-01-01", components=[]
+            ProductReleaseWithCollection, uuid=UUID, version="1.0.0", created_date="2024-01-01T00:00:00Z", components=[]
         )
         assert "Product Release" in _capture(format_output, data)
 
