@@ -38,7 +38,7 @@ TEA is an open standard for discovering and retrieving software transparency art
 - Structured exception hierarchy with error context
 - CLI with rich-formatted output, JSON mode, and verbose logging
 - Conformance test suite for validating TEA server compliance (programmatic, CLI, and pytest plugin)
-- Server-side helpers (`tea_datetime_serializer`) for TEA API implementations
+- Server-side helpers (`to_wire`, `tea_datetime_serializer`, `purl_from_tei`) for TEA API implementations
 - Unfiltered listing endpoints (`list_products`, `list_product_releases`)
 
 ## Installation
@@ -152,7 +152,7 @@ endpoint = select_endpoint(well_known, "1.0.0")
 print(endpoint.url, endpoint.priority)
 ```
 
-Known TEI types: `uuid`, `purl`, `hash`, `swid`, `eanupc`, `gtin`, `asin`, `udi` (`TeiType`). In the `tei://` form `parse_tei` accepts any type matching `[a-z][a-z0-9]*` (a lowercase letter, then lowercase letters or digits), so types added to the spec's registry keep working. A `purl` identifier in that form is the unpadded Base64URL encoding of the PURL; libtea passes it through unchanged.
+Known TEI types: `uuid`, `purl`, `hash`, `swid`, `eanupc`, `gtin`, `asin`, `udi` (`TeiType`). In the `tei://` form `parse_tei` accepts any type matching `[a-z][a-z0-9]*` (a lowercase letter, then lowercase letters or digits), so types added to the spec's registry keep working. A `purl` identifier in that form is the unpadded Base64URL encoding of the PURL; `parse_tei` passes it through unchanged. `purl_tei(domain, purl)` builds such a TEI (pass the PURL in canonical form), and `purl_from_tei(tei)` returns the PURL from either form.
 
 ### Search
 
@@ -578,15 +578,27 @@ The plugin generates one test per conformance check. See the [conformance docs](
 
 ## Server helpers
 
-For TEA server implementations that use libtea models as response schemas:
+For TEA server implementations that use libtea models as response schemas. `to_wire` turns models into the JSON a TEA server sends: camelCase keys, unset optional fields left out (TEA 1.0.0 schemas don't allow `null`), `Z` timestamps, and `ComponentReleaseWithCollection` flattened as TEA 1.0.0 defines it. `model_dump()` gives libtea's Python shape instead, which keeps that response nested under `release`. Pass `legacy=True` to emit the TEA 0.4.0 shape.
 
 ```python
 from datetime import datetime, timezone
-from libtea.server import tea_datetime_serializer
+
+from libtea.discovery import purl_from_tei
+from libtea.models import ErrorResponse, ErrorType
+from libtea.server import tea_datetime_serializer, to_wire
+
+to_wire(ErrorResponse(error=ErrorType.OBJECT_UNKNOWN))  # {"error": "OBJECT_UNKNOWN"}
+to_wire([info_1, info_2])  # lists of models, e.g. a /discovery response
+to_wire(component_release, legacy=True)  # TEA 0.4.0 shape, nested under "release"
+
+# A /discovery handler: the PURL inside a purl TEI, decoded from 1.0.0 Base64URL or taken from a legacy URN
+purl_from_tei("tei://example.com/purl/cGtnOnB5cGkvbGlidGVhQDAuNi4w")  # "pkg:pypi/libtea@0.6.0"
 
 # Serialize to TEA spec format: "2024-03-20T15:30:00Z"
 tea_datetime_serializer(datetime.now(timezone.utc))
 ```
+
+`to_wire` raises `ValueError` on a naive datetime; give models timezone-aware timestamps.
 
 ## Error handling
 
@@ -686,6 +698,12 @@ md5 = Checksum.model_validate(
 
 - `ErrorResponse.error` is a `str` (was `ErrorType`); compare it with `==`. `ErrorResponse.message` is new, and `ErrorType` has the 1.0.0 values.
 - `TeaRequestError` now has `.error_type`, like `TeaNotFoundError`. libtea reads at most 4 KiB of a 4xx body to find it, and cuts the message snippet at 200 characters.
+
+**Servers that build responses from libtea models**
+
+- Serialize with `libtea.server.to_wire(model)` rather than `model.model_dump(by_alias=True)`. `model_dump` keeps `ComponentReleaseWithCollection` nested under `release` (the 0.4.0 shape) and writes `null` for unset optional fields, neither of which a TEA 1.0.0 response may contain. Use `to_wire(model, legacy=True)` while still serving 0.4.0.
+- Models built in Python follow the 1.0.0 rules described above. Moving a server to 1.0.0 therefore means giving each `Artifact` a `version` and `created_date`, each `ReleaseDistribution` a `distribution_id` (`distribution_type` is gone), and each `Collection` a `created_date` (was `date`), and dropping MD5 checksums.
+- 1.0.0 paginated responses are `has_next` / `next_page_token` / `results` (build a `Paginated*Response` and pass it to `to_wire`), and `/discovery` receives `tei://` TEIs: `purl_from_tei` returns the PURL from both TEI forms.
 
 ## Requirements
 

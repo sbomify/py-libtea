@@ -10,6 +10,8 @@ from libtea.discovery import (
     _is_valid_domain,
     fetch_well_known,
     parse_tei,
+    purl_from_tei,
+    purl_tei,
     select_best_endpoint,
     select_endpoint,
     select_endpoints,
@@ -137,6 +139,43 @@ class TestParseTeiUri:
 
     def test_urn_form_still_parsed(self):
         assert parse_tei("urn:tei:uuid:example.com:abc") == ("uuid", "example.com", "abc")
+
+
+class TestPurlTei:
+    # The example in the spec's tei-types/purl.md
+    PURL = "pkg:maven/commons-io/commons-io@2.22.0"
+    TEI = "tei://example.com/purl/cGtnOm1hdmVuL2NvbW1vbnMtaW8vY29tbW9ucy1pb0AyLjIyLjA"
+
+    def test_encodes_unpadded_base64url(self):
+        assert purl_tei("example.com", self.PURL) == self.TEI
+
+    def test_decodes_spec_example(self):
+        assert purl_from_tei(self.TEI) == self.PURL
+
+    def test_padded_identifier_accepted(self):
+        assert purl_from_tei(self.TEI + "=") == self.PURL
+
+    def test_legacy_urn_returned_verbatim(self):
+        assert purl_from_tei("urn:tei:purl:example.com:pkg:pypi/libtea@0.4.0") == "pkg:pypi/libtea@0.4.0"
+
+    @pytest.mark.parametrize(
+        "tei",
+        [
+            "tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1",  # not a purl TEI
+            "tei://example.com/purl/cGtn+Zm9v",  # standard Base64 alphabet, not Base64URL
+            "tei://example.com/purl/aGVsbG8",  # decodes to "hello", not a PURL
+            "tei://example.com/purl/__4",  # decodes to bytes that aren't UTF-8
+            "tei://example.com/purl/a",  # impossible Base64 length
+        ],
+    )
+    def test_rejects(self, tei):
+        with pytest.raises(TeaDiscoveryError):
+            purl_from_tei(tei)
+
+    @pytest.mark.parametrize(("domain", "purl"), [("bad_domain", "pkg:pypi/x"), ("example.com", "not-a-purl")])
+    def test_purl_tei_rejects(self, domain, purl):
+        with pytest.raises(TeaDiscoveryError):
+            purl_tei(domain, purl)
 
 
 class TestFetchWellKnown:

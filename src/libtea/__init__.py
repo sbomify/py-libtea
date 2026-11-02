@@ -28,6 +28,12 @@ if TYPE_CHECKING:
         parse_tei as parse_tei,
     )
     from libtea.discovery import (
+        purl_from_tei as purl_from_tei,
+    )
+    from libtea.discovery import (
+        purl_tei as purl_tei,
+    )
+    from libtea.discovery import (
         select_best_endpoint as select_best_endpoint,
     )
     from libtea.discovery import (
@@ -192,6 +198,8 @@ __all__ = [
     "VersionedEndpoint",
     "fetch_well_known",
     "parse_tei",
+    "purl_from_tei",
+    "purl_tei",
     "select_best_endpoint",
     "select_endpoint",
     "select_endpoints",
@@ -256,6 +264,8 @@ _LAZY_IMPORTS: dict[str, str] = {
     "VersionedEndpoint": "libtea.discovery",
     "fetch_well_known": "libtea.discovery",
     "parse_tei": "libtea.discovery",
+    "purl_from_tei": "libtea.discovery",
+    "purl_tei": "libtea.discovery",
     "select_best_endpoint": "libtea.discovery",
     "select_endpoint": "libtea.discovery",
     "select_endpoints": "libtea.discovery",

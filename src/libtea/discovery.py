@@ -5,6 +5,8 @@ document from the TEI's domain, and select the best-matching endpoint using
 SemVer 2.0.0 comparison and priority-based ordering.
 """
 
+import base64
+import binascii
 import logging
 import re
 import warnings
@@ -27,6 +29,7 @@ _VALID_TEI_TYPES = frozenset(e.value for e in TeiType)
 
 _TEI_URI_PREFIX = "tei://"
 _TEI_URI_TYPE = re.compile(r"[a-z][a-z0-9]*")
+_BASE64URL = re.compile(r"[A-Za-z0-9_-]+")
 _TEI_EXPECTED_FORMAT = (
     "Expected format: tei://<domain>/<type>/<identifier> (or legacy urn:tei:<type>:<domain>:<identifier>)"
 )
@@ -110,6 +113,48 @@ def parse_tei(tei: str) -> tuple[str, str, str]:
         raise TeaDiscoveryError(f"Invalid domain in TEI: {domain!r}")
     identifier = ":".join(parts[4:])
     return tei_type, domain, identifier
+
+
+def purl_tei(domain: str, purl: str) -> str:
+    """Build a TEA 1.0.0 ``purl`` TEI: ``tei://<domain>/purl/<PURL as unpadded Base64URL>``.
+
+    The spec asks publishers to canonicalize the PURL (ECMA-427) before encoding; it is encoded as given.
+
+    Raises:
+        TeaDiscoveryError: If ``purl`` is not a PURL or ``domain`` is not a valid domain name.
+    """
+    if not purl.startswith("pkg:"):
+        raise TeaDiscoveryError(f"Not a PURL: {purl!r}")
+    encoded = base64.urlsafe_b64encode(purl.encode()).rstrip(b"=").decode()
+    tei = f"{_TEI_URI_PREFIX}{domain}/purl/{encoded}"
+    parse_tei(tei)
+    return tei
+
+
+def purl_from_tei(tei: str) -> str:
+    """Return the PURL carried by a ``purl`` TEI.
+
+    A TEA 1.0.0 ``tei://`` TEI carries it Base64URL-encoded (padding optional) and is decoded; a legacy
+    ``urn:tei:purl:`` TEI carries it verbatim.
+
+    Raises:
+        TeaDiscoveryError: If the TEI is invalid, not of type ``purl``, or does not decode to a PURL.
+    """
+    tei_type, _domain, identifier = parse_tei(tei)
+    if tei_type != "purl":
+        raise TeaDiscoveryError(f"Not a purl TEI: {tei!r}")
+    if not tei.startswith(_TEI_URI_PREFIX):
+        return identifier
+    encoded = identifier.rstrip("=")
+    if not _BASE64URL.fullmatch(encoded):
+        raise TeaDiscoveryError(f"purl TEI identifier is not Base64URL: {tei!r}")
+    try:
+        purl = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode()
+    except (binascii.Error, UnicodeDecodeError) as exc:
+        raise TeaDiscoveryError(f"purl TEI identifier does not decode: {tei!r}") from exc
+    if not purl.startswith("pkg:"):
+        raise TeaDiscoveryError(f"purl TEI identifier does not decode to a PURL: {tei!r}")
+    return purl
 
 
 def fetch_well_known(
@@ -422,6 +467,8 @@ __all__ = [
     "VersionedEndpoint",
     "fetch_well_known",
     "parse_tei",
+    "purl_from_tei",
+    "purl_tei",
     "select_best_endpoint",
     "select_endpoint",
     "select_endpoints",
