@@ -1429,6 +1429,22 @@ class TestCheckPaginationToken:
         assert len(responses.calls) == 2
 
     @responses.activate
+    def test_follows_empty_token(self, v1):
+        responses.get(
+            f"{V1_BASE_URL}/products",
+            match=[matchers.query_param_matcher({"pageSize": "1"})],
+            json={"hasNext": True, "nextPageToken": "", "results": [product(PRODUCT, "A")]},
+        )
+        responses.get(
+            f"{V1_BASE_URL}/products",
+            match=[matchers.query_param_matcher({"pageSize": "1", "pageToken": ""})],
+            json={"hasNext": False, "results": [product(COMPONENT, "B")]},
+        )
+        result = check_pagination_token(v1, CheckContext())
+        assert result.status == CheckStatus.PASS
+        assert "pageToken=&" in responses.calls[1].request.url or responses.calls[1].request.url.endswith("pageToken=")
+
+    @responses.activate
     def test_single_page_skips(self, v1):
         responses.get(f"{V1_BASE_URL}/products", json={"hasNext": False, "results": []})
         result = check_pagination_token(v1, CheckContext())

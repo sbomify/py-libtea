@@ -578,7 +578,7 @@ The plugin generates one test per conformance check. See the [conformance docs](
 
 ## Server helpers
 
-For TEA server implementations that use libtea models as response schemas. `to_wire` turns models into the JSON a TEA server sends: camelCase keys, fields that are `None` or were never set left out (TEA 1.0.0 schemas don't allow `null`, and an unset default such as `"checksums": []` on a server-hosted format is invalid), `Z` timestamps, and `ComponentReleaseWithCollection` flattened as TEA 1.0.0 defines it. `model_dump()` gives libtea's Python shape instead, which keeps that response nested under `release`. Pass `legacy=True` to emit the TEA 0.4.0 shape: the component release nested under `release`, and each collection's timestamp named `date`.
+For TEA server implementations that use libtea models as response schemas. `to_wire` turns models into the JSON a TEA server sends: camelCase keys, fields that are `None` or were never set left out (TEA 1.0.0 schemas don't allow `null`, and an unset default such as `"checksums": []` on a server-hosted format is invalid), UTC `Z` timestamps that keep fractional seconds, and `ComponentReleaseWithCollection` flattened as TEA 1.0.0 defines it. `model_dump()` gives libtea's Python shape instead, which keeps that response nested under `release`. Pass `legacy=True` to emit the TEA 0.4.0 shape: the component release nested under `release`, each collection's timestamp named `date`, and timestamps without fractional seconds.
 
 ```python
 from datetime import datetime, timezone
@@ -662,7 +662,7 @@ libtea now targets TEA 1.0.0 and still talks to 0.4.0 servers. These Python API 
 **Pagination**
 
 - `page_offset: int` is replaced by `page_token: str | None` on `list_*`, `search_*` and `get_product_releases`; the CLI's `--page-offset` is now `--page-token`. On 0.4.0 servers the token is the next offset as a string (`"100"`).
-- `Paginated*Response` has `has_next` and `next_page_token`. `timestamp`, `page_start_index`, `page_size` and `total_results` are now optional and are `None` on 1.x servers, so code that reads them must handle `None`. `PaginatedCollectionResponse` is new.
+- `Paginated*Response` has `has_next` and `next_page_token`. On 1.x a page must carry a token exactly when `has_next` is true (an empty string is a valid token); a last page that still carries one raises `TeaValidationError`. `timestamp`, `page_start_index`, `page_size` and `total_results` are now optional and are `None` on 1.x servers, so code that reads them must handle `None`. `PaginatedCollectionResponse` is new.
 - `page_size` is at most 100 on 1.x servers (10000 on 0.4.0), otherwise `TeaValidationError`.
 - The `iter_*` iterators follow tokens and raise `TeaServerError` when a token repeats or after 10,000 pages. On 1.x servers `get_component_releases` and `get_*_release_collections` still return a list, but they now fetch every page.
 
@@ -697,7 +697,7 @@ md5 = Checksum.model_validate(
 **Errors**
 
 - `ErrorResponse.error` is a `str` (was `ErrorType`); compare it with `==`. `ErrorResponse.message` is new, and `ErrorType` has the 1.0.0 values.
-- `TeaRequestError` now has `.error_type`, like `TeaNotFoundError`. libtea reads at most 4 KiB of a 4xx body to find it, and cuts the message snippet at 200 characters.
+- `TeaRequestError` now has `.error_type`, like `TeaNotFoundError`. libtea reads at most 4 KiB of a 4xx body to find it, only from `application/json` responses as the spec requires, and cuts the message snippet at 200 characters.
 
 **Servers that build responses from libtea models**
 

@@ -16,10 +16,11 @@ __all__ = ["tea_datetime_serializer", "to_wire"]
 
 
 def tea_datetime_serializer(dt: datetime) -> str:
-    """Serialize a datetime to TEA spec format: ``YYYY-MM-DDThh:mm:ssZ``.
+    """Serialize a datetime to the TEA 0.4.0 format: ``YYYY-MM-DDThh:mm:ssZ``.
 
-    The TEA spec requires strictly UTC timestamps with no milliseconds
-    and no timezone offsets other than ``Z``.
+    TEA 0.4.0 requires UTC timestamps with no fractional seconds and no offset
+    other than ``Z``. TEA 1.0.0 also requires UTC with ``Z`` but keeps fractional
+    seconds; :func:`to_wire` emits that form unless ``legacy=True``.
 
     Args:
         dt: A timezone-aware datetime to serialize.
@@ -42,7 +43,9 @@ def to_wire(data: BaseModel | Sequence[BaseModel], *, legacy: bool = False) -> A
 
     - camelCase keys; fields that are ``None`` or were never set are left out, so neither ``null`` nor an
       empty default (such as ``"checksums": []`` on a server-hosted format) is sent;
-    - timestamps as ``YYYY-MM-DDThh:mm:ssZ`` (see :func:`tea_datetime_serializer`), enums as plain strings;
+    - timestamps in UTC with ``Z``, keeping fractional seconds as TEA 1.0.0 requires
+      (``legacy=True`` drops them, as TEA 0.4.0 requires; see :func:`tea_datetime_serializer`);
+    - enums as plain strings;
     - a ``ComponentReleaseWithCollection`` flattened as TEA 1.0.0 defines it. With ``legacy=True``
       (TEA 0.4.0) it stays nested under ``release``, and every collection's ``createdDate`` is named
       ``date``, at any depth.
@@ -59,7 +62,7 @@ def to_wire(data: BaseModel | Sequence[BaseModel], *, legacy: bool = False) -> A
     """
     if not isinstance(data, BaseModel):
         return [to_wire(item, legacy=legacy) for item in data]
-    wire = _plain(data.model_dump(by_alias=True, exclude_none=True, exclude_unset=True))
+    wire = _plain(data.model_dump(by_alias=True, exclude_none=True, exclude_unset=True), legacy)
     if legacy:
         _legacy_collection_dates(data, wire)
     elif isinstance(data, ComponentReleaseWithCollection):
@@ -86,13 +89,21 @@ def _legacy_collection_dates(model: BaseModel, wire: dict[str, Any]) -> None:
                     _legacy_collection_dates(item, item_wire)
 
 
-def _plain(value: Any) -> Any:
+def _timestamp(dt: datetime, legacy: bool) -> str:
+    if legacy:
+        return tea_datetime_serializer(dt)
+    if dt.tzinfo is None:
+        raise ValueError("to_wire requires timezone-aware datetimes")
+    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _plain(value: Any, legacy: bool) -> Any:
     if isinstance(value, datetime):
-        return tea_datetime_serializer(value)
+        return _timestamp(value, legacy)
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, dict):
-        return {k: _plain(v) for k, v in value.items()}
+        return {k: _plain(v, legacy) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
-        return [_plain(v) for v in value]
+        return [_plain(v, legacy) for v in value]
     return value

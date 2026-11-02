@@ -357,6 +357,28 @@ class TestErrorTypeFromBody:
         assert exc.value.error_type is None
 
     @responses.activate
+    def test_non_json_content_type_is_not_a_tea_error(self, http_client):
+        """A TEA error needs Content-Type application/json as well as the body (discovery/readme.md)."""
+        responses.get(
+            f"{LEGACY_BASE_URL}/products", status=404, body='{"error": "OBJECT_UNKNOWN"}', content_type="text/plain"
+        )
+        with pytest.raises(TeaNotFoundError) as exc:
+            http_client.get_json("/products")
+        assert exc.value.error_type is None
+
+    @responses.activate
+    def test_json_content_type_with_parameters_is_a_tea_error(self, http_client):
+        responses.get(
+            f"{LEGACY_BASE_URL}/products",
+            status=404,
+            body='{"error": "OBJECT_UNKNOWN"}',
+            content_type="Application/JSON; charset=utf-8",
+        )
+        with pytest.raises(TeaNotFoundError) as exc:
+            http_client.get_json("/products")
+        assert exc.value.error_type == "OBJECT_UNKNOWN"
+
+    @responses.activate
     def test_400_non_string_error_ignored(self, http_client):
         responses.get(f"{LEGACY_BASE_URL}/products", status=400, json={"error": ["INVALID_REQUEST"]})
         with pytest.raises(TeaRequestError) as exc:

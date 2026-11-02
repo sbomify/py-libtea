@@ -435,8 +435,10 @@ class TeaHttpClient:
         if status >= 500:
             raise TeaServerError(f"Server error: HTTP {status}")
         # 4xx: read the bounded body once; the snippet and the TEA error type both come from it.
+        # A TEA error is an application/json response (parameters allowed) with the error body.
         raw_bytes = TeaHttpClient._read_error_body(response)
-        error_type = _tea_error_type(raw_bytes)
+        media_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+        error_type = _tea_error_type(raw_bytes) if media_type == "application/json" else None
         if status == 404:
             raise TeaNotFoundError(f"Not found: HTTP {status}", error_type=error_type)
         # Remaining 4xx codes (400, 405-499 excluding 401/403/404)

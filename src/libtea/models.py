@@ -633,8 +633,11 @@ class _PaginatedResponse(_TeaModel, Generic[_R]):
         problems = super()._v1_problems()
         if "results" not in self.model_fields_set:
             problems.append("missing required field 'results'")
-        if self.has_next and not self.next_page_token:
+        # The token is opaque: an empty string is a valid token, so presence is "is not None".
+        if self.has_next and self.next_page_token is None:
             problems.append("hasNext is true but nextPageToken is missing")
+        if not self.has_next and self.next_page_token is not None:
+            problems.append("hasNext is false but nextPageToken is present")
         return problems
 
     @model_validator(mode="before")

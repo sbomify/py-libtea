@@ -431,6 +431,14 @@ class TestPagination:
         with pytest.raises(ValidationError, match="nextPageToken"):
             PaginatedProductResponse.model_validate({"hasNext": True, "results": []})
 
+    def test_v1_empty_token_is_a_valid_opaque_token(self):
+        page = PaginatedProductResponse.model_validate({"hasNext": True, "nextPageToken": "", "results": []})
+        assert page.next_page_token == ""
+
+    def test_v1_token_on_last_page_rejected(self):
+        with pytest.raises(ValidationError, match="nextPageToken"):
+            PaginatedProductResponse.model_validate({"hasNext": False, "nextPageToken": "stale", "results": []})
+
     def test_legacy_shape_rejected_on_v1(self):
         with pytest.raises(ValidationError, match="hasNext"):  # Pydantic reports missing fields by alias
             PaginatedProductResponse.model_validate(

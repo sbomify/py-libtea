@@ -539,7 +539,7 @@ def check_pagination_token(client: TeaClient, ctx: CheckContext) -> CheckResult:
         return _skip(name, "pageToken pagination applies to TEA 1.x only")
     try:
         first = client.list_products(page_size=1)
-        if not first.next_page_token:
+        if not first.has_next or first.next_page_token is None:
             return _skip(name, "Fewer than two products on server")
         second = client.list_products(page_token=first.next_page_token, page_size=1)
     except TeaError as exc:

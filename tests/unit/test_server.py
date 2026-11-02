@@ -57,6 +57,28 @@ class TestToWire:
         assert wire["createdDate"] == "2025-05-12T18:08:00Z"
         assert wire["artifacts"][0]["createdDate"] == "2024-12-13T00:00:00Z"
 
+    def test_v1_keeps_fractional_seconds(self):
+        collection = Collection.model_validate({**V1_COLLECTION, "createdDate": "2025-05-12T18:08:00.123456Z"})
+        assert to_wire(collection)["createdDate"] == "2025-05-12T18:08:00.123456Z"
+        assert Collection.model_validate(to_wire(collection)) == collection
+
+    def test_v1_converts_offsets_to_z(self):
+        collection = Collection.model_validate(V1_COLLECTION).model_copy(
+            update={"created_date": datetime(2025, 5, 12, 20, 8, 0, 500000, tzinfo=timezone(timedelta(hours=2)))}
+        )
+        assert to_wire(collection)["createdDate"] == "2025-05-12T18:08:00.500000Z"
+
+    def test_legacy_drops_fractional_seconds(self):
+        collection = Collection.model_validate({**V1_COLLECTION, "createdDate": "2025-05-12T18:08:00.123456Z"})
+        assert to_wire(collection, legacy=True)["date"] == "2025-05-12T18:08:00Z"
+
+    def test_naive_datetime_raises(self):
+        collection = Collection.model_validate(V1_COLLECTION).model_copy(
+            update={"created_date": datetime(2025, 5, 12, 18, 8, 0)}
+        )
+        with pytest.raises(ValueError, match="timezone-aware"):
+            to_wire(collection)
+
     def test_output_is_plain_json(self):
         wire = to_wire(Collection.model_validate(V1_COLLECTION))
         assert type(wire["belongsTo"]) is str
