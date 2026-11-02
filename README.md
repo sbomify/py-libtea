@@ -598,7 +598,7 @@ purl_from_tei("tei://example.com/purl/cGtnOnB5cGkvbGlidGVhQDAuNi4w")  # "pkg:pyp
 tea_datetime_serializer(datetime.now(timezone.utc))
 ```
 
-`to_wire` raises `ValueError` on a naive datetime; give models timezone-aware timestamps.
+`to_wire` raises `ValueError` on a naive datetime; give models timezone-aware timestamps. With `legacy=True` an `ErrorResponse` is sent as just `{"error": ...}`, since TEA 0.4.0 has no `message`, and an error type 0.4.0 doesn't define (anything but `OBJECT_UNKNOWN` and `OBJECT_NOT_SHAREABLE`) raises `ValueError`.
 
 ## Error handling
 
@@ -673,7 +673,7 @@ libtea now targets TEA 1.0.0 and still talks to 0.4.0 servers. These Python API 
 - `ComponentReleaseWithCollection` still exposes `.release` and `.latest_collection`, and now accepts the flattened 1.0.0 wire shape. Keyword construction with a dict, `ComponentReleaseWithCollection(release={...}, ...)`, now fails; pass a `Release` instance instead.
 - Fields that both spec versions require are no longer optional: `Checksum.algorithm_type` and `algorithm_value`, `Artifact.uuid`, `type` and `formats`, and `ReleaseDistribution.distribution_id`. Building one without them now fails.
 - Fields that only 1.0.0 requires (for example `Release.component`, `ProductRelease.product`, `Artifact.version` and `created_date`, `ArtifactFormat.media_type`, `Identifier.id_type` and `id_value`, and the `Collection` fields) keep their optional types, but a 1.x response that omits one raises `TeaValidationError`. 0.4.0 responses may omit them.
-- Models you build in Python follow the 1.0.0 rules too: leaving out a field that only 1.0.0 requires raises pydantic `ValidationError`. That breaks test doubles such as `Collection()`, `Identifier(id_type="PURL")` and a `Paginated*Response` built without `has_next` or `results`. For 0.4.0-shaped data, pass the wire (camelCase) dict to `model_validate(..., context={"tea_legacy": True})`. Don't nest instances built that way into a model you build without that context; the outer model checks them against the 1.0.0 rules and fails.
+- Models you build in Python follow the 1.0.0 rules too: leaving out a field that only 1.0.0 requires raises pydantic `ValidationError`. That breaks test doubles such as `Collection()`, `Identifier(id_type="PURL")` and a `Paginated*Response` built without `has_next` or `results`. For 0.4.0-shaped data, pass the wire (camelCase) dict to `model_validate(..., context={"tea_legacy": True})`. Instances built that way, or returned by a 0.4.0 client, can be nested into other models as they are; only raw dicts are checked against the 1.0.0 rules.
 - Removed: `ReleaseDistribution.distribution_type`, `Artifact.distribution_types`, and the `mimeType` alias for `ArtifactFormat.media_type`.
 - `ComplianceDocumentType.FEDRAMP` is now `"FEDRAMP"` (was `"FedRAMP"`), and `EU_DECLARATION_OF_CONFORMITY` is new.
 

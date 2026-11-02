@@ -10,9 +10,19 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from libtea.models import _LEGACY_PAGE_KEYS, Collection, ComponentReleaseWithCollection, _PaginatedResponse
+from libtea.models import (
+    _LEGACY_PAGE_KEYS,
+    Collection,
+    ComponentReleaseWithCollection,
+    ErrorResponse,
+    ErrorType,
+    _PaginatedResponse,
+)
 
 __all__ = ["tea_datetime_serializer", "to_wire"]
+
+# A tuple, not a set: membership must use ``==`` so plain strings and ``ErrorType`` members both match.
+_LEGACY_ERROR_TYPES = (ErrorType.OBJECT_UNKNOWN.value, ErrorType.OBJECT_NOT_SHAREABLE.value)
 
 
 def tea_datetime_serializer(dt: datetime) -> str:
@@ -48,7 +58,8 @@ def to_wire(data: BaseModel | Sequence[BaseModel], *, legacy: bool = False) -> A
     - enums as plain strings;
     - a ``ComponentReleaseWithCollection`` flattened as TEA 1.0.0 defines it. With ``legacy=True``
       (TEA 0.4.0) it stays nested under ``release``, and every collection's ``createdDate`` is named
-      ``date``, at any depth.
+      ``date``, at any depth;
+    - with ``legacy=True``, an ``ErrorResponse`` as just ``{"error": ...}``: TEA 0.4.0 has no ``message``.
 
     Args:
         data: A model, or a list of models (for array responses such as ``/discovery``).
@@ -58,13 +69,19 @@ def to_wire(data: BaseModel | Sequence[BaseModel], *, legacy: bool = False) -> A
         A dict, or a list of dicts for a list input.
 
     Raises:
-        ValueError: If a model holds a naive datetime.
+        ValueError: If a model holds a naive datetime, or (``legacy=True``) an ``ErrorResponse`` has an
+            error type TEA 0.4.0 does not define (only ``OBJECT_UNKNOWN`` and ``OBJECT_NOT_SHAREABLE``).
     """
     if not isinstance(data, BaseModel):
         return [to_wire(item, legacy=legacy) for item in data]
     wire = _plain(data.model_dump(by_alias=True, exclude_none=True, exclude_unset=True), legacy)
     if legacy:
         _legacy_collection_dates(data, wire)
+        if isinstance(data, ErrorResponse):
+            # TEA 0.4.0's error-response is ``{"error": ...}`` only (additionalProperties: false), from two values.
+            if data.error not in _LEGACY_ERROR_TYPES:
+                raise ValueError(f"TEA 0.4.0 has no error type {data.error!r}; it defines {list(_LEGACY_ERROR_TYPES)}")
+            wire = {"error": wire["error"]}
     elif isinstance(data, ComponentReleaseWithCollection):
         wire = {**wire.pop("release"), **wire}
     elif isinstance(data, _PaginatedResponse):

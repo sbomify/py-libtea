@@ -131,6 +131,15 @@ class TestToWire:
             }
         ]
 
+    @pytest.mark.parametrize("error", [ErrorType.OBJECT_UNKNOWN, "OBJECT_NOT_SHAREABLE"])
+    def test_legacy_error_response_has_only_error(self, error):
+        """TEA 0.4.0's error-response allows only ``error``, so ``message`` is dropped."""
+        assert to_wire(ErrorResponse(error=error, message="m"), legacy=True) == {"error": str(error)}
+
+    def test_legacy_error_response_rejects_v1_only_type(self):
+        with pytest.raises(ValueError, match="INVALID_PAGE_TOKEN"):
+            to_wire(ErrorResponse(error=ErrorType.INVALID_PAGE_TOKEN), legacy=True)
+
     def test_keyword_built_legacy_page(self):
         """A 0.4.0 server's page built by field name keeps every offset field; a 1.0.0 page carries none."""
         page = PaginatedProductResponse(

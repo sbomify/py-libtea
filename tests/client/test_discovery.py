@@ -115,6 +115,9 @@ class TestParseTeiUri:
     def test_domain_not_rewritten(self):
         assert parse_tei("tei://Example.com/uuid/x")[1] == "Example.com"
 
+    def test_path_segment_characters_and_escapes_kept(self):
+        assert parse_tei("tei://example.com/asin/a-b._~!$&'()*+,;=:@%20%C3%A9")[2] == "a-b._~!$&'()*+,;=:@%20%C3%A9"
+
     @pytest.mark.parametrize(
         "bad",
         [
@@ -131,6 +134,12 @@ class TestParseTeiUri:
             "tei:///uuid/x",
             "tei://bad_domain.com/uuid/x",
             "TEI://example.com/uuid/x",
+            "tei://example.com/uuid/a b",  # characters a path segment must percent-encode
+            'tei://example.com/uuid/a"b',
+            "tei://example.com/uuid/a|b",
+            "tei://example.com/uuid/café",
+            "tei://example.com/uuid/a%zzb",  # not a percent-escape
+            "tei://example.com/uuid/a%2",
         ],
     )
     def test_rejects_malformed(self, bad):  # Review Focus 5
