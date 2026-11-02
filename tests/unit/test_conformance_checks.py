@@ -1415,6 +1415,20 @@ class TestCheckPaginationToken:
         assert len(responses.calls) == 2
 
     @responses.activate
+    def test_repeated_token_on_empty_pages_fails(self, v1):
+        stuck = {"hasNext": True, "nextPageToken": "t", "results": []}
+        responses.get(f"{V1_BASE_URL}/products", match=[matchers.query_param_matcher({"pageSize": "1"})], json=stuck)
+        responses.get(
+            f"{V1_BASE_URL}/products",
+            match=[matchers.query_param_matcher({"pageSize": "1", "pageToken": "t"})],
+            json=stuck,
+        )
+        result = check_pagination_token(v1, CheckContext())
+        assert result.status == CheckStatus.FAIL
+        assert "repeated" in result.message
+        assert len(responses.calls) == 2
+
+    @responses.activate
     def test_single_page_skips(self, v1):
         responses.get(f"{V1_BASE_URL}/products", json={"hasNext": False, "results": []})
         result = check_pagination_token(v1, CheckContext())

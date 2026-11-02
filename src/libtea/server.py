@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from libtea.models import ComponentReleaseWithCollection
+from libtea.models import Collection, ComponentReleaseWithCollection
 
 __all__ = ["tea_datetime_serializer", "to_wire"]
 
@@ -40,10 +40,12 @@ def to_wire(data: BaseModel | Sequence[BaseModel], *, legacy: bool = False) -> A
 
     ``model_dump()`` gives libtea's Python shape; this gives what a TEA server sends:
 
-    - camelCase keys, and unset optional fields left out (TEA 1.0.0 schemas don't allow ``null``);
+    - camelCase keys; fields that are ``None`` or were never set are left out, so neither ``null`` nor an
+      empty default (such as ``"checksums": []`` on a server-hosted format) is sent;
     - timestamps as ``YYYY-MM-DDThh:mm:ssZ`` (see :func:`tea_datetime_serializer`), enums as plain strings;
-    - a ``ComponentReleaseWithCollection`` flattened as TEA 1.0.0 defines it, or nested under
-      ``release`` as in TEA 0.4.0 when ``legacy=True``.
+    - a ``ComponentReleaseWithCollection`` flattened as TEA 1.0.0 defines it. With ``legacy=True``
+      (TEA 0.4.0) it stays nested under ``release``, and every collection's ``createdDate`` is named
+      ``date``, at any depth.
 
     Args:
         data: A model, or a list of models (for array responses such as ``/discovery``).
@@ -57,10 +59,31 @@ def to_wire(data: BaseModel | Sequence[BaseModel], *, legacy: bool = False) -> A
     """
     if not isinstance(data, BaseModel):
         return [to_wire(item, legacy=legacy) for item in data]
-    wire = _plain(data.model_dump(by_alias=True, exclude_none=True))
-    if isinstance(data, ComponentReleaseWithCollection) and not legacy:
+    wire = _plain(data.model_dump(by_alias=True, exclude_none=True, exclude_unset=True))
+    if legacy:
+        _legacy_collection_dates(data, wire)
+    elif isinstance(data, ComponentReleaseWithCollection):
         wire = {**wire.pop("release"), **wire}
     return wire
+
+
+def _legacy_collection_dates(model: BaseModel, wire: dict[str, Any]) -> None:
+    """Rename each collection's ``createdDate`` to TEA 0.4.0's ``date``, walking the model alongside its dump."""
+    if isinstance(model, Collection) and "createdDate" in wire:
+        renamed = [("date" if key == "createdDate" else key, value) for key, value in wire.items()]
+        wire.clear()
+        wire.update(renamed)
+    for name, field in type(model).model_fields.items():
+        key = field.alias or name
+        if key not in wire:
+            continue
+        value = getattr(model, name)
+        if isinstance(value, BaseModel):
+            _legacy_collection_dates(value, wire[key])
+        elif isinstance(value, tuple):
+            for item, item_wire in zip(value, wire[key]):
+                if isinstance(item, BaseModel):
+                    _legacy_collection_dates(item, item_wire)
 
 
 def _plain(value: Any) -> Any:

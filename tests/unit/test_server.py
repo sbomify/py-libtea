@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from libtea.models import (
+    Artifact,
+    ArtifactFormat,
     Collection,
     ComponentReleaseWithCollection,
     DiscoveryInfo,
@@ -20,6 +22,7 @@ from tests.spec_data import (
     LEGACY,
     PRODUCT,
     PRODUCT_RELEASE,
+    V1_ARTIFACT,
     V1_COLLECTION,
     V1_PRODUCT_RELEASE,
     V1_RELEASE,
@@ -68,6 +71,31 @@ class TestToWire:
             "nextPageToken": "t2",
             "results": [{"uuid": PRODUCT, "name": "P", "identifiers": []}],
         }
+
+    def test_unset_defaults_left_out(self):
+        # A server-hosted format: no url, so no checksums. "checksums": [] would be invalid on 1.0.0.
+        fmt = ArtifactFormat(media_type="application/json")
+        assert to_wire(fmt) == {"mediaType": "application/json"}
+        artifact = Artifact.model_validate({**V1_ARTIFACT, "formats": [{"mediaType": "application/json"}]})
+        assert Artifact.model_validate(to_wire(artifact)) == artifact
+
+    def test_legacy_collection_timestamp_is_date(self):
+        collection = Collection.model_validate(V1_COLLECTION)
+        wire = to_wire(collection, legacy=True)
+        assert wire["date"] == "2025-05-12T18:08:00Z"
+        assert "createdDate" not in wire
+        assert wire["artifacts"][0]["createdDate"] == "2024-12-13T00:00:00Z"  # artifacts keep their own name
+        assert Collection.model_validate(wire, context=LEGACY) == collection
+        assert to_wire([collection], legacy=True)[0]["date"] == "2025-05-12T18:08:00Z"
+
+    def test_legacy_nested_collection_timestamp_is_date(self):
+        crwc = ComponentReleaseWithCollection.model_validate(
+            {"release": V1_RELEASE, "latestCollection": V1_COLLECTION}, context=LEGACY
+        )
+        wire = to_wire(crwc, legacy=True)
+        assert wire["latestCollection"]["date"] == "2025-05-12T18:08:00Z"
+        assert "createdDate" not in wire["latestCollection"]
+        assert wire["release"]["createdDate"] == "2024-12-10T10:51:00Z"  # releases keep createdDate in 0.4.0
 
     def test_list_of_models(self):
         info = DiscoveryInfo(

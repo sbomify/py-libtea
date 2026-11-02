@@ -544,10 +544,15 @@ def check_pagination_token(client: TeaClient, ctx: CheckContext) -> CheckResult:
         second = client.list_products(page_token=first.next_page_token, page_size=1)
     except TeaError as exc:
         return _fail(name, f"list_products() failed: {exc}", details=str(exc))
+    # Pages may be empty on TEA 1.x, so a stuck token is checked separately from the results.
+    if second.has_next and second.next_page_token == first.next_page_token:
+        return _fail(name, "pageToken did not advance: page 2 repeated nextPageToken from page 1")
     repeated = {p.uuid for p in first.results} & {p.uuid for p in second.results}
     if repeated:
         return _fail(
-            name, "pageToken did not advance: page 2 repeated results from page 1", details=", ".join(repeated)
+            name,
+            "pageToken did not advance: page 2 repeated results from page 1",
+            details=", ".join(sorted(repeated)),
         )
     return _pass(name, "pageToken advanced to a different page")
 

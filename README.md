@@ -578,7 +578,7 @@ The plugin generates one test per conformance check. See the [conformance docs](
 
 ## Server helpers
 
-For TEA server implementations that use libtea models as response schemas. `to_wire` turns models into the JSON a TEA server sends: camelCase keys, unset optional fields left out (TEA 1.0.0 schemas don't allow `null`), `Z` timestamps, and `ComponentReleaseWithCollection` flattened as TEA 1.0.0 defines it. `model_dump()` gives libtea's Python shape instead, which keeps that response nested under `release`. Pass `legacy=True` to emit the TEA 0.4.0 shape.
+For TEA server implementations that use libtea models as response schemas. `to_wire` turns models into the JSON a TEA server sends: camelCase keys, fields that are `None` or were never set left out (TEA 1.0.0 schemas don't allow `null`, and an unset default such as `"checksums": []` on a server-hosted format is invalid), `Z` timestamps, and `ComponentReleaseWithCollection` flattened as TEA 1.0.0 defines it. `model_dump()` gives libtea's Python shape instead, which keeps that response nested under `release`. Pass `legacy=True` to emit the TEA 0.4.0 shape: the component release nested under `release`, and each collection's timestamp named `date`.
 
 ```python
 from datetime import datetime, timezone
