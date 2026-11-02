@@ -14,7 +14,7 @@ from typing import Any, TypeVar
 
 from libtea.client import TeaClient
 from libtea.conformance._types import CheckResult, CheckStatus
-from libtea.exceptions import TeaError, TeaNotFoundError, TeaValidationError
+from libtea.exceptions import TeaError, TeaNotFoundError, TeaServerError, TeaValidationError
 from libtea.models import PaginatedProductReleaseResponse, PaginatedProductResponse
 
 # Canonical zero UUID used for 404 tests.
@@ -136,11 +136,17 @@ _MAX_EMPTY_PAGES = 10
 
 
 def _first_nonempty_page(fetch: Callable[..., _Page], *args: Any, **kwargs: Any) -> _Page:
-    """Return the first page with results, following ``hasNext`` past empty pages (bounded)."""
+    """Return the first page with results, following ``hasNext`` past empty pages.
+
+    Raises:
+        TeaServerError: If more than ``_MAX_EMPTY_PAGES`` empty pages in a row still have ``hasNext`` set.
+    """
     page = fetch(*args, **kwargs)
-    for _ in range(_MAX_EMPTY_PAGES):
-        if page.results or not page.has_next:
-            break
+    empty_pages = 0
+    while not page.results and page.has_next:
+        empty_pages += 1
+        if empty_pages > _MAX_EMPTY_PAGES:
+            raise TeaServerError(f"Pagination limit reached: {_MAX_EMPTY_PAGES} empty pages with hasNext set")
         page = fetch(*args, **kwargs, page_token=page.next_page_token)
     return page
 

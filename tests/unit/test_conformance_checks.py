@@ -1,3 +1,5 @@
+import json
+
 import pytest
 import responses
 from responses import matchers
@@ -429,6 +431,24 @@ class TestCheckListProducts:
             json={"hasNext": False, "results": [item]},
         )
         assert check(v1, CheckContext(product_uuid=PRODUCT)).status == CheckStatus.PASS
+
+    @responses.activate
+    def test_v1_endless_empty_pages_fail_at_limit(self, v1):
+        """Empty pages that keep hasNext set fail the check at the bound instead of reporting no products."""
+        page = 0
+
+        def endless(_request):
+            nonlocal page
+            page += 1
+            return 200, {}, json.dumps({"hasNext": True, "nextPageToken": f"t{page}", "results": []})
+
+        responses.add_callback(responses.GET, f"{V1_BASE_URL}/products", callback=endless)
+        ctx = CheckContext()
+        result = check_list_products(v1, ctx)
+        assert result.status == CheckStatus.FAIL
+        assert "Pagination limit" in result.message
+        assert ctx.product_uuid is None
+        assert len(responses.calls) == 11
 
 
 class TestCheckGetProduct:
