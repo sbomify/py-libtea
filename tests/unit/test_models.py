@@ -921,6 +921,22 @@ class TestV1RequiredFields:
         with pytest.raises(ValidationError, match="formats"):
             Artifact.model_validate({**V1_ARTIFACT, "formats": []})
 
+    @pytest.mark.parametrize(
+        "second",
+        ["application/json", "Application/JSON", "text/plain; Charset=utf-8", "text/plain;charset=utf-8"],
+    )
+    def test_artifact_media_type_in_one_format_only(self, second):
+        first = "application/json" if "json" in second.lower() else "text/plain; charset=utf-8"
+        data = {**V1_ARTIFACT, "formats": [{"mediaType": first}, {"mediaType": second}]}
+        with pytest.raises(ValidationError, match="more than one format"):
+            Artifact.model_validate(data)
+        assert len(Artifact.model_validate(data, context=LEGACY).formats) == 2  # TEA 0.4.0 has no such rule
+
+    @pytest.mark.parametrize("second", ["application/vnd.cyclonedx+json", "text/plain; charset=UTF-8"])
+    def test_artifact_distinct_media_types_pass(self, second):
+        first = "application/json" if "json" in second else "text/plain; charset=utf-8"
+        Artifact.model_validate({**V1_ARTIFACT, "formats": [{"mediaType": first}, {"mediaType": second}]})
+
     def test_collection_requires_artifacts_key(self):
         data = {k: v for k, v in V1_COLLECTION.items() if k != "artifacts"}
         with pytest.raises(ValidationError, match="missing required field 'artifacts'"):

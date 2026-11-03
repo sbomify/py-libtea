@@ -322,10 +322,18 @@ class ArtifactFormat(_TeaModel):
         return problems
 
 
+def _media_type_key(media_type: str) -> tuple[str, frozenset[tuple[str, str]]]:
+    """A media type as TEA 1.0.0 format selection compares it: type, subtype and parameter names ignore case."""
+    essence, *params = media_type.split(";")
+    pairs = (param.partition("=") for param in params)
+    return essence.strip().lower(), frozenset((name.strip().lower(), value.strip()) for name, _, value in pairs)
+
+
 class Artifact(_TeaModel):
     """A security-related artifact (e.g. SBOM, VEX, attestation) with available formats.
 
-    TEA 1.0.0 also requires ``version``, ``created_date`` and at least one format.
+    TEA 1.0.0 also requires ``version``, ``created_date`` and at least one format, and a media type may
+    appear in only one format, so that each format can be selected by its media type.
     """
 
     _v1_required = ("version", "created_date")
@@ -342,6 +350,10 @@ class Artifact(_TeaModel):
         problems = super()._v1_problems()
         if not self.formats:
             problems.append("'formats' must not be empty")
+        media_types = [fmt.media_type for fmt in self.formats if fmt.media_type is not None]
+        keys = [_media_type_key(media_type) for media_type in media_types]
+        if duplicates := [media_type for media_type, key in zip(media_types, keys) if keys.count(key) > 1]:
+            problems.append(f"a media type appears in more than one format: {', '.join(duplicates)}")
         return problems
 
 
