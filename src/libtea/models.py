@@ -9,9 +9,9 @@ required only by 1.0.0 are optional types that are rejected when missing,
 unless the model is validated with ``context={"tea_legacy": True}``.
 """
 
+import re
 from collections import Counter
 from datetime import datetime
-from email.message import Message
 from enum import StrEnum
 from typing import Any, ClassVar, Generic, Literal, Self, TypeVar
 
@@ -324,25 +324,31 @@ class ArtifactFormat(_TeaModel):
         return problems
 
 
-# Far longer than any real media type (RFC 6838 caps type and subtype at 127 characters each). The email
-# parameter parser is quadratic in the value's length on Python releases before its fix, and the value comes
-# from the server, so a longer one is compared verbatim instead of parsed.
-_MAX_PARSED_MEDIA_TYPE = 512
+# RFC 9110 media-type: type "/" subtype *( OWS ";" OWS [ name "=" ( token / quoted-string ) ] ). An unquoted
+# value may also hold non-token characters such as ":" and "/", which servers send unquoted in profile URIs.
+# Every part is unambiguous, so matching is linear in the length of the value, which comes from the server.
+_MT_TOKEN = r"[!#$%&'*+.^_`|~0-9A-Za-z-]+"
+_MT_PARAM = rf';[ \t]*(?:({_MT_TOKEN})=([^\s;"]+|"(?:[^"\\]|\\.)*")[ \t]*)?'
+_MEDIA_TYPE = re.compile(rf"[ \t]*({_MT_TOKEN}/{_MT_TOKEN})[ \t]*((?:{_MT_PARAM})*)")
+_MEDIA_TYPE_PARAM = re.compile(_MT_PARAM)
+_QUOTED_PAIR = re.compile(r"\\(.)")
 
 
 def _media_type_key(media_type: str) -> tuple[str, frozenset[tuple[str, str]]]:
     """A media type as TEA 1.0.0 format selection compares it.
 
     Type, subtype and parameter names ignore case. Parameter values are compared exactly once unquoted, so
-    ``charset="utf-8"`` is ``charset=utf-8`` and ``profile="a;b"`` stays one value.
+    ``charset="utf-8"`` is ``charset=utf-8`` and ``profile="a;b"`` stays one value. A value that is not a
+    media type is compared verbatim.
     """
-    if len(media_type) > _MAX_PARSED_MEDIA_TYPE:
-        return media_type, frozenset()  # ponytail: verbatim, so only an exact repeat of such a value is caught
-    header = Message()
-    header["content-type"] = media_type
-    params = header.get_params(header="content-type") or []  # quote- and escape-aware; names come lowercased
-    # Not get_content_type(): it turns a malformed type into text/plain, so two of them would collide.
-    return media_type.split(";", 1)[0].strip().lower(), frozenset(params[1:])
+    if (match := _MEDIA_TYPE.fullmatch(media_type)) is None:
+        return media_type, frozenset()
+    params = (
+        (name.lower(), _QUOTED_PAIR.sub(r"\1", value[1:-1]) if value.startswith('"') else value)
+        for name, value in _MEDIA_TYPE_PARAM.findall(match[2])
+        if name  # a bare ";"
+    )
+    return match[1].lower(), frozenset(params)
 
 
 class Artifact(_TeaModel):

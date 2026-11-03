@@ -929,9 +929,14 @@ class TestV1RequiredFields:
             ("text/plain; charset=utf-8", "text/plain; Charset=utf-8"),
             ("text/plain; charset=utf-8", "text/plain;charset=utf-8"),
             ("text/plain; charset=utf-8", 'text/plain; charset="utf-8"'),  # quoted and unquoted are one value
+            ('a/b; p="x\\"y"', 'A/B; P="x\\"y"'),
+            # A long parameter is still parsed: the length limits of RFC 6838 cover only type and subtype.
+            (f'application/json; profile="https://example.com/{"x" * 600}"', None),
+            (f"application/json; profile=https://example.com/{'x' * 600}", None),  # sent unquoted
         ],
     )
     def test_artifact_media_type_in_one_format_only(self, first, second):
+        second = second or first.replace("application/json", "Application/JSON")
         data = {**V1_ARTIFACT, "formats": [{"mediaType": first}, {"mediaType": second}]}
         with pytest.raises(ValidationError, match="more than one format"):
             Artifact.model_validate(data)
@@ -949,12 +954,18 @@ class TestV1RequiredFields:
     def test_artifact_distinct_media_types_pass(self, first, second):
         Artifact.model_validate({**V1_ARTIFACT, "formats": [{"mediaType": first}, {"mediaType": second}]})
 
-    def test_overlong_media_type_compared_verbatim(self, monkeypatch):
-        # The email parameter parser is quadratic on older Pythons, so an overlong value must never reach it.
-        monkeypatch.setattr("libtea.models.Message", None)
-        overlong = 'application/x; p="' + ";" * 600 + '"'
-        with pytest.raises(ValidationError, match="more than one format"):
-            Artifact.model_validate({**V1_ARTIFACT, "formats": [{"mediaType": overlong}, {"mediaType": overlong}]})
+    @pytest.mark.timeout(5)  # a quadratic parser takes minutes on these
+    @pytest.mark.parametrize(
+        "media_type",
+        [
+            'a/b; p="' + ";" * 1_000_000,  # unclosed quote
+            'a/b; p="' + ";" * 1_000_000 + '"',
+            "a/b" + "; " * 500_000 + "x",  # bare parameters, then an invalid end
+            'a/b; p="' + "\\" * 1_000_000,
+        ],
+    )
+    def test_media_type_check_is_linear(self, media_type):
+        Artifact.model_validate({**V1_ARTIFACT, "formats": [{"mediaType": media_type}, {"mediaType": "a/c"}]})
 
     def test_collection_requires_artifacts_key(self):
         data = {k: v for k, v in V1_COLLECTION.items() if k != "artifacts"}
