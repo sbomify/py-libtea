@@ -164,12 +164,19 @@ class TestPurlTei:
     def test_legacy_urn_returned_verbatim(self):
         assert purl_from_tei("urn:tei:purl:example.com:pkg:pypi/libtea@0.4.0") == "pkg:pypi/libtea@0.4.0"
 
+    @pytest.mark.parametrize("purl", ["pkg:npm/%40angular/core@17.0.0?arch=x64#src", "pkg:golang/x"])
+    def test_namespaced_and_qualified_purls_round_trip(self, purl):
+        assert purl_from_tei(purl_tei("example.com", purl)) == purl
+
     @pytest.mark.parametrize(
         "tei",
         [
             "tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1",  # not a purl TEI
             "tei://example.com/purl/cGtn+Zm9v",  # standard Base64 alphabet, not Base64URL
             "tei://example.com/purl/aGVsbG8",  # decodes to "hello", not a PURL
+            "tei://example.com/purl/cGtnOg",  # "pkg:": no type or name
+            "tei://example.com/purl/cGtnOm5wbS8",  # "pkg:npm/": no name
+            "urn:tei:purl:example.com:hello",  # legacy form, still not a PURL
             "tei://example.com/purl/__4",  # decodes to bytes that aren't UTF-8
             "tei://example.com/purl/a",  # impossible Base64 length
             TEI + "=",  # padded: TEA 1.0.0 identifiers are unpadded
@@ -180,7 +187,18 @@ class TestPurlTei:
         with pytest.raises(TeaDiscoveryError):
             purl_from_tei(tei)
 
-    @pytest.mark.parametrize(("domain", "purl"), [("bad_domain", "pkg:pypi/x"), ("example.com", "not-a-purl")])
+    @pytest.mark.parametrize(
+        ("domain", "purl"),
+        [
+            ("bad_domain", "pkg:pypi/x"),
+            ("example.com", "not-a-purl"),
+            ("example.com", "pkg:"),
+            ("example.com", "pkg:npm"),
+            ("example.com", "pkg:npm/"),
+            ("example.com", "pkg:npm/@1.0"),
+            ("example.com", "pkg:1npm/x"),  # a type starts with a letter
+        ],
+    )
     def test_purl_tei_rejects(self, domain, purl):
         with pytest.raises(TeaDiscoveryError):
             purl_tei(domain, purl)

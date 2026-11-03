@@ -471,9 +471,26 @@ class TestPagination:
         page = PaginatedProductResponse.model_validate({"hasNext": True, "nextPageToken": "", "results": []})
         assert page.next_page_token == ""
 
-    def test_v1_token_on_last_page_rejected(self):
-        with pytest.raises(ValidationError, match="nextPageToken"):
-            PaginatedProductResponse.model_validate({"hasNext": False, "nextPageToken": "stale", "results": []})
+    @pytest.mark.parametrize("token", ["stale", None])  # the key must be absent, so null is rejected too
+    def test_v1_token_on_last_page_rejected(self, token):
+        with pytest.raises(ValidationError, match="nextPageToken is present"):
+            PaginatedProductResponse.model_validate({"hasNext": False, "nextPageToken": token, "results": []})
+
+    def test_v1_null_token_with_has_next_rejected(self):
+        with pytest.raises(ValidationError, match="nextPageToken is missing"):
+            PaginatedProductResponse.model_validate({"hasNext": True, "nextPageToken": None, "results": []})
+
+    @pytest.mark.parametrize("key", ["timestamp", "pageStartIndex", "pageSize", "totalResults"])
+    @pytest.mark.parametrize("context", [LEGACY, {**LEGACY, "tea_page_offset": 0}])
+    @pytest.mark.parametrize("value", ["absent", None])
+    def test_legacy_page_requires_offset_metadata(self, key, context, value):
+        data = {"timestamp": "2024-03-20T15:30:00Z", "pageStartIndex": 0, "pageSize": 2, "totalResults": 0}
+        if value == "absent":
+            del data[key]
+        else:
+            data[key] = value
+        with pytest.raises(ValidationError, match=f"missing required {key}"):
+            PaginatedProductResponse.model_validate({**data, "results": []}, context=context)
 
     def test_legacy_shape_rejected_on_v1(self):
         with pytest.raises(ValidationError, match="hasNext"):  # Pydantic reports missing fields by alias
@@ -503,9 +520,10 @@ class TestPagination:
         assert (p.has_next, p.next_page_token) == (has_next, token)
 
     def test_legacy_bad_offsets_rejected(self):
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValidationError, match="hasNext"):
             PaginatedProductResponse.model_validate(
-                {"pageStartIndex": "x", "totalResults": 3, "results": []}, context=LEGACY
+                {"timestamp": "2024-03-20T15:30:00Z", "pageStartIndex": "x", "pageSize": 2, "totalResults": 3},
+                context=LEGACY,
             )
 
     def test_collection_page(self):

@@ -33,6 +33,8 @@ _TEI_URI_TYPE = re.compile(r"[a-z][a-z0-9]*")
 # Excludes "/", "?", "#", spaces, non-ASCII and a "%" not followed by two hex digits.
 _TEI_URI_IDENTIFIER = re.compile(r"(?:[A-Za-z0-9\-._~!$&'()*+,;=:@]|%[0-9A-Fa-f]{2})+")
 _BASE64URL = re.compile(r"[A-Za-z0-9_-]+")
+# What no PURL (ECMA-427) can do without: "pkg:", a type starting with a letter, "/" and a non-empty name.
+_PURL = re.compile(r"pkg:[A-Za-z][A-Za-z0-9.+-]*/[^?#@]*[^/?#@]")
 _TEI_EXPECTED_FORMAT = (
     "Expected format: tei://<domain>/<type>/<identifier> (or legacy urn:tei:<type>:<domain>:<identifier>)"
 )
@@ -124,9 +126,10 @@ def purl_tei(domain: str, purl: str) -> str:
     The spec asks publishers to canonicalize the PURL (ECMA-427) before encoding; it is encoded as given.
 
     Raises:
-        TeaDiscoveryError: If ``purl`` is not a PURL or ``domain`` is not a valid domain name.
+        TeaDiscoveryError: If ``purl`` is not a PURL (``pkg:<type>/<name>``, at least) or ``domain`` is not a
+            valid domain name.
     """
-    if not purl.startswith("pkg:"):
+    if not _PURL.match(purl):
         raise TeaDiscoveryError(f"Not a PURL: {purl!r}")
     encoded = base64.urlsafe_b64encode(purl.encode()).rstrip(b"=").decode()
     tei = f"{_TEI_URI_PREFIX}{domain}/purl/{encoded}"
@@ -142,25 +145,26 @@ def purl_from_tei(tei: str) -> str:
 
     Raises:
         TeaDiscoveryError: If the TEI is invalid, not of type ``purl``, not the canonical unpadded
-            Base64URL encoding of its PURL, or does not decode to a PURL.
+            Base64URL encoding of its PURL, or does not carry a PURL (``pkg:<type>/<name>``, at least).
     """
     tei_type, _domain, identifier = parse_tei(tei)
     if tei_type != "purl":
         raise TeaDiscoveryError(f"Not a purl TEI: {tei!r}")
     if not tei.startswith(_TEI_URI_PREFIX):
-        return identifier
-    if not _BASE64URL.fullmatch(identifier):  # also rejects '=' padding
-        raise TeaDiscoveryError(f"purl TEI identifier is not unpadded Base64URL: {tei!r}")
-    try:
-        purl = base64.urlsafe_b64decode(identifier + "=" * (-len(identifier) % 4)).decode()
-    except (binascii.Error, UnicodeDecodeError) as exc:
-        raise TeaDiscoveryError(f"purl TEI identifier does not decode: {tei!r}") from exc
-    # TEIs compare by their encoded form, and lenient decoding ignores the discarded bits, so only the
-    # canonical encoding names this PURL.
-    if base64.urlsafe_b64encode(purl.encode()).rstrip(b"=").decode() != identifier:
-        raise TeaDiscoveryError(f"purl TEI identifier is not canonical Base64URL: {tei!r}")
-    if not purl.startswith("pkg:"):
-        raise TeaDiscoveryError(f"purl TEI identifier does not decode to a PURL: {tei!r}")
+        purl = identifier
+    else:
+        if not _BASE64URL.fullmatch(identifier):  # also rejects '=' padding
+            raise TeaDiscoveryError(f"purl TEI identifier is not unpadded Base64URL: {tei!r}")
+        try:
+            purl = base64.urlsafe_b64decode(identifier + "=" * (-len(identifier) % 4)).decode()
+        except (binascii.Error, UnicodeDecodeError) as exc:
+            raise TeaDiscoveryError(f"purl TEI identifier does not decode: {tei!r}") from exc
+        # TEIs compare by their encoded form, and lenient decoding ignores the discarded bits, so only the
+        # canonical encoding names this PURL.
+        if base64.urlsafe_b64encode(purl.encode()).rstrip(b"=").decode() != identifier:
+            raise TeaDiscoveryError(f"purl TEI identifier is not canonical Base64URL: {tei!r}")
+    if not _PURL.match(purl):
+        raise TeaDiscoveryError(f"purl TEI does not carry a PURL: {tei!r}")
     return purl
 
 

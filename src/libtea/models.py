@@ -23,7 +23,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic.alias_generators import to_camel
+from pydantic.alias_generators import to_camel, to_snake
 
 # Not exported from the top-level ``pydantic`` package before 2.10; this module has it since 2.0.
 from pydantic.functional_validators import ModelWrapValidatorHandler
@@ -653,10 +653,11 @@ class _PaginatedResponse(_TeaModel, Generic[_R]):
         problems = super()._v1_problems()
         if "results" not in self.model_fields_set:
             problems.append("missing required field 'results'")
-        # The token is opaque: an empty string is a valid token, so presence is "is not None".
+        # The token is an opaque string, so "" is a valid token and null is not one. On the last page the key
+        # must be absent, so it is checked by presence: a null token there is rejected too.
         if self.has_next and self.next_page_token is None:
             problems.append("hasNext is true but nextPageToken is missing")
-        if not self.has_next and self.next_page_token is not None:
+        if not self.has_next and "next_page_token" in self.model_fields_set:
             problems.append("hasNext is false but nextPageToken is present")
         return problems
 
@@ -670,8 +671,11 @@ class _PaginatedResponse(_TeaModel, Generic[_R]):
             # ``timestamp`` is kept: it is also the field name, so dropping it would strip it from a page built
             # by field name, while the other keys are dropped only in their wire spelling.
             return {k: v for k, v in data.items() if k == "timestamp" or k not in _LEGACY_PAGE_KEYS}
+        # TEA 0.4.0 requires all four, under either spelling.
+        if missing := [key for key in _LEGACY_PAGE_KEYS if data.get(key, data.get(to_snake(key))) is None]:
+            raise ValueError(f"TEA 0.4.0 page is missing required {', '.join(missing)}")
         if "totalResults" not in data:
-            return data
+            return data  # built by field name: the caller supplies has_next
         start = (info.context or {}).get("tea_page_offset", data.get("pageStartIndex"))
         results = data.get("results", [])
         try:
