@@ -33,8 +33,9 @@ _TEI_URI_TYPE = re.compile(r"[a-z][a-z0-9]*")
 # Excludes "/", "?", "#", spaces, non-ASCII and a "%" not followed by two hex digits.
 _TEI_URI_IDENTIFIER = re.compile(r"(?:[A-Za-z0-9\-._~!$&'()*+,;=:@]|%[0-9A-Fa-f]{2})+")
 _BASE64URL = re.compile(r"[A-Za-z0-9_-]+")
-# What no PURL (ECMA-427) can do without: "pkg:", a type starting with a letter, "/" and a non-empty name.
-_PURL = re.compile(r"pkg:[A-Za-z][A-Za-z0-9.+-]*/[^?#@]*[^/?#@]")
+# What no PURL (ECMA-427) can do without: "pkg:", a type starting with a letter, then "/"-separated
+# non-empty segments ending in the name, at "@", "?", "#" or the end. So no empty or trailing segment.
+_PURL = re.compile(r"pkg:[A-Za-z][A-Za-z0-9.+-]*(?:/[^/?#@]+)+(?=[@?#]|\Z)")
 _TEI_EXPECTED_FORMAT = (
     "Expected format: tei://<domain>/<type>/<identifier> (or legacy urn:tei:<type>:<domain>:<identifier>)"
 )

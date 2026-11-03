@@ -164,7 +164,14 @@ class TestPurlTei:
     def test_legacy_urn_returned_verbatim(self):
         assert purl_from_tei("urn:tei:purl:example.com:pkg:pypi/libtea@0.4.0") == "pkg:pypi/libtea@0.4.0"
 
-    @pytest.mark.parametrize("purl", ["pkg:npm/%40angular/core@17.0.0?arch=x64#src", "pkg:golang/x"])
+    @pytest.mark.parametrize(
+        "purl",
+        [
+            "pkg:npm/%40angular/core@17.0.0?arch=x64#src",
+            "pkg:golang/x",
+            "pkg:maven/org.apache/log4j?repository_url=https://repo.example.com/maven2",
+        ],
+    )
     def test_namespaced_and_qualified_purls_round_trip(self, purl):
         assert purl_from_tei(purl_tei("example.com", purl)) == purl
 
@@ -176,6 +183,7 @@ class TestPurlTei:
             "tei://example.com/purl/aGVsbG8",  # decodes to "hello", not a PURL
             "tei://example.com/purl/cGtnOg",  # "pkg:": no type or name
             "tei://example.com/purl/cGtnOm5wbS8",  # "pkg:npm/": no name
+            "tei://example.com/purl/cGtnOm1hdmVuL2dyb3VwLw",  # "pkg:maven/group/": empty final segment
             "urn:tei:purl:example.com:hello",  # legacy form, still not a PURL
             "tei://example.com/purl/__4",  # decodes to bytes that aren't UTF-8
             "tei://example.com/purl/a",  # impossible Base64 length
@@ -196,6 +204,9 @@ class TestPurlTei:
             ("example.com", "pkg:npm"),
             ("example.com", "pkg:npm/"),
             ("example.com", "pkg:npm/@1.0"),
+            ("example.com", "pkg:maven/group/"),  # empty final segment
+            ("example.com", "pkg:npm/name/@1.0"),
+            ("example.com", "pkg:npm//name"),  # empty middle segment
             ("example.com", "pkg:1npm/x"),  # a type starts with a letter
         ],
     )
