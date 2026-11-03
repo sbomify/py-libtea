@@ -22,7 +22,7 @@ Items that depend on external factors or are deferred indefinitely. These are **
 
 **Additional note for Publisher API:** When serializing models back to the server, use `model_dump(mode="json", by_alias=True, exclude_none=True)`. Serialization should also be gated by the negotiated spec version (`TeaClient.is_legacy`) so 0.4.0-only wire shapes (for example `Collection.date` instead of `createdDate`, offset pagination fields, MD5 checksums) are only sent to servers that expect them.
 
-**Action:** When the Publisher API reaches beta (stable naming, stable schema), create a versioned design doc in `docs/plans/` and schedule for the next minor release.
+**Action:** When the Publisher API reaches beta (stable naming, stable schema), create a versioned design doc in `docs/plans/` and schedule it for an upcoming release.
 
 ---
 

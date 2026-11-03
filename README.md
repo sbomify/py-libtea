@@ -734,6 +734,10 @@ uv run ruff format --check .   # Format check
 uv build                       # Build wheel and sdist
 ```
 
+## Versioning
+
+Versions are CalVer, `YY.M.PATCH`, matching the other sbomify projects: the two-digit year and month of the release, then a counter that restarts at 0 each month. Releases are tagged `vYY.M.PATCH` (for example `v26.11.0`). 26.11.0 follows 0.5.1, so version ordering still holds for pip and uv.
+
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE) for details.
