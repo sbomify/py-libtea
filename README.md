@@ -713,7 +713,7 @@ md5 = Checksum.model_validate(
 - [semver](https://python-semver.readthedocs.io/) >= 3.0.4 for version selection
 
 Optional:
-- CLI: [click](https://click.palletsprojects.com/) >= 8.0, [rich](https://rich.readthedocs.io/) >= 13.0.0
+- CLI: [click](https://click.palletsprojects.com/) >= 8.2.1, [rich](https://rich.readthedocs.io/) >= 13.0.0
 - Conformance: [pytest](https://docs.pytest.org/) >= 8.0.0
 
 ## Not yet supported

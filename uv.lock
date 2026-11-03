@@ -586,7 +586,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", marker = "extra == 'cli'", specifier = ">=8.0,<9" },
+    { name = "click", marker = "extra == 'cli'", specifier = ">=8.2.1,<9" },
     { name = "idna", specifier = ">=3.15,<4" },
     { name = "pydantic", specifier = ">=2.1.0,<3" },
     { name = "pytest", marker = "extra == 'conformance'", specifier = ">=8.0.0" },
