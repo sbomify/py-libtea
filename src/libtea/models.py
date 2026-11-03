@@ -9,7 +9,9 @@ required only by 1.0.0 are optional types that are rejected when missing,
 unless the model is validated with ``context={"tea_legacy": True}``.
 """
 
+from collections import Counter
 from datetime import datetime
+from email.message import Message
 from enum import StrEnum
 from typing import Any, ClassVar, Generic, Literal, Self, TypeVar
 
@@ -323,10 +325,16 @@ class ArtifactFormat(_TeaModel):
 
 
 def _media_type_key(media_type: str) -> tuple[str, frozenset[tuple[str, str]]]:
-    """A media type as TEA 1.0.0 format selection compares it: type, subtype and parameter names ignore case."""
-    essence, *params = media_type.split(";")
-    pairs = (param.partition("=") for param in params)
-    return essence.strip().lower(), frozenset((name.strip().lower(), value.strip()) for name, _, value in pairs)
+    """A media type as TEA 1.0.0 format selection compares it.
+
+    Type, subtype and parameter names ignore case. Parameter values are compared exactly once unquoted, so
+    ``charset="utf-8"`` is ``charset=utf-8`` and ``profile="a;b"`` stays one value.
+    """
+    header = Message()
+    header["content-type"] = media_type
+    params = header.get_params(header="content-type") or []  # quote- and escape-aware; names come lowercased
+    # Not get_content_type(): it turns a malformed type into text/plain, so two of them would collide.
+    return media_type.split(";", 1)[0].strip().lower(), frozenset(params[1:])
 
 
 class Artifact(_TeaModel):
@@ -352,7 +360,8 @@ class Artifact(_TeaModel):
             problems.append("'formats' must not be empty")
         media_types = [fmt.media_type for fmt in self.formats if fmt.media_type is not None]
         keys = [_media_type_key(media_type) for media_type in media_types]
-        if duplicates := [media_type for media_type, key in zip(media_types, keys) if keys.count(key) > 1]:
+        counts = Counter(keys)  # formats come from the server: one pass, not a count per format
+        if duplicates := [media_type for media_type, key in zip(media_types, keys) if counts[key] > 1]:
             problems.append(f"a media type appears in more than one format: {', '.join(duplicates)}")
         return problems
 

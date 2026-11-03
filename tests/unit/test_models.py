@@ -922,19 +922,31 @@ class TestV1RequiredFields:
             Artifact.model_validate({**V1_ARTIFACT, "formats": []})
 
     @pytest.mark.parametrize(
-        "second",
-        ["application/json", "Application/JSON", "text/plain; Charset=utf-8", "text/plain;charset=utf-8"],
+        ("first", "second"),
+        [
+            ("application/json", "application/json"),
+            ("application/json", "Application/JSON"),
+            ("text/plain; charset=utf-8", "text/plain; Charset=utf-8"),
+            ("text/plain; charset=utf-8", "text/plain;charset=utf-8"),
+            ("text/plain; charset=utf-8", 'text/plain; charset="utf-8"'),  # quoted and unquoted are one value
+        ],
     )
-    def test_artifact_media_type_in_one_format_only(self, second):
-        first = "application/json" if "json" in second.lower() else "text/plain; charset=utf-8"
+    def test_artifact_media_type_in_one_format_only(self, first, second):
         data = {**V1_ARTIFACT, "formats": [{"mediaType": first}, {"mediaType": second}]}
         with pytest.raises(ValidationError, match="more than one format"):
             Artifact.model_validate(data)
         assert len(Artifact.model_validate(data, context=LEGACY).formats) == 2  # TEA 0.4.0 has no such rule
 
-    @pytest.mark.parametrize("second", ["application/vnd.cyclonedx+json", "text/plain; charset=UTF-8"])
-    def test_artifact_distinct_media_types_pass(self, second):
-        first = "application/json" if "json" in second else "text/plain; charset=utf-8"
+    @pytest.mark.parametrize(
+        ("first", "second"),
+        [
+            ("application/json", "application/vnd.cyclonedx+json"),
+            ("text/plain; charset=utf-8", "text/plain; charset=UTF-8"),  # parameter values are case-sensitive
+            ('application/example; profile="a;b"', 'application/example; profile="a; b"'),
+            ("application", "text"),  # malformed, but not the same
+        ],
+    )
+    def test_artifact_distinct_media_types_pass(self, first, second):
         Artifact.model_validate({**V1_ARTIFACT, "formats": [{"mediaType": first}, {"mediaType": second}]})
 
     def test_collection_requires_artifacts_key(self):
