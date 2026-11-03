@@ -324,12 +324,20 @@ class ArtifactFormat(_TeaModel):
         return problems
 
 
+# Far longer than any real media type (RFC 6838 caps type and subtype at 127 characters each). The email
+# parameter parser is quadratic in the value's length on Python releases before its fix, and the value comes
+# from the server, so a longer one is compared verbatim instead of parsed.
+_MAX_PARSED_MEDIA_TYPE = 512
+
+
 def _media_type_key(media_type: str) -> tuple[str, frozenset[tuple[str, str]]]:
     """A media type as TEA 1.0.0 format selection compares it.
 
     Type, subtype and parameter names ignore case. Parameter values are compared exactly once unquoted, so
     ``charset="utf-8"`` is ``charset=utf-8`` and ``profile="a;b"`` stays one value.
     """
+    if len(media_type) > _MAX_PARSED_MEDIA_TYPE:
+        return media_type, frozenset()  # ponytail: verbatim, so only an exact repeat of such a value is caught
     header = Message()
     header["content-type"] = media_type
     params = header.get_params(header="content-type") or []  # quote- and escape-aware; names come lowercased
