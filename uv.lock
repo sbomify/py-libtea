@@ -455,7 +455,7 @@ wheels = [
 
 [[package]]
 name = "libtea"
-version = "0.5.1"
+version = "26.11.0"
 source = { editable = "." }
 dependencies = [
     { name = "idna" },
