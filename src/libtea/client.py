@@ -239,7 +239,7 @@ class TeaClient:
             if (url, advertised) in tried:
                 continue
             tried.add((url, advertised))
-            base_url = f"{url.rstrip('/')}/v{advertised}"
+            base_url = f"{url}/v{advertised}"
             if scheme == "https" and urlsplit(base_url).scheme != "https":
                 # TEA 1.0.0: a client shall reject an http base URL learned from discovery.
                 errors.append((base_url, TeaDiscoveryError("non-HTTPS endpoint learned from .well-known rejected")))

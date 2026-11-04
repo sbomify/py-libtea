@@ -757,7 +757,8 @@ class TeaEndpoint(_TeaModel):
             Defaults to 1.0 per spec when not specified.
     """
 
-    url: str
+    # The .well-known schema's pattern: no userinfo, query, fragment or trailing slash, so "/v<version>" appends.
+    url: str = Field(pattern=r"^https?://[^/?#@]+(/[^?#\s]*[^/?#\s])?$")
     versions: tuple[str, ...] = Field(min_length=1)
     priority: float | None = Field(default=None, ge=0, le=1)
 

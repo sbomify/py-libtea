@@ -633,6 +633,30 @@ class TestSelectEndpoint:
         with pytest.raises(ValidationError):
             TeaEndpoint(url="https://api.example.com", versions=[])
 
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://user:secret@api.example.com",
+            "https://api.example.com/tea?x=1",
+            "https://api.example.com/tea#top",
+            "https://api.example.com/tea/",
+            "https://api.example.com/",
+            "HTTPS://api.example.com",
+            "ftp://api.example.com",
+            "api.example.com",
+        ],
+    )
+    def test_url_outside_well_known_schema_rejected(self, url):
+        """The .well-known schema allows no userinfo, query, fragment or trailing slash, and a lowercase scheme."""
+        with pytest.raises(ValidationError):
+            TeaEndpoint(url=url, versions=["1.0.0"])
+
+    @pytest.mark.parametrize(
+        "url", ["https://api.example.com", "https://api.example.com/my/tea", "http://localhost:8080"]
+    )
+    def test_url_inside_well_known_schema_accepted(self, url):
+        assert TeaEndpoint(url=url, versions=["1.0.0"]).url == url
+
 
 class TestDiscoveryInfo:
     def test_rejects_empty_servers(self):
