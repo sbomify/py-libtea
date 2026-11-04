@@ -29,9 +29,9 @@ TEA is an open standard for discovering and retrieving software transparency art
 - Artifact download with on-the-fly checksum verification (SHA-1 through BLAKE2b; MD5 on 0.4.0 servers only)
 - Download of artifact content hosted by the TEA server itself (TEA 1.x)
 - Optional TTL response caching
-- Endpoint failover with SemVer-compatible version selection
+- Endpoint failover with SemVer-compatible version selection, through to `/discovery` (`from_tei`)
 - SSRF protection — blocks private IPs, cloud metadata endpoints, DNS rebinding
-- Bearer token and HTTP basic auth authentication
+- Bearer token and API key authentication (exchanged at `/token` on TEA 1.x; HTTP basic auth on 0.4.0)
 - Bearer token isolation — tokens are never sent to artifact download hosts
 - `TeaClientProtocol` for dependency inversion and test doubles
 - Typed Pydantic v2 models with full camelCase/snake_case conversion
@@ -64,10 +64,9 @@ pip install libtea[conformance]
 ```python
 from libtea import TeaClient
 
-# Auto-discover the TEA server from the domain's .well-known/tea
-with TeaClient.from_well_known("example.com") as client:
-    # Discover a product by TEI
-    results = client.discover("tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1")
+# Resolve a TEI: its domain's .well-known/tea, then /discovery, failing over between endpoints
+client, results = TeaClient.from_tei("tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1")
+with client:
     for info in results:
         print(info.product_release_uuid, info.servers)
 
@@ -126,9 +125,9 @@ On a 0.4.0 server:
 ```python
 from libtea import TeaClient
 
-with TeaClient.from_well_known("example.com") as client:
-    # Discover product releases via TEI
-    results = client.discover("tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1")
+# Resolve a TEI end to end, failing over between the .well-known/tea endpoints
+client, results = TeaClient.from_tei("tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1")
+with client:
     for info in results:
         print(info.product_release_uuid, info.servers)
 
@@ -136,7 +135,9 @@ with TeaClient.from_well_known("example.com") as client:
     results = client.discover(purl="pkg:github/sbomify/sbomify")
 ```
 
-`discover` takes exactly one of `tei` and `purl`. The value is sent to the server verbatim, so pass a TEI in the form the server speaks: `tei://<domain>/<type>/<identifier>` for TEA 1.x, the legacy URN form for 0.4.0 servers (see [Upgrading](#upgrading)). On a 1.x server an unknown TEI is a 404 (`TeaNotFoundError`).
+`from_tei` tries the endpoints `from_well_known` would, in the same order, and sends `/discovery` to each until one answers. An endpoint that is unreachable, answers 5xx or a 404 that is not a TEA error, or returns an invalid body is skipped. A TEA error 404 (such as `OBJECT_UNKNOWN`, raised as `TeaNotFoundError` with `error_type`), a 401 or a 403 is an answer and ends discovery. `domain=` resolves another domain's `.well-known/tea` instead of the TEI's.
+
+On a client you already have, `discover` takes exactly one of `tei` and `purl`. The value is sent to the server verbatim, so pass a TEI in the form the server speaks: `tei://<domain>/<type>/<identifier>` for TEA 1.x, the legacy URN form for 0.4.0 servers (see [Upgrading](#upgrading)). On a 1.x server an unknown TEI is a 404 (`TeaNotFoundError`).
 
 Low-level discovery functions are also available:
 
@@ -342,9 +343,11 @@ from libtea import TeaClient
 # Bearer token
 client = TeaClient.from_well_known("trust.sbomify.com", token="your-token")
 
-# HTTP basic auth
-client = TeaClient.from_well_known("trust.sbomify.com", basic_auth=("user", "password"))
+# API key (TEA 1.x): exchanged at POST /token, and the access token is sent instead
+client = TeaClient.from_well_known("trust.sbomify.com", basic_auth=("key-id", "key-secret"))
 ```
+
+On a TEA 1.x server `basic_auth` is an API key. The client sends it only to `POST /token` (the `client_credentials` grant over HTTP Basic, as the TEA auth baseline requires) and presents the access token it gets as the bearer token. A token rejected with an `invalid_token` challenge is replaced, and the request retried, once. A TEA 0.4.0 server receives `basic_auth` as HTTP Basic auth on every request.
 
 ### Response caching
 
@@ -651,6 +654,7 @@ libtea now targets TEA 1.0.0 and still talks to 0.4.0 servers. These Python API 
 - A base URL without a `/v<semver>` suffix (and no `spec_version=`) is now TEA 1.0.0, not 0.4.0. `TEA_SPEC_VERSION` is `"1.0.0"`. To keep talking to a 0.4.0 server, pass `spec_version="0.4.0"` or end the base URL in `/v0.4.0`.
 - `TeaClient.from_well_known(version=None)` now negotiates: it prefers 1.0.0, falls back to 0.4.0, and fails over across both. It used to default to `"0.4.0"`. Pass `version="0.4.0"` to pin the old behaviour. Endpoints of another compatible version (for example `0.3.0`) are tried, with a warning, only after every endpoint advertising 1.0.0 or 0.4.0 exactly has failed; a prerelease such as `1.0.0-rc.1` does not count as 1.0.0. With the default `scheme="https"`, an `http://` endpoint listed in `.well-known` is rejected and the next one is tried. The API path uses the version spelling exactly as the server advertises it (for example `/v1.0.0+build.5`).
 - A base URL ending in `/v<semver>` with a major version other than 0 or 1 (for example `/v2.0.0`) now raises `ValueError`.
+- On a 1.x server `basic_auth` is now an API key exchanged at `POST /token`; it is no longer sent to resource endpoints. A server without a `/token` endpoint answers that exchange with an error, so code that used `basic_auth` against a 0.4.0 server behind an unversioned base URL needs `spec_version="0.4.0"`.
 - On 0.4.0 servers `get_artifact` now calls the 0.4.0 path `/artifact/{uuid}` (libtea 0.5.1 called `/artifact/{uuid}/latest`, which 0.4.0 servers answer with 404), and `get_artifact_version` raises `TeaValidationError` before any request, since 0.4.0 has no versioned artifact endpoint.
 - `TeaClient` gains `spec_version` and `is_legacy` (not part of `TeaClientProtocol`, which stays method-only so `issubclass()` and `Mock(spec=TeaClient)` keep working). `TeaClientProtocol` gains `download_artifact_content` and the new `discover` signature, so test doubles that implement the protocol need updating.
 
@@ -658,6 +662,7 @@ libtea now targets TEA 1.0.0 and still talks to 0.4.0 servers. These Python API 
 
 - TEIs are now `tei://<domain>/<type>/<identifier>`. `parse_tei` and the CLI still accept the legacy `urn:tei:<type>:<domain>:<identifier>` form, and `TeaClient.discover` sends whatever TEI you give it verbatim; use the legacy form with 0.4.0 servers. When the CLI discovers the server from a legacy-form TEI, it connects to a 0.4.0 endpoint, since only 0.4.0 defines that form.
 - `discover(tei=None, *, purl=None)` takes exactly one of the two, otherwise `TeaValidationError`. PURL lookup needs a 1.x server. On a 1.x server an empty discovery array also raises `TeaValidationError`; an unknown TEI is a 404.
+- `TeaClient.from_tei(tei)` is new and returns `(client, results)`. It fails over between `.well-known/tea` endpoints at the `/discovery` step, as TEA discovery requires, which `from_well_known` followed by `discover` does not. The CLI's `discover`, `inspect` and TEI `download` use it when no `--base-url` is given, so they no longer send a HEAD probe first.
 
 **Pagination**
 
@@ -720,7 +725,7 @@ Optional:
 
 - Publisher API (blocked on the TEA spec)
 - Async client
-- Some TEA 1.0.0 consumer features: the `/token` exchange, `ETag` revalidation, signature downloads, `sortField`/`sortOrder` and following `servers[].rootUrl`. See [docs/FUTURE.md](docs/FUTURE.md)
+- Some TEA 1.0.0 consumer features: `ETag` revalidation, signature downloads, `sortField`/`sortOrder` and following `servers[].rootUrl`. See [docs/FUTURE.md](docs/FUTURE.md)
 
 ## Development
 
