@@ -3,12 +3,15 @@ import requests
 import responses
 from pydantic import ValidationError
 
+from libtea.client import TeaClient
 from libtea.discovery import (
     VersionedEndpoint,
     _is_compatible_version,
     _is_valid_domain,
     fetch_well_known,
     parse_tei,
+    purl_from_tei,
+    purl_tei,
     select_best_endpoint,
     select_endpoint,
     select_endpoints,
@@ -92,6 +95,124 @@ class TestParseTei:
         assert tei_type == "purl"
         assert domain == "cyclonedx.org"
         assert identifier == "pkg:maven/org.apache/log4j@2.24.3"
+
+
+class TestParseTeiUri:
+    def test_uuid_tei(self):
+        assert parse_tei("tei://products.example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1") == (
+            "uuid",
+            "products.example.com",
+            "d4d9f54a-abcf-11ee-ac79-1a52914d44b1",
+        )
+
+    def test_hash_identifier_keeps_colon(self):
+        tei = "tei://example.com/hash/SHA-256:fd44efd601f651c8865acf0dfeacb0df19a2b50ec69ead0262096fd2f67197b9"
+        assert parse_tei(tei)[2].startswith("SHA-256:")
+
+    def test_unregistered_type_accepted(self):
+        assert parse_tei("tei://example.com/newtype2/x")[0] == "newtype2"
+
+    def test_domain_not_rewritten(self):
+        assert parse_tei("tei://Example.com/uuid/x")[1] == "Example.com"
+
+    def test_path_segment_characters_and_escapes_kept(self):
+        assert parse_tei("tei://example.com/asin/a-b._~!$&'()*+,;=:@%20%C3%A9")[2] == "a-b._~!$&'()*+,;=:@%20%C3%A9"
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "tei://example.com:8443/uuid/x",
+            "tei://example.com/uuid/a/b",
+            "tei://example.com/uuid/a%2Fb",
+            "tei://example.com/uuid/a%2fb",
+            "tei://example.com/uuid/",
+            "tei://example.com/UUID/x",
+            "tei://example.com/1uuid/x",
+            "tei://example.com/uuid/x?y=1",
+            "tei://example.com/uuid/x#frag",
+            "tei://example.com/uuid",
+            "tei:///uuid/x",
+            "tei://bad_domain.com/uuid/x",
+            "TEI://example.com/uuid/x",
+            "tei://example.com/uuid/a b",  # characters a path segment must percent-encode
+            'tei://example.com/uuid/a"b',
+            "tei://example.com/uuid/a|b",
+            "tei://example.com/uuid/café",
+            "tei://example.com/uuid/a%zzb",  # not a percent-escape
+            "tei://example.com/uuid/a%2",
+        ],
+    )
+    def test_rejects_malformed(self, bad):  # Review Focus 5
+        with pytest.raises(TeaDiscoveryError, match="tei://<domain>/<type>/<identifier>"):
+            parse_tei(bad)
+
+    def test_urn_form_still_parsed(self):
+        assert parse_tei("urn:tei:uuid:example.com:abc") == ("uuid", "example.com", "abc")
+
+
+class TestPurlTei:
+    # The example in the spec's tei-types/purl.md
+    PURL = "pkg:maven/commons-io/commons-io@2.22.0"
+    TEI = "tei://example.com/purl/cGtnOm1hdmVuL2NvbW1vbnMtaW8vY29tbW9ucy1pb0AyLjIyLjA"
+
+    def test_encodes_unpadded_base64url(self):
+        assert purl_tei("example.com", self.PURL) == self.TEI
+
+    def test_decodes_spec_example(self):
+        assert purl_from_tei(self.TEI) == self.PURL
+
+    def test_legacy_urn_returned_verbatim(self):
+        assert purl_from_tei("urn:tei:purl:example.com:pkg:pypi/libtea@0.4.0") == "pkg:pypi/libtea@0.4.0"
+
+    @pytest.mark.parametrize(
+        "purl",
+        [
+            "pkg:npm/%40angular/core@17.0.0?arch=x64#src",
+            "pkg:golang/x",
+            "pkg:maven/org.apache/log4j?repository_url=https://repo.example.com/maven2",
+        ],
+    )
+    def test_namespaced_and_qualified_purls_round_trip(self, purl):
+        assert purl_from_tei(purl_tei("example.com", purl)) == purl
+
+    @pytest.mark.parametrize(
+        "tei",
+        [
+            "tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1",  # not a purl TEI
+            "tei://example.com/purl/cGtn+Zm9v",  # standard Base64 alphabet, not Base64URL
+            "tei://example.com/purl/aGVsbG8",  # decodes to "hello", not a PURL
+            "tei://example.com/purl/cGtnOg",  # "pkg:": no type or name
+            "tei://example.com/purl/cGtnOm5wbS8",  # "pkg:npm/": no name
+            "tei://example.com/purl/cGtnOm1hdmVuL2dyb3VwLw",  # "pkg:maven/group/": empty final segment
+            "urn:tei:purl:example.com:hello",  # legacy form, still not a PURL
+            "tei://example.com/purl/__4",  # decodes to bytes that aren't UTF-8
+            "tei://example.com/purl/a",  # impossible Base64 length
+            TEI + "=",  # padded: TEA 1.0.0 identifiers are unpadded
+            TEI[:-1] + "B",  # same PURL, but non-zero discarded bits: a distinct, non-canonical TEI
+        ],
+    )
+    def test_rejects(self, tei):
+        with pytest.raises(TeaDiscoveryError):
+            purl_from_tei(tei)
+
+    @pytest.mark.parametrize(
+        ("domain", "purl"),
+        [
+            ("bad_domain", "pkg:pypi/x"),
+            ("example.com", "not-a-purl"),
+            ("example.com", "pkg:"),
+            ("example.com", "pkg:npm"),
+            ("example.com", "pkg:npm/"),
+            ("example.com", "pkg:npm/@1.0"),
+            ("example.com", "pkg:maven/group/"),  # empty final segment
+            ("example.com", "pkg:npm/name/@1.0"),
+            ("example.com", "pkg:npm//name"),  # empty middle segment
+            ("example.com", "pkg:1npm/x"),  # a type starts with a letter
+        ],
+    )
+    def test_purl_tei_rejects(self, domain, purl):
+        with pytest.raises(TeaDiscoveryError):
+            purl_tei(domain, purl)
 
 
 class TestFetchWellKnown:
@@ -242,6 +363,12 @@ class TestFetchWellKnown:
     @responses.activate
     def test_fetch_well_known_non_json_raises_discovery_error(self):
         responses.get("https://example.com/.well-known/tea", body="not json")
+        with pytest.raises(TeaDiscoveryError, match="Invalid JSON"):
+            fetch_well_known("example.com")
+
+    @responses.activate
+    def test_fetch_well_known_deeply_nested_json_raises_discovery_error(self):
+        responses.get("https://example.com/.well-known/tea", body=b"[" * 100_000)
         with pytest.raises(TeaDiscoveryError, match="Invalid JSON"):
             fetch_well_known("example.com")
 
@@ -762,3 +889,160 @@ class TestSelectBestEndpoint:
             warnings.simplefilter("always")
             select_best_endpoint(wk, "0.4.0")
         assert any("negotiated to server version" in str(warning.message) for warning in w)
+
+
+class TestEndpointNegotiation:
+    """``TeaClient.from_well_known`` negotiates 1.0.0, then 0.4.0, and keeps the advertised spelling."""
+
+    API = "https://api.example.com"
+
+    def _discover(self, *endpoints: dict, **kwargs) -> TeaClient:
+        responses.get("https://example.com/.well-known/tea", json={"schemaVersion": 1, "endpoints": list(endpoints)})
+        return TeaClient.from_well_known("example.com", **kwargs)
+
+    @responses.activate
+    def test_negotiates_highest_supported(self):
+        responses.head(f"{self.API}/v1.0.0", status=200)
+        client = self._discover({"url": self.API, "versions": ["0.4.0", "1.0.0"]})
+        assert client.spec_version == "1.0.0"
+        assert client.is_legacy is False
+        assert responses.calls[1].request.url == f"{self.API}/v1.0.0"
+
+    @responses.activate
+    def test_falls_back_to_0_4_0(self):
+        responses.head(f"{self.API}/v0.4.0", status=200)
+        client = self._discover({"url": self.API, "versions": ["0.4.0"]})
+        assert client.spec_version == "0.4.0"
+        assert client.is_legacy is True
+        assert responses.calls[1].request.url == f"{self.API}/v0.4.0"
+
+    @responses.activate
+    def test_build_metadata_spelling_used(self):
+        responses.head(f"{self.API}/v1.0.0+build.5", status=200)
+        responses.get(
+            f"{self.API}/v1.0.0+build.5/discovery",
+            json=[
+                {
+                    "productReleaseUuid": "d4d9f54a-abcf-11ee-ac79-1a52914d44b1",
+                    "servers": [{"rootUrl": self.API, "versions": ["1.0.0+build.5"]}],
+                }
+            ],
+        )
+        client = self._discover({"url": self.API, "versions": ["1.0.0+build.5"]})
+        assert client.spec_version == "1.0.0+build.5"
+        assert responses.calls[1].request.url == f"{self.API}/v1.0.0+build.5"
+        client.discover("tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1")
+        assert responses.calls[2].request.url.startswith(f"{self.API}/v1.0.0+build.5/discovery?tei=")
+
+    @responses.activate
+    def test_each_failover_candidate_uses_its_own_spelling(self):
+        responses.head("https://a.example.com/v1.0.0+a", status=500)
+        responses.head("https://b.example.com/v1.0.0+b", status=200)
+        client = self._discover(
+            {"url": "https://a.example.com", "versions": ["1.0.0+a"], "priority": 1.0},
+            {"url": "https://b.example.com", "versions": ["1.0.0+b"], "priority": 0.5},
+        )
+        assert client.spec_version == "1.0.0+b"
+        assert [c.request.url for c in responses.calls[1:]] == [
+            "https://a.example.com/v1.0.0+a",
+            "https://b.example.com/v1.0.0+b",
+        ]
+
+    @responses.activate
+    def test_fails_over_across_supported_versions(self):
+        responses.head("https://a.example.com/v1.0.0", status=500)
+        responses.head("https://b.example.com/v0.4.0", status=200)
+        client = self._discover(
+            {"url": "https://a.example.com", "versions": ["1.0.0"]},
+            {"url": "https://b.example.com", "versions": ["0.4.0"]},
+        )
+        assert client.spec_version == "0.4.0"
+        assert client.is_legacy is True
+        assert [c.request.url for c in responses.calls[1:]] == [
+            "https://a.example.com/v1.0.0",
+            "https://b.example.com/v0.4.0",
+        ]
+
+    @responses.activate
+    def test_exact_supported_version_beats_prerelease(self):
+        """A 1.0.0 prerelease is not 1.0.0; the exact 0.4.0 match wins and nothing warns."""
+        import warnings
+
+        responses.head(f"{self.API}/v1.0.0-rc.1", status=200)
+        responses.head(f"{self.API}/v0.4.0", status=200)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            client = self._discover({"url": self.API, "versions": ["0.4.0", "1.0.0-rc.1"]})
+        assert client.spec_version == "0.4.0"
+        assert client.is_legacy is True
+        assert [c.request.url for c in responses.calls[1:]] == [f"{self.API}/v0.4.0"]
+        assert [str(w.message) for w in caught] == []
+
+    @responses.activate
+    def test_downgrades_when_no_supported_version_matches_exactly(self):
+        responses.head(f"{self.API}/v0.3.0", status=200)
+        with pytest.warns(UserWarning, match="negotiated to server version 0.3.0"):
+            client = self._discover({"url": self.API, "versions": ["0.3.0"]})
+        assert client.spec_version == "0.3.0"
+        assert client.is_legacy is True
+        assert [c.request.url for c in responses.calls[1:]] == [f"{self.API}/v0.3.0"]
+
+    @responses.activate
+    def test_higher_version_beats_higher_priority(self):
+        responses.head("https://new.example.com/v1.0.0", status=200)
+        client = self._discover(
+            {"url": "https://old.example.com", "versions": ["0.4.0"], "priority": 1.0},
+            {"url": "https://new.example.com", "versions": ["1.0.0"], "priority": 0.1},
+        )
+        assert client.spec_version == "1.0.0"
+        assert [c.request.url for c in responses.calls[1:]] == ["https://new.example.com/v1.0.0"]
+
+    @responses.activate
+    def test_all_attempts_fail_lists_every_url_tried(self):
+        responses.head("https://a.example.com/v1.0.0", status=500)
+        responses.head("https://b.example.com/v0.4.0", body=requests.ConnectionError("refused"))
+        with pytest.raises(TeaDiscoveryError, match="All 2 endpoint") as exc_info:
+            self._discover(
+                {"url": "https://a.example.com", "versions": ["1.0.0"]},
+                {"url": "https://b.example.com", "versions": ["0.4.0"]},
+            )
+        assert "https://a.example.com/v1.0.0" in str(exc_info.value)
+        assert "https://b.example.com/v0.4.0" in str(exc_info.value)
+
+    @responses.activate
+    def test_explicit_version_kept(self):
+        responses.head(f"{self.API}/v0.4.0", status=200)
+        client = self._discover({"url": self.API, "versions": ["1.0.0", "0.4.0"]}, version="0.4.0")
+        assert client.spec_version == "0.4.0"
+        assert client.is_legacy is True
+        assert responses.calls[1].request.url == f"{self.API}/v0.4.0"
+
+    @responses.activate
+    def test_explicit_version_without_match_does_not_try_other_versions(self):
+        with pytest.raises(TeaDiscoveryError, match="No .*endpoint found for version '1.0.0'"):
+            self._discover({"url": self.API, "versions": ["0.4.0"]}, version="1.0.0")
+        assert len(responses.calls) == 1
+
+    @responses.activate
+    def test_unsupported_explicit_version_raises_discovery_error_without_probing(self):
+        with pytest.raises(TeaDiscoveryError, match="Unsupported TEA spec version") as exc_info:
+            self._discover({"url": self.API, "versions": ["2.0.0"]}, version="2.0.0")
+        assert isinstance(exc_info.value.__cause__, ValueError)
+        assert len(responses.calls) == 1  # only .well-known/tea was fetched
+
+    @responses.activate
+    def test_no_supported_version_lists_tried_and_offered(self):
+        with pytest.raises(TeaDiscoveryError) as exc_info:
+            self._discover({"url": self.API, "versions": ["2.0.0", "0.9.0-x"]})
+        message = str(exc_info.value)
+        assert "'1.0.0', '0.4.0'" in message
+        assert "'2.0.0'" in message
+
+    def test_select_best_endpoint_returns_advertised_spelling(self):
+        wk = TeaWellKnown(
+            schema_version=1,
+            endpoints=[TeaEndpoint(url="https://api.example.com", versions=["not-semver", "1.0.0+build.5"])],
+        )
+        assert select_best_endpoint(wk, "1.0.0").matched_version == "1.0.0+build.5"
+        with pytest.warns(UserWarning, match="negotiated to server version"):
+            assert select_best_endpoint(wk, "1.1.0").matched_version == "1.0.0+build.5"

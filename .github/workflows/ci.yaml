@@ -20,3 +20,16 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pytest --cov-fail-under=90
       - run: uv build
+
+  test-min-deps:
+    # Every direct dependency at its declared minimum (e.g. pydantic 2.1.0), on the oldest supported Python.
+    runs-on: ubuntu-latest
+    env:
+      UV_RESOLUTION: lowest-direct
+      UV_PYTHON: "3.11"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - run: uv python install
+      - run: uv sync --extra cli
+      - run: uv run pytest

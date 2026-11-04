@@ -1,8 +1,163 @@
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from libtea.server import tea_datetime_serializer
+from libtea.models import (
+    Artifact,
+    ArtifactFormat,
+    Collection,
+    ComponentReleaseWithCollection,
+    DiscoveryInfo,
+    ErrorResponse,
+    ErrorType,
+    PaginatedProductResponse,
+    Product,
+    ProductRelease,
+    TeaServerInfo,
+)
+from libtea.server import tea_datetime_serializer, to_wire
+from tests.spec_data import (
+    COMPONENT_RELEASE,
+    LEGACY,
+    PRODUCT,
+    PRODUCT_RELEASE,
+    V1_ARTIFACT,
+    V1_COLLECTION,
+    V1_PRODUCT_RELEASE,
+    V1_RELEASE,
+)
+
+
+class TestToWire:
+    def test_component_release_flattened_by_default(self):
+        crwc = ComponentReleaseWithCollection.model_validate({**V1_RELEASE, "latestCollection": V1_COLLECTION})
+        wire = to_wire(crwc)
+        assert "release" not in wire
+        assert wire["uuid"] == COMPONENT_RELEASE
+        assert wire["latestCollection"]["version"] == 2
+        assert ComponentReleaseWithCollection.model_validate(wire) == crwc
+
+    def test_component_release_nested_for_legacy(self):
+        crwc = ComponentReleaseWithCollection.model_validate(
+            {"release": V1_RELEASE, "latestCollection": V1_COLLECTION}, context=LEGACY
+        )
+        wire = to_wire(crwc, legacy=True)
+        assert set(wire) == {"release", "latestCollection"}
+        assert ComponentReleaseWithCollection.model_validate(wire, context=LEGACY) == crwc
+
+    def test_unset_optional_fields_left_out(self):
+        wire = to_wire(ProductRelease.model_validate(V1_PRODUCT_RELEASE))
+        assert None not in wire.values()
+        assert "releaseDate" not in wire
+        assert to_wire(ErrorResponse(error=ErrorType.OBJECT_UNKNOWN)) == {"error": "OBJECT_UNKNOWN"}
+
+    def test_timestamps_in_tea_format(self):
+        wire = to_wire(Collection.model_validate(V1_COLLECTION))
+        assert wire["createdDate"] == "2025-05-12T18:08:00Z"
+        assert wire["artifacts"][0]["createdDate"] == "2024-12-13T00:00:00Z"
+
+    def test_v1_keeps_fractional_seconds(self):
+        collection = Collection.model_validate({**V1_COLLECTION, "createdDate": "2025-05-12T18:08:00.123456Z"})
+        assert to_wire(collection)["createdDate"] == "2025-05-12T18:08:00.123456Z"
+        assert Collection.model_validate(to_wire(collection)) == collection
+
+    def test_v1_converts_offsets_to_z(self):
+        collection = Collection.model_validate(V1_COLLECTION).model_copy(
+            update={"created_date": datetime(2025, 5, 12, 20, 8, 0, 500000, tzinfo=timezone(timedelta(hours=2)))}
+        )
+        assert to_wire(collection)["createdDate"] == "2025-05-12T18:08:00.500000Z"
+
+    def test_legacy_drops_fractional_seconds(self):
+        collection = Collection.model_validate({**V1_COLLECTION, "createdDate": "2025-05-12T18:08:00.123456Z"})
+        assert to_wire(collection, legacy=True)["date"] == "2025-05-12T18:08:00Z"
+
+    def test_naive_datetime_raises(self):
+        collection = Collection.model_validate(V1_COLLECTION).model_copy(
+            update={"created_date": datetime(2025, 5, 12, 18, 8, 0)}
+        )
+        with pytest.raises(ValueError, match="timezone-aware"):
+            to_wire(collection)
+
+    def test_output_is_plain_json(self):
+        wire = to_wire(Collection.model_validate(V1_COLLECTION))
+        assert type(wire["belongsTo"]) is str
+        assert json.loads(json.dumps(wire)) == wire
+
+    def test_v1_page_has_no_offset_fields(self):
+        page = PaginatedProductResponse(
+            has_next=True, next_page_token="t2", results=(Product(uuid=PRODUCT, name="P", identifiers=()),)
+        )
+        assert to_wire(page) == {
+            "hasNext": True,
+            "nextPageToken": "t2",
+            "results": [{"uuid": PRODUCT, "name": "P", "identifiers": []}],
+        }
+
+    def test_unset_defaults_left_out(self):
+        # A server-hosted format: no url, so no checksums. "checksums": [] would be invalid on 1.0.0.
+        fmt = ArtifactFormat(media_type="application/json")
+        assert to_wire(fmt) == {"mediaType": "application/json"}
+        artifact = Artifact.model_validate({**V1_ARTIFACT, "formats": [{"mediaType": "application/json"}]})
+        assert Artifact.model_validate(to_wire(artifact)) == artifact
+
+    def test_legacy_collection_timestamp_is_date(self):
+        collection = Collection.model_validate(V1_COLLECTION)
+        wire = to_wire(collection, legacy=True)
+        assert wire["date"] == "2025-05-12T18:08:00Z"
+        assert "createdDate" not in wire
+        assert wire["artifacts"][0]["createdDate"] == "2024-12-13T00:00:00Z"  # artifacts keep their own name
+        assert Collection.model_validate(wire, context=LEGACY) == collection
+        assert to_wire([collection], legacy=True)[0]["date"] == "2025-05-12T18:08:00Z"
+
+    def test_legacy_nested_collection_timestamp_is_date(self):
+        crwc = ComponentReleaseWithCollection.model_validate(
+            {"release": V1_RELEASE, "latestCollection": V1_COLLECTION}, context=LEGACY
+        )
+        wire = to_wire(crwc, legacy=True)
+        assert wire["latestCollection"]["date"] == "2025-05-12T18:08:00Z"
+        assert "createdDate" not in wire["latestCollection"]
+        assert wire["release"]["createdDate"] == "2024-12-10T10:51:00Z"  # releases keep createdDate in 0.4.0
+
+    def test_list_of_models(self):
+        info = DiscoveryInfo(
+            product_release_uuid=PRODUCT_RELEASE,
+            servers=(TeaServerInfo(root_url="https://api.example.com", versions=("1.0.0",)),),
+        )
+        assert to_wire([info]) == [
+            {
+                "productReleaseUuid": PRODUCT_RELEASE,
+                "servers": [{"rootUrl": "https://api.example.com", "versions": ["1.0.0"]}],
+            }
+        ]
+
+    @pytest.mark.parametrize("error", [ErrorType.OBJECT_UNKNOWN, "OBJECT_NOT_SHAREABLE"])
+    def test_legacy_error_response_has_only_error(self, error):
+        """TEA 0.4.0's error-response allows only ``error``, so ``message`` is dropped."""
+        assert to_wire(ErrorResponse(error=error, message="m"), legacy=True) == {"error": str(error)}
+
+    def test_legacy_error_response_rejects_v1_only_type(self):
+        with pytest.raises(ValueError, match="INVALID_PAGE_TOKEN"):
+            to_wire(ErrorResponse(error=ErrorType.INVALID_PAGE_TOKEN), legacy=True)
+
+    def test_keyword_built_legacy_page(self):
+        """A 0.4.0 server's page built by field name keeps every offset field; a 1.0.0 page carries none."""
+        page = PaginatedProductResponse(
+            has_next=False,
+            timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            page_start_index=0,
+            page_size=100,
+            total_results=0,
+            results=(),
+        )
+        legacy = to_wire(page, legacy=True)
+        assert (legacy["timestamp"], legacy["pageStartIndex"], legacy["pageSize"], legacy["totalResults"]) == (
+            "2024-01-01T00:00:00Z",
+            0,
+            100,
+            0,
+        )
+        assert to_wire(page) == {"hasNext": False, "results": []}
 
 
 class TestTeaDatetimeSerializer:

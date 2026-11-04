@@ -9,6 +9,7 @@ their data is ``list`` which is ambiguous by type alone).
 from __future__ import annotations
 
 import json
+import shlex
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -81,11 +82,15 @@ def _pagination_header(
     console: Console,
 ) -> None:
     """Render a dim pagination summary line."""
-    if not data.results:
+    if data.total_results is None:  # TEA 1.x: no totals, only a continuation token
+        console.print(Text(f"{len(data.results)} result(s)", style="dim"))
+        if data.has_next:
+            console.print(Text(f"More results: --page-token {shlex.quote(data.next_page_token or '')}", style="dim"))
+    elif not data.results:
         console.print(Text(f"No results (total: {data.total_results})", style="dim"))
     else:
-        end = data.page_start_index + len(data.results)
-        console.print(Text(f"Results {data.page_start_index + 1}-{end} of {data.total_results}", style="dim"))
+        start = data.page_start_index or 0  # 0.4.0 default
+        console.print(Text(f"Results {start + 1}-{start + len(data.results)} of {data.total_results}", style="dim"))
 
 
 def _distributions_table(distributions: Sequence[ReleaseDistribution], *, console: Console) -> None:
@@ -93,7 +98,7 @@ def _distributions_table(distributions: Sequence[ReleaseDistribution], *, consol
     if not distributions:
         return
     tbl = Table(title="Distributions")
-    tbl.add_column("ID / Type")
+    tbl.add_column("ID")
     tbl.add_column("Description")
     tbl.add_column("URL")
     tbl.add_column("Signature URL")
@@ -102,9 +107,7 @@ def _distributions_table(distributions: Sequence[ReleaseDistribution], *, consol
         checksums = (
             ", ".join(f"{_opt(cs.algorithm_type)}:{(_opt(cs.algorithm_value))[:12]}..." for cs in d.checksums) or "-"
         )
-        # Prefer v0.4.0 distribution_id, fall back to legacy distribution_type
-        id_or_type = d.distribution_id or d.distribution_type
-        tbl.add_row(_esc(id_or_type), _esc(d.description), _esc(d.url), _esc(d.signature_url), escape(checksums))
+        tbl.add_row(_esc(d.distribution_id), _esc(d.description), _esc(d.url), _esc(d.signature_url), escape(checksums))
     console.print(tbl)
 
 
@@ -120,11 +123,7 @@ def _artifacts_table(artifacts: Sequence[Artifact], *, console: Console) -> None
     tbl.add_column("Formats")
     for a in artifacts:
         fmt_str = ", ".join(f.media_type or "?" for f in a.formats) or "-"
-        # Prefer v0.4.0 distribution_ids, fall back to legacy distribution_types.
-        # Use `is not None` so an explicitly empty list from a v0.4.0 server
-        # does not fall back to legacy data (empty tuple is falsy).
-        applies_seq = a.distribution_ids if a.distribution_ids is not None else (a.distribution_types or ())
-        applies = ", ".join(applies_seq) or "-"
+        applies = ", ".join(a.distribution_ids or ()) or "-"
         tbl.add_row(_esc(a.uuid), _esc(a.name), _esc(a.type), escape(applies), escape(fmt_str))
     console.print(tbl)
 
@@ -275,7 +274,7 @@ def fmt_component_release(data: ComponentReleaseWithCollection, *, console: Cons
         [
             ("UUID", _opt(col.uuid)),
             ("Version", _opt(col.version)),
-            ("Date", _opt(col.date)),
+            ("Date", _opt(col.created_date)),
             ("Belongs To", _opt(col.belongs_to)),
         ],
         console=console,
@@ -295,7 +294,7 @@ def fmt_collection(data: Collection, *, console: Console) -> None:
         [
             ("UUID", _opt(data.uuid)),
             ("Version", _opt(data.version)),
-            ("Date", _opt(data.date)),
+            ("Date", _opt(data.created_date)),
             ("Belongs To", _opt(data.belongs_to)),
             ("Update Reason", reason),
         ],
@@ -363,7 +362,7 @@ def fmt_collections(data: list[Collection], *, console: Console) -> None:
         tbl.add_row(
             _esc(col.uuid),
             _esc(col.version),
-            _esc(col.date),
+            _esc(col.created_date),
             _esc(col.belongs_to),
             str(len(col.artifacts)),
         )
@@ -479,7 +478,7 @@ def _inspect_component_details(comp: dict[str, Any], *, console: Console) -> Non
     if distributions:
         comp_name = comp.get("name") or release.get("componentName", "Component")
         tbl = Table(title=f"Distributions ({_esc(comp_name)})")
-        tbl.add_column("ID / Type")
+        tbl.add_column("ID")
         tbl.add_column("Description")
         tbl.add_column("URL")
         tbl.add_column("Signature URL")
@@ -489,10 +488,8 @@ def _inspect_component_details(comp: dict[str, Any], *, console: Console) -> Non
             checksums = (
                 ", ".join(f"{cs.get('algType', '?')}:{cs.get('algValue', '')[:12]}..." for cs in checksums_list) or "-"
             )
-            # Prefer v0.4.0 distributionId, fall back to legacy distributionType
-            id_or_type = d.get("distributionId") or d.get("distributionType")
             tbl.add_row(
-                _esc(id_or_type),
+                _esc(d.get("distributionId")),
                 _esc(d.get("description")),
                 _esc(d.get("url")),
                 _esc(d.get("signatureUrl")),
@@ -518,29 +515,25 @@ def _inspect_component_details(comp: dict[str, Any], *, console: Console) -> Non
     tbl.add_column("URL")
     tbl.add_column("Signature URL")
     for art in artifacts:
-        # Prefer v0.4.0 distributionIds, fall back to legacy distributionTypes.
-        # Use explicit key check so an empty v0.4.0 list does not fall back.
-        dist_ids = art.get("distributionIds")
-        applies_seq = dist_ids if dist_ids is not None else (art.get("distributionTypes") or [])
-        applies = ", ".join(applies_seq) or "-"
+        applies = ", ".join(art.get("distributionIds") or []) or "-"
         formats = art.get("formats", [])
         if formats:
             for fmt in formats:
                 tbl.add_row(
-                    escape(art.get("uuid", "-")),
-                    escape(art.get("name", "-")),
-                    escape(art.get("type", "-")),
+                    _esc(art.get("uuid")),
+                    _esc(art.get("name")),
+                    _esc(art.get("type")),
                     escape(applies),
-                    escape(fmt.get("mediaType", "-")),
+                    _esc(fmt.get("mediaType")),
                     _esc(fmt.get("description")),
-                    escape(fmt.get("url", "-")),
+                    _esc(fmt.get("url")),
                     _esc(fmt.get("signatureUrl")),
                 )
         else:
             tbl.add_row(
-                escape(art.get("uuid", "-")),
-                escape(art.get("name", "-")),
-                escape(art.get("type", "-")),
+                _esc(art.get("uuid")),
+                _esc(art.get("name")),
+                _esc(art.get("type")),
                 escape(applies),
                 "-",
                 "-",
@@ -632,7 +625,7 @@ def format_output(data: object, *, command: str | None = None, console: Console 
 
     for model_type, formatter in _TYPE_FORMATTERS.items():
         if isinstance(data, model_type):
-            formatter(data, console=c)  # type: ignore[operator]
+            formatter(data, console=c)
             return
 
     # Fallback: render as JSON

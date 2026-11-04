@@ -1,11 +1,14 @@
 """TEI parsing, .well-known/tea fetching, and SemVer-based endpoint selection.
 
-Implements the TEA discovery flow: parse a TEI URN, fetch the ``.well-known/tea``
+Implements the TEA discovery flow: parse a TEI, fetch the ``.well-known/tea``
 document from the TEI's domain, and select the best-matching endpoint using
 SemVer 2.0.0 comparison and priority-based ordering.
 """
 
+import base64
+import binascii
 import logging
+import re
 import warnings
 from dataclasses import dataclass
 from typing import Any
@@ -23,6 +26,19 @@ from libtea.models import TeaEndpoint, TeaWellKnown, TeiType
 logger = logging.getLogger("libtea")
 
 _VALID_TEI_TYPES = frozenset(e.value for e in TeiType)
+
+_TEI_URI_PREFIX = "tei://"
+_TEI_URI_TYPE = re.compile(r"[a-z][a-z0-9]*")
+# A single non-empty RFC 3986 path segment: pchar = unreserved / pct-encoded / sub-delims / ":" / "@".
+# Excludes "/", "?", "#", spaces, non-ASCII and a "%" not followed by two hex digits.
+_TEI_URI_IDENTIFIER = re.compile(r"(?:[A-Za-z0-9\-._~!$&'()*+,;=:@]|%[0-9A-Fa-f]{2})+")
+_BASE64URL = re.compile(r"[A-Za-z0-9_-]+")
+# What no PURL (ECMA-427) can do without: "pkg:", a type starting with a letter, then "/"-separated
+# non-empty segments ending in the name, at "@", "?", "#" or the end. So no empty or trailing segment.
+_PURL = re.compile(r"pkg:[A-Za-z][A-Za-z0-9.+-]*(?:/[^/?#@]+)+(?=[@?#]|\Z)")
+_TEI_EXPECTED_FORMAT = (
+    "Expected format: tei://<domain>/<type>/<identifier> (or legacy urn:tei:<type>:<domain>:<identifier>)"
+)
 
 
 def _endpoint_sort_key(pair: tuple[_SemVer, TeaEndpoint]) -> tuple[_SemVer, float]:
@@ -51,13 +67,35 @@ def _is_valid_domain(domain: str) -> bool:
     return True
 
 
-def parse_tei(tei: str) -> tuple[str, str, str]:
-    """Parse a TEI URN into (type, domain, identifier).
+def _parse_tei_uri(tei: str) -> tuple[str, str, str]:
+    """Parse ``tei://<domain>/<type>/<identifier>``; the type is checked syntactically, not against ``TeiType``."""
+    parts = tei[len(_TEI_URI_PREFIX) :].split("/")
+    if len(parts) == 3:
+        domain, tei_type, identifier = parts
+        # _is_valid_domain also rejects ":" (no port allowed)
+        if (
+            _is_valid_domain(domain)
+            and _TEI_URI_TYPE.fullmatch(tei_type)
+            and _TEI_URI_IDENTIFIER.fullmatch(identifier)
+            and "%2f" not in identifier.lower()
+        ):
+            return tei_type, domain, identifier
+    raise TeaDiscoveryError(f"Invalid TEI: {tei!r}. {_TEI_EXPECTED_FORMAT}")
 
-    TEI format: ``urn:tei:<type>:<domain>:<identifier>``
+
+def parse_tei(tei: str) -> tuple[str, str, str]:
+    """Parse a TEI into (type, domain, identifier).
+
+    Two forms are accepted:
+
+    - ``tei://<domain>/<type>/<identifier>`` (TEA 1.0.0). The scheme is case-sensitive, the domain is
+      returned unchanged, any lowercase alphanumeric ``type`` is accepted (the type registry may grow),
+      and the identifier must be a single URI path segment: it may contain ``:`` and percent-escapes, but
+      not ``/``, ``%2F``, ``?``, ``#``, spaces or other characters a path segment does not allow.
+    - ``urn:tei:<type>:<domain>:<identifier>`` (TEA 0.4.0), where ``type`` must be a known :class:`TeiType`.
 
     Args:
-        tei: TEI URN string.
+        tei: TEI string.
 
     Returns:
         Tuple of (type, domain, identifier).
@@ -65,9 +103,11 @@ def parse_tei(tei: str) -> tuple[str, str, str]:
     Raises:
         TeaDiscoveryError: If the TEI format is invalid.
     """
+    if tei.startswith(_TEI_URI_PREFIX):
+        return _parse_tei_uri(tei)
     parts = tei.split(":")
     if len(parts) < 5 or parts[0] != "urn" or parts[1] != "tei":
-        raise TeaDiscoveryError(f"Invalid TEI: {tei!r}. Expected format: urn:tei:<type>:<domain>:<identifier>")
+        raise TeaDiscoveryError(f"Invalid TEI: {tei!r}. {_TEI_EXPECTED_FORMAT}")
 
     tei_type = parts[2]
     if tei_type not in _VALID_TEI_TYPES:
@@ -79,6 +119,54 @@ def parse_tei(tei: str) -> tuple[str, str, str]:
         raise TeaDiscoveryError(f"Invalid domain in TEI: {domain!r}")
     identifier = ":".join(parts[4:])
     return tei_type, domain, identifier
+
+
+def purl_tei(domain: str, purl: str) -> str:
+    """Build a TEA 1.0.0 ``purl`` TEI: ``tei://<domain>/purl/<PURL as unpadded Base64URL>``.
+
+    The spec asks publishers to canonicalize the PURL (ECMA-427) before encoding; it is encoded as given.
+
+    Raises:
+        TeaDiscoveryError: If ``purl`` is not a PURL (``pkg:<type>/<name>``, at least) or ``domain`` is not a
+            valid domain name.
+    """
+    if not _PURL.match(purl):
+        raise TeaDiscoveryError(f"Not a PURL: {purl!r}")
+    encoded = base64.urlsafe_b64encode(purl.encode()).rstrip(b"=").decode()
+    tei = f"{_TEI_URI_PREFIX}{domain}/purl/{encoded}"
+    parse_tei(tei)
+    return tei
+
+
+def purl_from_tei(tei: str) -> str:
+    """Return the PURL carried by a ``purl`` TEI.
+
+    A TEA 1.0.0 ``tei://`` TEI carries it as unpadded Base64URL and is decoded; a legacy
+    ``urn:tei:purl:`` TEI carries it verbatim.
+
+    Raises:
+        TeaDiscoveryError: If the TEI is invalid, not of type ``purl``, not the canonical unpadded
+            Base64URL encoding of its PURL, or does not carry a PURL (``pkg:<type>/<name>``, at least).
+    """
+    tei_type, _domain, identifier = parse_tei(tei)
+    if tei_type != "purl":
+        raise TeaDiscoveryError(f"Not a purl TEI: {tei!r}")
+    if not tei.startswith(_TEI_URI_PREFIX):
+        purl = identifier
+    else:
+        if not _BASE64URL.fullmatch(identifier):  # also rejects '=' padding
+            raise TeaDiscoveryError(f"purl TEI identifier is not unpadded Base64URL: {tei!r}")
+        try:
+            purl = base64.urlsafe_b64decode(identifier + "=" * (-len(identifier) % 4)).decode()
+        except (binascii.Error, UnicodeDecodeError) as exc:
+            raise TeaDiscoveryError(f"purl TEI identifier does not decode: {tei!r}") from exc
+        # TEIs compare by their encoded form, and lenient decoding ignores the discarded bits, so only the
+        # canonical encoding names this PURL.
+        if base64.urlsafe_b64encode(purl.encode()).rstrip(b"=").decode() != identifier:
+            raise TeaDiscoveryError(f"purl TEI identifier is not canonical Base64URL: {tei!r}")
+    if not _PURL.match(purl):
+        raise TeaDiscoveryError(f"purl TEI does not carry a PURL: {tei!r}")
+    return purl
 
 
 def fetch_well_known(
@@ -186,7 +274,7 @@ def fetch_well_known(
 
             try:
                 data = response.json()
-            except ValueError as exc:
+            except (ValueError, RecursionError) as exc:  # RecursionError: deep nesting
                 raise TeaDiscoveryError(f"Invalid JSON in .well-known/tea response from {domain}") from exc
         finally:
             if response is not None:
@@ -277,11 +365,28 @@ class VersionedEndpoint:
     """An endpoint paired with the server version it was matched on.
 
     Returned by :func:`select_best_endpoint` to let callers know which
-    version to use in the URL path (``v{matched_version}``).
+    version to use in the URL path (``v{matched_version}``). ``matched_version``
+    is the string exactly as the endpoint advertises it, build metadata included.
     """
 
     endpoint: TeaEndpoint
     matched_version: str
+
+
+def _advertised_version(ep: TeaEndpoint, version: str) -> str:
+    """Return the spelling ``ep`` advertises for ``version``.
+
+    SemVer equality ignores build metadata, so ``1.0.0`` equals ``1.0.0+build.5``; the spec requires
+    the path to use the string exactly as advertised, so recover it from the endpoint.
+    """
+    target = _SemVer.parse(version)
+    for v_str in ep.versions:
+        try:
+            if _SemVer.parse(v_str) == target:
+                return v_str
+        except ValueError:
+            continue
+    return version  # pragma: no cover — callers only pass a version the endpoint advertises
 
 
 def _is_compatible_version(client: _SemVer, server: _SemVer) -> bool:
@@ -327,7 +432,7 @@ def select_best_endpoint(well_known: TeaWellKnown, supported_version: str) -> Ve
     # Phase 1: exact match — delegate to select_endpoints
     try:
         exact = select_endpoints(well_known, supported_version)
-        return VersionedEndpoint(endpoint=exact[0], matched_version=supported_version)
+        return VersionedEndpoint(endpoint=exact[0], matched_version=_advertised_version(exact[0], supported_version))
     except TeaDiscoveryError:
         pass  # fall through to Phase 2 (compatible match)
 
@@ -374,6 +479,8 @@ __all__ = [
     "VersionedEndpoint",
     "fetch_well_known",
     "parse_tei",
+    "purl_from_tei",
+    "purl_tei",
     "select_best_endpoint",
     "select_endpoint",
     "select_endpoints",

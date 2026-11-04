@@ -5,7 +5,8 @@ a ``tea_client`` fixture, and generates one pytest test item per check.
 
 Usage::
 
-    pytest --tea-base-url https://tea.example.com/v1 --tea-tei "urn:tei:..."
+    pytest --tea-base-url https://tea.example.com/v1 \\
+        --tea-tei "tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
 
 All conformance module imports are deferred to function bodies so that
 ``pytest-cov`` can track them.  The ``pytest11`` entry point causes this

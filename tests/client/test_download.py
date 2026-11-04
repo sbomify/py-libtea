@@ -3,8 +3,10 @@ import hashlib
 import pytest
 import responses
 
+from libtea._http import TeaHttpClient
 from libtea.exceptions import TeaChecksumError
 from libtea.models import Checksum, ChecksumAlgorithm
+from tests.spec_data import V1_BASE_URL
 
 ARTIFACT_URL = "https://artifacts.example.com/sbom.json"
 ARTIFACT_CONTENT = b'{"bomFormat": "CycloneDX", "specVersion": "1.5"}'
@@ -118,3 +120,36 @@ class TestDownloadArtifact:
         with pytest.raises(TeaChecksumError, match="SHA-256"):
             client.download_artifact(ARTIFACT_URL, dest, verify_checksums=checksums)
         assert not dest.exists()
+
+
+@responses.activate
+def test_non_ascii_checksum_is_a_mismatch(client, tmp_path):
+    responses.get(ARTIFACT_URL, body=ARTIFACT_CONTENT)
+    checksums = [Checksum(algorithm_type=ChecksumAlgorithm.SHA_256, algorithm_value="é" * 64)]
+    dest = tmp_path / "sbom.json"
+    with pytest.raises(TeaChecksumError, match="SHA-256"):
+        client.download_artifact(ARTIFACT_URL, dest, verify_checksums=checksums)
+    assert not dest.exists()
+
+
+@responses.activate
+def test_authenticated_off_base_rejected(tmp_path):
+    with TeaHttpClient(base_url=V1_BASE_URL, token="secret") as h, pytest.raises(ValueError, match="API base"):
+        h.download_with_hashes("https://evil.example.com/x", tmp_path / "x", authenticated=True)
+    assert len(responses.calls) == 0
+
+
+@pytest.mark.parametrize("path", ["/../../other-app/x", "/%2e%2e/%2E%2E/other-app/x", "/./x"])
+@responses.activate
+def test_authenticated_dot_segments_rejected(tmp_path, path):
+    with TeaHttpClient(base_url=V1_BASE_URL, token="secret") as h, pytest.raises(ValueError, match="API base"):
+        h.download_with_hashes(f"{V1_BASE_URL}{path}", tmp_path / "x", authenticated=True)
+    assert len(responses.calls) == 0
+
+
+@responses.activate
+@pytest.mark.parametrize("url", ["https://api.example.com.evil.com/x", "https://api.example.com@evil.com/x"])
+def test_authenticated_lookalike_host_rejected(tmp_path, url):
+    with TeaHttpClient(base_url="https://api.example.com", token="secret") as h, pytest.raises(ValueError):
+        h.download_with_hashes(url, tmp_path / "x", authenticated=True)
+    assert len(responses.calls) == 0

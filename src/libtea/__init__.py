@@ -5,7 +5,7 @@ Quick start::
     from libtea import TeaClient
 
     with TeaClient("https://tea.example.com/v1", token="...") as client:
-        results = client.discover("urn:tei:purl:example.com:pkg:pypi/lib@1.0")
+        results = client.discover("tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1")
 
 Or auto-discover the server from a domain's ``.well-known/tea``::
 
@@ -26,6 +26,12 @@ if TYPE_CHECKING:
     )
     from libtea.discovery import (
         parse_tei as parse_tei,
+    )
+    from libtea.discovery import (
+        purl_from_tei as purl_from_tei,
+    )
+    from libtea.discovery import (
+        purl_tei as purl_tei,
     )
     from libtea.discovery import (
         select_best_endpoint as select_best_endpoint,
@@ -139,6 +145,9 @@ if TYPE_CHECKING:
         IdentifierType as IdentifierType,
     )
     from libtea.models import (
+        PaginatedCollectionResponse as PaginatedCollectionResponse,
+    )
+    from libtea.models import (
         PaginatedComponentReleaseResponse as PaginatedComponentReleaseResponse,
     )
     from libtea.models import (
@@ -155,6 +164,9 @@ if TYPE_CHECKING:
     )
     from libtea.models import (
         ProductRelease as ProductRelease,
+    )
+    from libtea.models import (
+        ProductReleaseWithCollection as ProductReleaseWithCollection,
     )
     from libtea.models import (
         Release as Release,
@@ -186,6 +198,8 @@ __all__ = [
     "VersionedEndpoint",
     "fetch_well_known",
     "parse_tei",
+    "purl_from_tei",
+    "purl_tei",
     "select_best_endpoint",
     "select_endpoint",
     "select_endpoints",
@@ -225,12 +239,14 @@ __all__ = [
     "ErrorType",
     "Identifier",
     "IdentifierType",
+    "PaginatedCollectionResponse",
     "PaginatedComponentReleaseResponse",
     "PaginatedComponentResponse",
     "PaginatedProductReleaseResponse",
     "PaginatedProductResponse",
     "Product",
     "ProductRelease",
+    "ProductReleaseWithCollection",
     "Release",
     "ReleaseDistribution",
     "TeaEndpoint",
@@ -248,6 +264,8 @@ _LAZY_IMPORTS: dict[str, str] = {
     "VersionedEndpoint": "libtea.discovery",
     "fetch_well_known": "libtea.discovery",
     "parse_tei": "libtea.discovery",
+    "purl_from_tei": "libtea.discovery",
+    "purl_tei": "libtea.discovery",
     "select_best_endpoint": "libtea.discovery",
     "select_endpoint": "libtea.discovery",
     "select_endpoints": "libtea.discovery",
@@ -287,12 +305,14 @@ _LAZY_IMPORTS: dict[str, str] = {
     "ErrorType": "libtea.models",
     "Identifier": "libtea.models",
     "IdentifierType": "libtea.models",
+    "PaginatedCollectionResponse": "libtea.models",
     "PaginatedComponentReleaseResponse": "libtea.models",
     "PaginatedComponentResponse": "libtea.models",
     "PaginatedProductReleaseResponse": "libtea.models",
     "PaginatedProductResponse": "libtea.models",
     "Product": "libtea.models",
     "ProductRelease": "libtea.models",
+    "ProductReleaseWithCollection": "libtea.models",
     "Release": "libtea.models",
     "ReleaseDistribution": "libtea.models",
     "TeaEndpoint": "libtea.models",

@@ -23,7 +23,7 @@ TOMCAT_RELEASE = {
     "identifiers": [{"idType": "PURL", "idValue": "pkg:maven/org.apache.tomcat/tomcat@11.0.7"}],
     "distributions": [
         {
-            "distributionType": "zip",
+            "distributionId": "6a0d58e1-4896-4f1e-83f7-5feb6c032537",
             "description": "Core binary distribution, zip archive",
             "identifiers": [{"idType": "PURL", "idValue": "pkg:maven/org.apache.tomcat/tomcat@11.0.7?type=zip"}],
             "checksums": [
@@ -81,8 +81,7 @@ LOG4J_COLLECTION = {
 }
 
 
-# v0.4.0 payload variants: distributionId replaces distributionType,
-# distributionIds replaces distributionTypes on artifacts.
+# v0.4.0 payload variants with distributionId and artifact distributionIds.
 TOMCAT_RELEASE_V040 = {
     "uuid": "605d0ecb-1057-40e4-9abf-c400b10f0345",
     "version": "11.0.7",
@@ -150,7 +149,7 @@ class TestSpecExamples:
             # Step 2: Get component release with collection
             cr = client.get_component_release(release_uuid)
             assert cr.release.version == "11.0.7"
-            assert cr.release.distributions[0].distribution_type == "zip"
+            assert cr.release.distributions[0].distribution_id == "6a0d58e1-4896-4f1e-83f7-5feb6c032537"
             assert cr.release.distributions[0].checksums[0].algorithm_type == ChecksumAlgorithm.SHA_256
 
             # Step 3: Get latest collection
@@ -168,7 +167,7 @@ class TestSpecExamples:
 
     @responses.activate
     def test_v040_server_payload(self, base_url):
-        """v0.4.0 server sends distributionId and distributionIds instead of legacy fields."""
+        """v0.4.0 server sends distributionId and distributionIds."""
         release_uuid = TOMCAT_RELEASE_V040["uuid"]
 
         responses.get(
@@ -182,42 +181,6 @@ class TestSpecExamples:
         with TeaClient(base_url=base_url) as client:
             cr = client.get_component_release(release_uuid)
 
-            # New v0.4.0 field
             assert cr.release.distributions[0].distribution_id == "d7a8e9f0-1234-5678-abcd-ef0123456789"
-            # Legacy field absent
-            assert cr.release.distributions[0].distribution_type is None
-
-            # Artifact uses distributionIds (new) not distributionTypes (legacy)
             sbom = cr.latest_collection.artifacts[0]
             assert sbom.distribution_ids == ("d7a8e9f0-1234-5678-abcd-ef0123456789",)
-            assert sbom.distribution_types is None
-
-    @responses.activate
-    def test_mixed_server_payload(self, base_url):
-        """Transitional server sends both old and new fields — both preserved."""
-        mixed_release = {
-            **TOMCAT_RELEASE_V040,
-            "distributions": [
-                {
-                    "distributionId": "d7a8e9f0-1234-5678-abcd-ef0123456789",
-                    "distributionType": "zip",
-                    "description": "Both fields present",
-                }
-            ],
-        }
-        release_uuid = mixed_release["uuid"]
-
-        responses.get(
-            f"{base_url}/componentRelease/{release_uuid}",
-            json={
-                "release": mixed_release,
-                "latestCollection": LOG4J_COLLECTION,
-            },
-        )
-
-        with TeaClient(base_url=base_url) as client:
-            cr = client.get_component_release(release_uuid)
-            dist = cr.release.distributions[0]
-            # Both fields preserved
-            assert dist.distribution_id == "d7a8e9f0-1234-5678-abcd-ef0123456789"
-            assert dist.distribution_type == "zip"

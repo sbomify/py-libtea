@@ -35,8 +35,9 @@ Documentation = "https://github.com/sbomify/py-libtea#readme"
 Changelog = "https://github.com/sbomify/py-libtea/releases"
 
 [project.optional-dependencies]
-cli = ["click>=8.0,<9", "rich>=13.0.0"]
-conformance = ["pytest>=8.0.0"]
+# click 8.2.1 is the oldest CI can test: CliRunner before it loses stderr.
+cli = ["click>=8.2.1,<9", "rich>=13.0.0"]
+conformance = ["pytest>=9.0.0"]
 server = []
 
 [project.scripts]
@@ -55,7 +56,7 @@ dev = [
     "responses>=0.26.0,<1",
     "mypy>=1.15.0,<3",
     "types-requests>=2.32.0",
-    "click>=8.0,<9",
+    "click>=8.2.1,<9",
     "rich>=13.0.0",
 ]
 
