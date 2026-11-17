@@ -32,6 +32,7 @@ from libtea.models import (
     Checksum,
     ChecksumAlgorithm,
     ComponentReleaseWithCollection,
+    DiscoveryInfo,
     ProductRelease,
     normalize_algorithm_name,
 )
@@ -272,6 +273,49 @@ def _client_session(
         _error(str(exc))
 
 
+@contextmanager
+def _tei_session(
+    base_url: str | None,
+    token: str | None,
+    domain: str | None,
+    timeout: float,
+    use_http: bool,
+    port: int | None,
+    auth: str | None,
+    tei: str,
+    allow_private_ips: bool = False,
+) -> Iterator[tuple[TeaClient, list[DiscoveryInfo]]]:
+    """Resolve ``tei`` and yield the client that resolved it, with the discovery results.
+
+    Without --base-url the TEI is resolved through ``.well-known/tea`` with endpoint failover
+    (:meth:`TeaClient.from_tei`), where --domain replaces the TEI's domain.
+    """
+    if base_url:
+        with _client_session(
+            base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
+        ) as client:
+            yield client, client.discover(tei)
+        return
+    try:
+        client, results = TeaClient.from_tei(
+            tei,
+            domain=domain,
+            token=token,
+            basic_auth=_parse_basic_auth(auth),
+            timeout=timeout,
+            scheme="http" if use_http else "https",
+            port=port,
+            allow_private_ips=allow_private_ips,
+        )
+    except (TeaError, ValueError) as exc:
+        _error(str(exc))
+    with client:
+        try:
+            yield client, results
+        except TeaError as exc:
+            _error(str(exc))
+
+
 def _is_json_output() -> bool:
     """Check if JSON output mode is active via Click context."""
     ctx = click.get_current_context(silent=True)
@@ -460,12 +504,18 @@ def discover(
     """
     if (tei is None) == (purl is None):
         raise click.UsageError("Provide exactly one of TEI or --purl")
-    if purl is not None and not base_url:
-        _error("--purl requires --base-url")
-    with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
-    ) as client:
-        result = client.discover(tei, purl=purl)
+    if purl is not None:
+        if not base_url:
+            _error("--purl requires --base-url")
+        with _client_session(
+            base_url, token, domain, timeout, use_http, port, auth, allow_private_ips=allow_private_ips
+        ) as client:
+            result = client.discover(purl=purl)
+    else:
+        with _tei_session(
+            base_url, token, domain, timeout, use_http, port, auth, cast(str, tei), allow_private_ips
+        ) as (_, result):
+            pass
     if quiet:
         for d in result:
             print(d.product_release_uuid)
@@ -1042,17 +1092,17 @@ def _deduplicate_filename(filename: str, seen: set[str]) -> str:
 def _download_from_tei(
     client: TeaClient,
     tei: str,
+    discoveries: list[DiscoveryInfo],
     dest_dir: Path,
     max_download_bytes: int | None,
     *,
     quiet: bool = False,
     dry_run: bool = False,
 ) -> bool:
-    """Discover a TEI and download all artifacts into dest_dir.
+    """Download all artifacts of a discovered TEI into dest_dir.
 
     Returns True if all attempted downloads succeeded, False if any failed.
     """
-    discoveries = client.discover(tei)
     if not discoveries:
         _error(f"No results found for TEI: {tei}")
     if not dry_run:
@@ -1170,11 +1220,12 @@ def download(
                 click.confirm(f"Download artifacts into current directory ({cwd})?", abort=True)
             destination = "."
         try:
-            with _client_session(
-                base_url, token, domain, timeout, use_http, port, auth, tei=source, allow_private_ips=allow_private_ips
-            ) as client:
+            with _tei_session(base_url, token, domain, timeout, use_http, port, auth, source, allow_private_ips) as (
+                client,
+                discoveries,
+            ):
                 all_ok = _download_from_tei(
-                    client, source, Path(destination), max_download_bytes, quiet=quiet, dry_run=dry_run
+                    client, source, discoveries, Path(destination), max_download_bytes, quiet=quiet, dry_run=dry_run
                 )
         except OSError as exc:
             _error(f"I/O error: {exc}")
@@ -1248,10 +1299,10 @@ def inspect(
       tea-cli inspect 'tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1' --domain example.com
       tea-cli inspect 'tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1' --json
     """
-    with _client_session(
-        base_url, token, domain, timeout, use_http, port, auth, tei=tei, allow_private_ips=allow_private_ips
-    ) as client:
-        discoveries = client.discover(tei)
+    with _tei_session(base_url, token, domain, timeout, use_http, port, auth, tei, allow_private_ips) as (
+        client,
+        discoveries,
+    ):
         result = []
         for disc in discoveries:
             pr = client.get_product_release(disc.product_release_uuid)

@@ -983,6 +983,48 @@ class TestCLITeiAutoDiscovery:
         assert result.exit_code == 0
         assert len(json.loads(result.output)) == 1
 
+    TEI = "tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+    RELEASE = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+    def two_endpoints(self):
+        endpoints = [
+            {"url": "https://primary.example.com", "versions": ["1.0.0"], "priority": 1.0},
+            {"url": "https://fallback.example.com", "versions": ["1.0.0"], "priority": 0.5},
+        ]
+        responses.get("https://example.com/.well-known/tea", json={"schemaVersion": 1, "endpoints": endpoints})
+        servers = [{"rootUrl": "https://fallback.example.com", "versions": ["1.0.0"]}]
+        responses.get(
+            "https://fallback.example.com/v1.0.0/discovery",
+            json=[{"productReleaseUuid": self.RELEASE, "servers": servers}],
+        )
+
+    @responses.activate
+    def test_discover_fails_over_to_next_endpoint(self):
+        self.two_endpoints()
+        responses.get("https://primary.example.com/v1.0.0/discovery", status=503)
+        result = runner.invoke(app, ["discover", self.TEI, "--quiet"])
+        assert result.exit_code == 0, _all_output(result)
+        assert result.output.strip() == self.RELEASE
+        assert all(c.request.method == "GET" for c in responses.calls)
+
+    @responses.activate
+    def test_discover_reports_tea_error_404_without_failover(self):
+        self.two_endpoints()
+        responses.get("https://primary.example.com/v1.0.0/discovery", status=404, json={"error": "OBJECT_UNKNOWN"})
+        result = runner.invoke(app, ["discover", self.TEI])
+        assert result.exit_code == 1
+        assert "OBJECT_UNKNOWN" in _all_output(result)
+        assert not any("fallback" in c.request.url for c in responses.calls)
+
+    @responses.activate
+    def test_inspect_error_after_discovery(self):
+        self.two_endpoints()
+        responses.get("https://primary.example.com/v1.0.0/discovery", status=503)
+        responses.get(f"https://fallback.example.com/v1.0.0/productRelease/{self.RELEASE}", status=404)
+        result = runner.invoke(app, ["inspect", self.TEI])
+        assert result.exit_code == 1
+        assert "Not found" in _all_output(result)
+
 
 class TestCLIEntryPointErrors:
     """Test _cli_entry.py error handling."""

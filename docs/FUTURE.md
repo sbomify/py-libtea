@@ -45,7 +45,7 @@ Items that depend on external factors or are deferred indefinitely. These are **
 
 | Item | Notes |
 |------|-------|
-| `/token` client-credentials exchange | `POST /token` with the `client_credentials` grant (see `auth/readme.md`). Today a caller supplies an already-issued bearer token or basic-auth credentials. |
+| Access-token renewal ahead of expiry | `basic_auth` on a 1.x server is exchanged at `POST /token`, and a token is replaced only after a `401` with an `invalid_token` challenge (the spec's recovery path). `expires_in` is not used to renew it first, which only matters for a server that rejects an expired token without that challenge. Other grant types (JWT or SAML assertions, mutual TLS) are not offered either. |
 | `ETag` / `If-None-Match` / `304` | Conditional requests and revalidation for the artifact download endpoints. Downloads currently always fetch the full body. |
 | Signature download endpoints | `/artifact/{uuid}/latest/signature/download` and `/artifact/{uuid}/{artifactVersion}/signature/download`. `signatureUrl` on a format is exposed in the models but not fetched. |
 | `sortField` / `sortOrder` | Sorting query parameters on `/products`, `/productReleases`, `/components` and `/componentReleases`, and on the per-parent child lists (a product's releases, a component's releases, and both collections lists). The client sends none of them. |

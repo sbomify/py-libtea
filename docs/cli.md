@@ -44,7 +44,7 @@ Every command accepts the following options for server selection and authenticat
 | `--base-url` *URL* | TEA server base URL (e.g. `https://trust.sbomify.com/tea/v0.4.0`, a TEA 0.4.0 server, or `https://tea.example.com/tea/v1.0.0`). A `/v<semver>` suffix selects the spec version; without one, TEA 1.0.0 is assumed. Can also be set via the `TEA_BASE_URL` environment variable. Mutually exclusive with `--domain`. |
 | `--domain` *DOMAIN* | Discover server from the domain's `.well-known/tea` endpoint. TEA 1.0.0 is preferred, falling back to 0.4.0. The domain can also be auto-extracted from a TEI argument. |
 | `--token` *TOKEN* | Bearer token for authentication. Prefer the `TEA_TOKEN` environment variable to avoid exposing the token in shell history. |
-| `--auth` *USER:PASSWORD* | HTTP basic authentication credentials. Prefer the `TEA_AUTH` environment variable to avoid exposing credentials in shell history. Mutually exclusive with `--token`. |
+| `--auth` *USER:PASSWORD* | HTTP basic authentication credentials: an API key on TEA 1.x, exchanged at `/token` (see [Authentication](#authentication)). Prefer the `TEA_AUTH` environment variable to avoid exposing credentials in shell history. Mutually exclusive with `--token`. |
 | `--timeout` *SECONDS* | Request timeout in seconds (default: 30). |
 | `--use-http` | Use HTTP instead of HTTPS for `.well-known/tea` discovery. Intended for local development only. |
 | `--port` *PORT* | Port for well-known resolution (overrides the default for the scheme). |
@@ -365,7 +365,9 @@ See the [conformance docs](conformance.md) for the full check reference and pyte
 
 **Bearer token** (most common): Pass via `--token` or `TEA_TOKEN`. Requires HTTPS. The token is never sent to artifact download URLs (CDNs) — only to the TEA API server.
 
-**HTTP basic auth:** Pass via `--auth USER:PASSWORD` or `TEA_AUTH`. Requires HTTPS.
+**API key / HTTP basic auth:** Pass via `--auth USER:PASSWORD` or `TEA_AUTH`. Requires HTTPS. On a TEA 1.x server the pair is an API key (`KEY-ID:SECRET`): it is sent only to `POST /token`, and the access token it yields is sent to every other endpoint. A TEA 0.4.0 server receives it as HTTP basic auth on every request.
+
+**Discovery failover:** A TEI given without `--base-url` (`discover`, `inspect`, `download`) is resolved at each `.well-known/tea` endpoint in turn until one answers `/discovery`. An unreachable endpoint, a 5xx, a 404 that is not a TEA error or an invalid body moves on to the next one. A TEA error 404 (for example `OBJECT_UNKNOWN`), 401 or 403 stops there.
 
 Using credentials over plaintext HTTP raises an error. Use `--use-http` only for unauthenticated local development.
 

@@ -29,11 +29,18 @@ from libtea._validation import (
     _validate_page_size,
     _validate_path_segment,
 )
-from libtea.discovery import _advertised_version, fetch_well_known, select_best_endpoint, select_endpoints
+from libtea.discovery import (
+    _advertised_version,
+    fetch_well_known,
+    parse_tei,
+    select_best_endpoint,
+    select_endpoints,
+)
 from libtea.exceptions import (
     TeaChecksumError,
     TeaConnectionError,
     TeaDiscoveryError,
+    TeaNotFoundError,
     TeaServerError,
     TeaValidationError,
 )
@@ -105,7 +112,10 @@ class TeaClient:
         token: Optional bearer token for authentication. Mutually exclusive
             with ``basic_auth``. Rejected with plaintext HTTP.
         basic_auth: Optional ``(username, password)`` tuple for HTTP Basic auth.
-            Mutually exclusive with ``token``. Rejected with plaintext HTTP.
+            Mutually exclusive with ``token``. Rejected with plaintext HTTP. On a TEA 1.x
+            server it is an API key ``(key id, secret)``: it is exchanged at ``POST /token``
+            for an access token, which is sent instead, and never reaches a resource endpoint.
+            A TEA 0.4.0 server receives it as Basic auth on every request.
         timeout: Request timeout in seconds (default 30).
         max_retries: Number of automatic retries on 5xx responses (default 3).
         backoff_factor: Exponential backoff multiplier between retries (default 0.5).
@@ -143,6 +153,7 @@ class TeaClient:
             max_retries=max_retries,
             backoff_factor=backoff_factor,
             cache_ttl=cache_ttl,
+            api_key_exchange=not self.is_legacy,
         )
 
     @classmethod
@@ -199,6 +210,93 @@ class TeaClient:
                 (wraps the last probe failure as ``__cause__``), or the negotiated
                 version is not one this client supports.
         """
+        return cls._connect(
+            domain,
+            None,
+            token=token,
+            basic_auth=basic_auth,
+            timeout=timeout,
+            version=version,
+            scheme=scheme,
+            port=port,
+            max_retries=max_retries,
+            backoff_factor=backoff_factor,
+            allow_private_ips=allow_private_ips,
+            cache_ttl=cache_ttl,
+        )[0]
+
+    @classmethod
+    def from_tei(
+        cls,
+        tei: str,
+        *,
+        domain: str | None = None,
+        token: str | None = None,
+        basic_auth: tuple[str, str] | None = None,
+        timeout: float = 30.0,
+        scheme: str = "https",
+        port: int | None = None,
+        max_retries: int = 3,
+        backoff_factor: float = 0.5,
+        allow_private_ips: bool = False,
+        cache_ttl: float | None = None,
+    ) -> tuple[Self, list[DiscoveryInfo]]:
+        """Resolve a TEI end to end: its domain's ``.well-known/tea``, then ``/discovery`` with endpoint failover.
+
+        The candidate endpoints are those :meth:`from_well_known` would probe, in the same order, and the
+        ``/discovery`` request is the probe. Per TEA discovery, an endpoint that is unreachable, answers
+        5xx or a 404 that is not a TEA error, or returns an invalid body is skipped for the next one. A TEA
+        error 404 (such as ``OBJECT_UNKNOWN``), a 401 or a 403 is an answer and ends discovery. A
+        ``urn:tei:`` TEI is only resolved at TEA 0.4.0 endpoints, the only version defining that form.
+
+        Args:
+            tei: TEI to resolve, sent verbatim.
+            domain: Resolve this domain's ``.well-known/tea`` instead of the TEI's (for example a test host).
+            token, basic_auth, timeout, scheme, port, max_retries, backoff_factor, allow_private_ips, cache_ttl:
+                As for :meth:`from_well_known`.
+
+        Returns:
+            The client of the endpoint that resolved the TEI, and its discovery results.
+
+        Raises:
+            TeaDiscoveryError: If the TEI is invalid (checked only without ``domain``), or no compatible
+                endpoint resolved it (wrapping the last failure as ``__cause__``).
+            TeaNotFoundError: If an endpoint answers with a TEA error 404: the TEI is not resolved there.
+            TeaAuthenticationError: On HTTP 401/403.
+        """
+        return cls._connect(
+            domain or parse_tei(tei)[1],
+            tei,
+            token=token,
+            basic_auth=basic_auth,
+            timeout=timeout,
+            version="0.4.0" if tei.startswith("urn:tei:") else None,
+            scheme=scheme,
+            port=port,
+            max_retries=max_retries,
+            backoff_factor=backoff_factor,
+            allow_private_ips=allow_private_ips,
+            cache_ttl=cache_ttl,
+        )
+
+    @classmethod
+    def _connect(
+        cls,
+        domain: str,
+        tei: str | None,
+        *,
+        token: str | None,
+        basic_auth: tuple[str, str] | None,
+        timeout: float,
+        version: str | None,
+        scheme: str,
+        port: int | None,
+        max_retries: int,
+        backoff_factor: float,
+        allow_private_ips: bool,
+        cache_ttl: float | None,
+    ) -> tuple[Self, list[DiscoveryInfo]]:
+        """Try the ``.well-known/tea`` candidates in order: a HEAD probe, or resolving ``tei`` when given."""
         well_known = fetch_well_known(domain, timeout=timeout, scheme=scheme, port=port)
         # Ordered (endpoint URL, advertised version) attempts: highest version first, then endpoint priority.
         # Without an explicit ``version`` every supported version contributes, so failover can cross versions.
@@ -239,15 +337,16 @@ class TeaClient:
             if (url, advertised) in tried:
                 continue
             tried.add((url, advertised))
-            base_url = f"{url.rstrip('/')}/v{advertised}"
+            base_url = f"{url}/v{advertised}"
             if scheme == "https" and urlsplit(base_url).scheme != "https":
                 # TEA 1.0.0: a client shall reject an http base URL learned from discovery.
                 errors.append((base_url, TeaDiscoveryError("non-HTTPS endpoint learned from .well-known rejected")))
                 logger.warning("Endpoint %s is not HTTPS, trying next", base_url)
                 continue
             try:
-                probe_endpoint(base_url, timeout=min(timeout, 5.0))
-                return cls(
+                if tei is None:
+                    probe_endpoint(base_url, timeout=min(timeout, 5.0))
+                client = cls(
                     base_url=base_url,
                     token=token,
                     basic_auth=basic_auth,
@@ -261,6 +360,23 @@ class TeaClient:
             except (TeaConnectionError, TeaServerError, ValueError) as exc:  # ValueError: credentials over http
                 logger.warning("Endpoint %s unusable, trying next: %s", base_url, exc)
                 errors.append((base_url, exc))
+                continue
+            if tei is None:
+                return client, []
+            try:
+                return client, client.discover(tei)
+            except (TeaConnectionError, TeaServerError, TeaValidationError, TeaNotFoundError) as exc:
+                client.close()
+                if isinstance(exc, TeaNotFoundError) and exc.error_type is not None:
+                    # A TEA error: the TEI is unknown or withheld here, which another endpoint must not overrule.
+                    raise TeaNotFoundError(
+                        f"TEI {tei!r} is not resolved at {base_url}: {exc.error_type}", error_type=exc.error_type
+                    ) from exc
+                logger.warning("Discovery at %s failed, trying next endpoint: %s", base_url, exc)
+                errors.append((base_url, exc))
+            except BaseException:
+                client.close()
+                raise
 
         if not errors:
             offered = sorted({v for ep in well_known.endpoints for v in ep.versions})

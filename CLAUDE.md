@@ -65,7 +65,7 @@ conformance/         Conformance test suite (optional dependency: pytest)
 - Downloads follow redirects manually with SSRF validation at each hop
 - Discovery redirects are validated against internal networks (SSRF protection via `_security._validate_download_url`)
 - `_validation._validate()` wraps Pydantic `ValidationError` into `TeaValidationError` so all client errors are `TeaError` subclasses
-- Endpoint failover: `from_well_known()` probes candidates in priority order, skipping unreachable ones. With `version=None` it negotiates 1.0.0 first, then 0.4.0, and the candidates span both versions
+- Endpoint failover: `from_well_known()` probes candidates in priority order, skipping unreachable ones. With `version=None` it negotiates 1.0.0 first, then 0.4.0, and the candidates span both versions. `from_tei()` shares the loop (`_connect`) but uses `/discovery?tei=` as the probe: connection errors, 5xx, a non-TEA 404 or an invalid body fail over; a TEA error 404, 401 or 403 ends discovery
 - `download_artifact_content()` (server-hosted artifact bytes) sends the token only on the first hop, to the API base; every redirect hop goes through the unauthenticated session with SSRF validation
 - `probe_endpoint()` lives in `_http.py` (not `client.py`) to maintain the HTTP layer boundary
 - `_raise_for_status()` reads 4xx bodies once, bounded to 4 KiB, to parse the TEA `error` value (`_tea_error_type`), and only for `application/json` responses (spec rule for recognising a TEA error); the message snippet is cut to 200 characters. This avoids memory issues on streaming responses
@@ -73,7 +73,7 @@ conformance/         Conformance test suite (optional dependency: pytest)
 - Conformance checks run sequentially; earlier checks populate `CheckContext` with discovered UUIDs for later checks
 - `from __future__ import annotations` is safe in conformance modules (no Pydantic models, only dataclasses)
 
-**Auth**: Bearer token and basic auth are supported. Token and basic_auth are mutually exclusive. HTTP (non-TLS) with credentials is rejected.
+**Auth**: Bearer token and basic auth are supported. Token and basic_auth are mutually exclusive. HTTP (non-TLS) with credentials is rejected. On a 1.x server `basic_auth` is an API key: `TeaHttpClient(api_key_exchange=True)` sends it only to `POST /token` (`client_credentials`, each part form-encoded before Basic) and uses the returned access token as the bearer token, replacing it once per request after a `401` with an `invalid_token` challenge. A 0.4.0 server gets plain Basic auth on every request.
 
 ## Critical Implementation Rules
 

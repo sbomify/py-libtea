@@ -1,12 +1,22 @@
 from unittest.mock import patch
 
 import pytest
+import requests
 import responses
 from responses import matchers
 
 from libtea._validation import _validate, _validate_list
 from libtea.client import TeaClient
-from libtea.exceptions import TeaChecksumError, TeaRequestError, TeaServerError, TeaValidationError
+from libtea.exceptions import (
+    TeaAuthenticationError,
+    TeaChecksumError,
+    TeaConnectionError,
+    TeaDiscoveryError,
+    TeaNotFoundError,
+    TeaRequestError,
+    TeaServerError,
+    TeaValidationError,
+)
 from libtea.models import Checksum
 from tests.spec_data import (
     ARTIFACT,
@@ -446,8 +456,9 @@ def test_token_not_forwarded_on_redirect_to_api_host(tmp_path):
 
 
 @responses.activate
-def test_basic_auth_not_forwarded_on_redirect(tmp_path):
+def test_api_key_access_token_not_forwarded_on_redirect(tmp_path):
     c = TeaClient(V1_BASE_URL, basic_auth=("u", "p"))
+    responses.post(f"{V1_BASE_URL}/token", json={"access_token": "issued", "token_type": "Bearer"})
     responses.get(
         f"{V1_BASE_URL}/artifact/{ARTIFACT}/2/download",
         status=302,
@@ -455,8 +466,143 @@ def test_basic_auth_not_forwarded_on_redirect(tmp_path):
     )
     responses.get("https://cdn.example.com/blob/abc", body=b"{}")
     c.download_artifact_content(ARTIFACT, tmp_path / "a.json", media_type=MEDIA, version=2)
-    assert responses.calls[0].request.headers["Authorization"] == "Basic dTpw"  # base64("u:p")
-    assert "Authorization" not in responses.calls[1].request.headers
+    assert responses.calls[0].request.headers["Authorization"] == "Basic dTpw"  # base64("u:p"), to /token only
+    assert responses.calls[1].request.headers["Authorization"] == "Bearer issued"
+    assert "Authorization" not in responses.calls[2].request.headers
+
+
+class TestApiKeyExchange:
+    """TEA 1.x: ``basic_auth`` is an API key, exchanged at POST /token; resources only see the access token."""
+
+    PRODUCT_URL = f"{V1_BASE_URL}/product/{PRODUCT}"
+    EXPIRED = {"WWW-Authenticate": 'Bearer realm="tea", error="invalid_token", error_description="expired"'}
+
+    @staticmethod
+    def issue(*tokens):
+        for token in tokens:
+            responses.post(f"{V1_BASE_URL}/token", json={"access_token": token, "token_type": "Bearer"})
+
+    @responses.activate
+    def test_key_goes_to_token_endpoint_only(self):
+        self.issue("t1")
+        responses.get(self.PRODUCT_URL, json=product(PRODUCT, "P"))
+        c = TeaClient(V1_BASE_URL, basic_auth=("key-id", "key-secret"))
+        c.get_product(PRODUCT)
+        c.get_product(PRODUCT)
+        token_call, *resource_calls = responses.calls
+        assert token_call.request.method == "POST"
+        assert token_call.request.body == "grant_type=client_credentials"
+        assert token_call.request.headers["Content-Type"] == "application/x-www-form-urlencoded"
+        assert token_call.request.headers["Authorization"] == "Basic a2V5LWlkOmtleS1zZWNyZXQ="  # key-id:key-secret
+        assert [call.request.headers["Authorization"] for call in resource_calls] == ["Bearer t1", "Bearer t1"]
+
+    @responses.activate
+    def test_key_parts_form_encoded_before_basic(self):
+        self.issue("t1")
+        responses.get(self.PRODUCT_URL, json=product(PRODUCT, "P"))
+        TeaClient(V1_BASE_URL, basic_auth=("id:1", "sé cret")).get_product(PRODUCT)
+        # RFC 6749 section 2.3.1: "id%3A1:s%C3%A9+cret", then Base64.
+        assert responses.calls[0].request.headers["Authorization"] == "Basic aWQlM0ExOnMlQzMlQTkrY3JldA=="
+
+    @responses.activate
+    def test_legacy_server_still_gets_basic_auth(self):
+        responses.get(f"{LEGACY_BASE_URL}/product/{PRODUCT}", json=product(PRODUCT, "P"))
+        TeaClient(LEGACY_BASE_URL, basic_auth=("u", "p")).get_product(PRODUCT)
+        assert len(responses.calls) == 1
+        assert responses.calls[0].request.headers["Authorization"] == "Basic dTpw"
+
+    @responses.activate
+    def test_rejected_token_replaced_once(self):
+        self.issue("old", "new")
+        responses.get(self.PRODUCT_URL, status=401, headers=self.EXPIRED)
+        responses.get(self.PRODUCT_URL, json=product(PRODUCT, "P"))
+        assert TeaClient(V1_BASE_URL, basic_auth=("u", "p")).get_product(PRODUCT).name == "P"
+        sent = [(call.request.method, call.request.headers["Authorization"]) for call in responses.calls]
+        assert sent == [("POST", "Basic dTpw"), ("GET", "Bearer old"), ("POST", "Basic dTpw"), ("GET", "Bearer new")]
+
+    @responses.activate
+    def test_second_rejection_raises(self):
+        self.issue("old", "new")
+        responses.get(self.PRODUCT_URL, status=401, headers=self.EXPIRED)
+        with pytest.raises(TeaAuthenticationError):
+            TeaClient(V1_BASE_URL, basic_auth=("u", "p")).get_product(PRODUCT)
+        assert len(responses.calls) == 4  # token, request, token, retried request: never a second retry
+
+    @responses.activate
+    def test_401_without_invalid_token_not_retried(self):
+        self.issue("t1")
+        responses.get(self.PRODUCT_URL, status=401, headers={"WWW-Authenticate": 'Bearer error="insufficient_scope"'})
+        with pytest.raises(TeaAuthenticationError):
+            TeaClient(V1_BASE_URL, basic_auth=("u", "p")).get_product(PRODUCT)
+        assert len(responses.calls) == 2
+
+    @responses.activate
+    def test_bearer_token_401_not_retried(self):
+        responses.get(self.PRODUCT_URL, status=401, headers=self.EXPIRED)
+        with pytest.raises(TeaAuthenticationError):
+            TeaClient(V1_BASE_URL, token="fixed").get_product(PRODUCT)
+        assert len(responses.calls) == 1  # a caller-supplied token cannot be replaced
+
+    @responses.activate
+    def test_rejected_key_raises(self):
+        responses.post(f"{V1_BASE_URL}/token", status=401, json={"error": "invalid_client"})
+        with pytest.raises(TeaAuthenticationError):
+            TeaClient(V1_BASE_URL, basic_auth=("u", "bad")).get_product(PRODUCT)
+        assert len(responses.calls) == 1
+
+    @responses.activate
+    def test_oauth_error_type_kept(self):
+        responses.post(f"{V1_BASE_URL}/token", status=400, json={"error": "unsupported_grant_type"})
+        with pytest.raises(TeaRequestError) as exc_info:
+            TeaClient(V1_BASE_URL, basic_auth=("u", "p")).get_product(PRODUCT)
+        assert exc_info.value.error_type == "unsupported_grant_type"
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"token_type": "Bearer"},
+            {"access_token": "", "token_type": "Bearer"},
+            {"access_token": 7, "token_type": "Bearer"},
+            {"access_token": "t1"},
+            {"access_token": "t1", "token_type": "mac"},
+            ["t1"],
+        ],
+    )
+    @responses.activate
+    def test_invalid_token_response_rejected(self, body):
+        responses.post(f"{V1_BASE_URL}/token", json=body)
+        with pytest.raises(TeaValidationError, match="/token"):
+            TeaClient(V1_BASE_URL, basic_auth=("u", "p")).get_product(PRODUCT)
+
+    @responses.activate
+    def test_token_type_case_insensitive(self):
+        responses.post(f"{V1_BASE_URL}/token", json={"access_token": "t1", "token_type": "bearer"})
+        responses.get(self.PRODUCT_URL, json=product(PRODUCT, "P"))
+        TeaClient(V1_BASE_URL, basic_auth=("u", "p")).get_product(PRODUCT)
+        assert responses.calls[1].request.headers["Authorization"] == "Bearer t1"
+
+    @responses.activate
+    def test_token_endpoint_unreachable(self):
+        responses.post(f"{V1_BASE_URL}/token", body=requests.ConnectionError("refused"))
+        with pytest.raises(TeaConnectionError):
+            TeaClient(V1_BASE_URL, basic_auth=("u", "p")).get_product(PRODUCT)
+
+    @responses.activate
+    def test_concurrent_requests_share_one_exchange(self):
+        self.issue("t1")
+        responses.get(self.PRODUCT_URL, json=product(PRODUCT, "P"))
+        TeaClient(V1_BASE_URL, basic_auth=("u", "p")).get_products([PRODUCT] * 8, max_workers=8)
+        assert [call.request.method for call in responses.calls].count("POST") == 1
+
+    @responses.activate
+    def test_closed_client_drops_the_key(self):
+        self.issue("t1")
+        c = TeaClient(V1_BASE_URL, basic_auth=("u", "p"))
+        c.close()
+        responses.get(self.PRODUCT_URL, json=product(PRODUCT, "P"))
+        c.get_product(PRODUCT)
+        assert [call.request.method for call in responses.calls] == ["GET"]
+        assert "Authorization" not in responses.calls[0].request.headers
 
 
 @responses.activate
@@ -519,3 +665,120 @@ def test_server_download_trusts_private_api_base(tmp_path):
     c = TeaClient("https://10.0.0.5/tea/v1.0.0")
     responses.get(f"https://10.0.0.5/tea/v1.0.0/artifact/{ARTIFACT}/latest/download", body=b"{}")
     assert c.download_artifact_content(ARTIFACT, tmp_path / "a", media_type=MEDIA).read_bytes() == b"{}"
+
+
+class TestFromTei:
+    """TEA discovery: the /discovery request is the probe, and fails over between .well-known endpoints."""
+
+    TEI = "tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+    PRIMARY = "https://primary.example.com/v1.0.0/discovery"
+    FALLBACK = "https://fallback.example.com/v1.0.0/discovery"
+    FOUND = [
+        {
+            "productReleaseUuid": PRODUCT_RELEASE,
+            "servers": [{"rootUrl": "https://api.example.com", "versions": ["1.0.0"]}],
+        }
+    ]
+
+    @staticmethod
+    def well_known(domain="example.com"):
+        endpoints = [
+            {"url": "https://primary.example.com", "versions": ["1.0.0"], "priority": 1.0},
+            {"url": "https://fallback.example.com", "versions": ["1.0.0"], "priority": 0.5},
+        ]
+        responses.get(f"https://{domain}/.well-known/tea", json={"schemaVersion": 1, "endpoints": endpoints})
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            {"status": 503},
+            {"body": requests.ConnectionError("refused")},
+            {"status": 404, "body": "<html>Not Found</html>", "content_type": "text/html"},
+            {"status": 404, "json": {"message": "Not Found"}},
+            {"status": 404, "body": '{"error": "OBJECT_UNKNOWN"}', "content_type": "text/plain"},
+            {"json": []},
+            {"json": [{"servers": []}]},
+            {"body": "not json"},
+        ],
+    )
+    @responses.activate
+    def test_fails_over(self, failure):
+        self.well_known()
+        responses.get(self.PRIMARY, **failure)
+        responses.get(self.FALLBACK, json=self.FOUND)
+        client, results = TeaClient.from_tei(self.TEI)
+        assert client._http._base_url == "https://fallback.example.com/v1.0.0"
+        assert [r.product_release_uuid for r in results] == [PRODUCT_RELEASE]
+        assert {c.request.method for c in responses.calls} == {"GET"}  # no HEAD probe
+        assert responses.calls[-1].request.params == {"tei": self.TEI}
+
+    @responses.activate
+    def test_tea_error_404_ends_discovery(self):
+        self.well_known()
+        responses.get(self.PRIMARY, status=404, json={"error": "OBJECT_UNKNOWN"})
+        responses.get(self.FALLBACK, json=self.FOUND)
+        with pytest.raises(TeaNotFoundError, match="primary.example.com.*OBJECT_UNKNOWN") as exc_info:
+            TeaClient.from_tei(self.TEI)
+        assert exc_info.value.error_type == "OBJECT_UNKNOWN"
+        assert len(responses.calls) == 2
+
+    @pytest.mark.parametrize("status", [401, 403])
+    @responses.activate
+    def test_auth_failure_ends_discovery(self, status):
+        self.well_known()
+        responses.get(self.PRIMARY, status=status)
+        responses.get(self.FALLBACK, json=self.FOUND)
+        with pytest.raises(TeaAuthenticationError):
+            TeaClient.from_tei(self.TEI)
+        assert len(responses.calls) == 2
+
+    @responses.activate
+    def test_all_endpoints_fail(self):
+        self.well_known()
+        responses.get(self.PRIMARY, status=500)
+        responses.get(self.FALLBACK, body=requests.ConnectionError("refused"))
+        with pytest.raises(TeaDiscoveryError, match="All 2 endpoint") as exc_info:
+            TeaClient.from_tei(self.TEI)
+        assert isinstance(exc_info.value.__cause__, TeaConnectionError)
+
+    @responses.activate
+    def test_legacy_urn_resolved_at_0_4_0_only(self):
+        endpoints = [
+            {"url": "https://new.example.com", "versions": ["1.0.0"]},
+            {"url": "https://old.example.com", "versions": ["0.4.0"]},
+        ]
+        responses.get("https://example.com/.well-known/tea", json={"schemaVersion": 1, "endpoints": endpoints})
+        old_server = {"rootUrl": "https://old.example.com", "versions": ["0.4.0"]}
+        responses.get(
+            "https://old.example.com/v0.4.0/discovery",
+            json=[{"productReleaseUuid": PRODUCT_RELEASE, "servers": [old_server]}],
+        )
+        client, results = TeaClient.from_tei("urn:tei:uuid:example.com:d4d9f54a-abcf-11ee-ac79-1a52914d44b1")
+        assert client.is_legacy and len(results) == 1
+        assert len(responses.calls) == 2
+
+    @responses.activate
+    def test_domain_override(self):
+        self.well_known(domain="staging.example.com")
+        responses.get(self.PRIMARY, json=self.FOUND)
+        client, _ = TeaClient.from_tei(self.TEI, domain="staging.example.com")
+        assert client._http._base_url == "https://primary.example.com/v1.0.0"
+
+    def test_invalid_tei(self):
+        with pytest.raises(TeaDiscoveryError):
+            TeaClient.from_tei("tei://example.com/nope")
+
+    @responses.activate
+    def test_api_key_exchanged_at_the_resolving_endpoint(self):
+        self.well_known()
+        responses.post("https://primary.example.com/v1.0.0/token", json={"access_token": "t1", "token_type": "Bearer"})
+        responses.get(self.PRIMARY, json=self.FOUND)
+        TeaClient.from_tei(self.TEI, basic_auth=("u", "p"))
+        assert responses.calls[2].request.headers["Authorization"] == "Bearer t1"
+
+    @responses.activate
+    def test_from_well_known_still_probes(self):
+        self.well_known()
+        responses.head("https://primary.example.com/v1.0.0", status=200)
+        TeaClient.from_well_known("example.com")
+        assert [c.request.method for c in responses.calls] == ["GET", "HEAD"]

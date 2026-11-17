@@ -6,13 +6,14 @@ This module is an implementation detail. Public consumers should use
 
 import json
 import logging
+import re
 import threading
 import time
 import warnings
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Self, cast
-from urllib.parse import unquote, urljoin, urlparse, urlsplit
+from urllib.parse import quote_plus, unquote, urljoin, urlparse, urlsplit
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -38,6 +39,8 @@ _ERROR_BODY_SNIPPET_BYTES = 200
 # A TEA error body may carry a long `message`; read enough to parse it so `error` is not lost to the snippet cut.
 _ERROR_BODY_PARSE_BYTES = 4096
 _DOWNLOAD_CHUNK_SIZE = 8192
+# RFC 6750 section 3: a Bearer challenge whose error attribute (quoted or not) is invalid_token.
+_INVALID_TOKEN_CHALLENGE = re.compile(r'\bBearer\b.*\berror\s*=\s*"?invalid_token\b', re.IGNORECASE)
 
 
 def _tea_error_type(raw: bytes) -> str | None:
@@ -115,6 +118,9 @@ class TeaHttpClient:
         timeout: Request timeout in seconds (default 30).
         max_retries: Number of retries on 5xx responses (default 3). Set to 0 to disable.
         backoff_factor: Exponential backoff factor between retries (default 0.5).
+        api_key_exchange: Treat ``basic_auth`` as a TEA 1.x API key: present it only at
+            ``POST /token`` and send the access token it yields as the bearer token. A token rejected
+            with an ``invalid_token`` challenge is replaced once per request.
 
     Raises:
         ValueError: If ``base_url`` is invalid, or both ``token`` and ``basic_auth`` are set,
@@ -131,6 +137,7 @@ class TeaHttpClient:
         max_retries: int = 3,
         backoff_factor: float = 0.5,
         cache_ttl: float | None = None,
+        api_key_exchange: bool = False,
     ):
         parsed = urlparse(base_url)
         if parsed.scheme not in ("http", "https"):
@@ -159,9 +166,12 @@ class TeaHttpClient:
         self._session = requests.Session()
         self._session.headers["user-agent"] = USER_AGENT
 
+        # TEA 1.x: an API key goes only to POST /token, never to a resource endpoint (auth/readme.md).
+        self._api_key = basic_auth if api_key_exchange else None
+        self._token_lock = threading.Lock()
         if token:
             self._session.headers["authorization"] = f"Bearer {token}"
-        elif basic_auth:
+        elif basic_auth and not api_key_exchange:
             self._session.auth = basic_auth
 
         retry = Retry(
@@ -198,8 +208,8 @@ class TeaHttpClient:
             TeaServerError: On HTTP 5xx.
         """
         # Cache lookup — key is (path, params).  Auth is not included because
-        # credentials are constructor-only and immutable for the session lifetime.
-        # If token refresh is ever added, the key must include an auth fingerprint.
+        # credentials are constructor-only and immutable for the session lifetime;
+        # a replaced access token is issued for the same API key.
         cache_key = (
             (path, frozenset(params.items()) if params else frozenset()) if self._cache_ttl is not None else None
         )
@@ -217,7 +227,7 @@ class TeaHttpClient:
         url = f"{self._base_url}{path}"
         logger.debug("GET %s params=%s", url, params)
         try:
-            response = self._session.get(url, params=params, timeout=self._timeout, allow_redirects=False, stream=True)
+            response = self._send(url, params)
         except requests.ConnectionError as exc:
             logger.warning("Connection error for %s: %s", url, exc)
             raise TeaConnectionError(str(exc)) from exc
@@ -231,23 +241,7 @@ class TeaHttpClient:
         try:
             logger.debug("HTTP %d %s (%.3fs)", response.status_code, response.url, response.elapsed.total_seconds())
             self._raise_for_status(response)
-            content_length = response.headers.get("Content-Length")
-            if content_length and content_length.isdigit() and int(content_length) > self._max_response_bytes:
-                raise TeaValidationError(
-                    f"Response too large: {content_length} bytes (limit {self._max_response_bytes})"
-                )
-            # Read at most limit+1 bytes to detect oversized responses without
-            # loading an unbounded body into memory (stream=True defers the read).
-            # decode_content=True tells urllib3 to decompress gzip/deflate.
-            limit = self._max_response_bytes
-            response.raw.decode_content = True
-            body = response.raw.read(limit + 1)
-            if len(body) > limit:
-                raise TeaValidationError(f"Response body exceeds limit: >{limit} bytes (limit {limit})")
-            try:
-                result = json.loads(body)
-            except (ValueError, UnicodeDecodeError, RecursionError) as exc:  # RecursionError: deep nesting
-                raise TeaValidationError(f"Invalid JSON in response: {exc}") from exc
+            result = self._read_json(response)
 
             # Cache store (bounded: evict least-recently-stored entry when full)
             if cache_key is not None:
@@ -260,6 +254,74 @@ class TeaHttpClient:
             return result
         finally:
             response.close()
+
+    def _read_json(self, response: requests.Response) -> Any:
+        """Parse a JSON response body, reading at most ``_max_response_bytes``."""
+        content_length = response.headers.get("Content-Length")
+        if content_length and content_length.isdigit() and int(content_length) > self._max_response_bytes:
+            raise TeaValidationError(f"Response too large: {content_length} bytes (limit {self._max_response_bytes})")
+        # Read at most limit+1 bytes to detect oversized responses without
+        # loading an unbounded body into memory (stream=True defers the read).
+        # decode_content=True tells urllib3 to decompress gzip/deflate.
+        limit = self._max_response_bytes
+        response.raw.decode_content = True
+        body = response.raw.read(limit + 1)
+        if len(body) > limit:
+            raise TeaValidationError(f"Response body exceeds limit: >{limit} bytes (limit {limit})")
+        try:
+            return json.loads(body)
+        except (ValueError, UnicodeDecodeError, RecursionError) as exc:  # RecursionError: deep nesting
+            raise TeaValidationError(f"Invalid JSON in response: {exc}") from exc
+
+    def _send(self, url: str, params: dict[str, Any] | None) -> requests.Response:
+        """GET through the API session; with an API key, replace a token rejected as ``invalid_token`` once."""
+        self._authorize()
+        sent = self._session.headers.get("authorization")
+        response = self._session.get(url, params=params, timeout=self._timeout, allow_redirects=False, stream=True)
+        challenge = response.headers.get("WWW-Authenticate", "")
+        if self._api_key is not None and response.status_code == 401 and _INVALID_TOKEN_CHALLENGE.search(challenge):
+            response.close()
+            self._authorize(rejected=sent)
+            response = self._session.get(url, params=params, timeout=self._timeout, allow_redirects=False, stream=True)
+        return response
+
+    def _authorize(self, rejected: str | bytes | None = None) -> None:
+        """Exchange the API key at ``POST /token`` unless a token other than ``rejected`` is already held.
+
+        ponytail: a token is replaced only after an ``invalid_token`` challenge, ``expires_in`` is not used;
+        renew ahead of expiry if a server answers an expired token without that challenge.
+        """
+        if self._api_key is None:
+            return
+        with self._token_lock:  # concurrent requests share one exchange
+            if self._session.headers.get("authorization") != rejected:
+                return
+            url = f"{self._base_url}/token"
+            logger.debug("POST %s", url)
+            key_id, secret = self._api_key
+            try:
+                response = self._session.post(
+                    url,
+                    data={"grant_type": "client_credentials"},
+                    # RFC 6749 section 2.3.1: each part is form-encoded before the Basic encoding.
+                    auth=(quote_plus(key_id), quote_plus(secret)),
+                    timeout=self._timeout,
+                    allow_redirects=False,
+                    stream=True,
+                )
+            except requests.RequestException as exc:
+                logger.warning("Token request error for %s: %s", url, exc)
+                raise TeaConnectionError(str(exc)) from exc
+            try:
+                self._raise_for_status(response)
+                body = self._read_json(response)
+            finally:
+                response.close()
+            access_token = body.get("access_token") if isinstance(body, dict) else None
+            token_type = body.get("token_type") if isinstance(body, dict) else None
+            if not (access_token and isinstance(access_token, str) and str(token_type).lower() == "bearer"):
+                raise TeaValidationError("Invalid /token response: expected a Bearer access_token")
+            self._session.headers["authorization"] = f"Bearer {access_token}"
 
     def download_with_hashes(
         self,
@@ -323,9 +385,12 @@ class TeaHttpClient:
                 try:
                     redirects = 0
                     while True:
-                        response = session.get(
-                            current_url, params=params, stream=True, timeout=self._timeout, allow_redirects=False
-                        )
+                        if session is self._session:
+                            response = self._send(current_url, params)
+                        else:
+                            response = session.get(
+                                current_url, params=params, stream=True, timeout=self._timeout, allow_redirects=False
+                            )
                         if 300 <= response.status_code < 400:
                             redirects += 1
                             if redirects > _MAX_DOWNLOAD_REDIRECTS:
@@ -381,6 +446,7 @@ class TeaHttpClient:
     def close(self) -> None:
         """Close the HTTP session and clear sensitive credentials from memory."""
         self.clear_cache()
+        self._api_key = None
         self._session.headers.pop("authorization", None)
         self._session.auth = None
         self._session.cert = None
