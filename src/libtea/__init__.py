@@ -1,14 +1,17 @@
 """libtea — Python client library for the Transparency Exchange API (TEA).
 
-Quick start::
+Quick start: resolve a TEI through its domain's ``.well-known/tea``, failing over between endpoints::
 
     from libtea import TeaClient
 
-    with TeaClient("https://tea.example.com/v1", token="...") as client:
-        results = client.discover("tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1")
+    client, results = TeaClient.from_tei("tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1")
+    with client:
+        release = client.get_product_release(results[0].product_release_uuid)
 
-Or auto-discover the server from a domain's ``.well-known/tea``::
+Or connect to a known server (the ``/v<semver>`` suffix selects the spec version), or to a domain's
+``.well-known/tea`` endpoint::
 
+    client = TeaClient("https://tea.example.com/tea/v1.0.0", token="...")
     client = TeaClient.from_well_known("tea.example.com", token="...")
 """
 

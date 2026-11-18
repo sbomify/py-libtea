@@ -30,6 +30,9 @@ pip install libtea[cli]
 | `--verbose`, `-v` | Show verbose output (libtea debug logs on stderr, suppresses urllib3/requests noise) |
 | `--debug`, `-d` | Show full debug output (all HTTP requests, urllib3, timing) on stderr |
 | `--allow-private-ips` | Allow artifact downloads from private/internal IPs (relaxes SSRF checks for downloads only). Scheme validation and cloud metadata endpoint blocking are always enforced. |
+| `--no-input` | Never prompt for input, for scripts and CI. A TEI `download` without `DEST_DIR` then saves into the current directory without asking. |
+| `--no-color` | Disable colored output. The `NO_COLOR` environment variable is also respected. |
+| `--output`, `-o` *FILE* | Write the formatted output to *FILE* instead of stdout. Not used by `download`, which writes to its destination. |
 | `--version` | Show version and exit |
 | `--help` | Show help message and exit |
 
@@ -338,12 +341,16 @@ tea-cli conformance --base-url URL [OPTIONS]
 | `--component-release-uuid` *UUID* | Explicit component release UUID. |
 | `--artifact-uuid` *UUID* | Explicit artifact UUID. |
 | `--token` *TOKEN* | Bearer token. Can also be set via `TEA_TOKEN`. |
-| `--auth` *USER:PASSWORD* | Basic auth credentials. Can also be set via `TEA_AUTH`. |
+| `--auth` *USER:PASSWORD* | Basic auth credentials: an API key exchanged at `/token` on TEA 1.x. Can also be set via `TEA_AUTH`. |
 | `--timeout` *SECONDS* | Request timeout in seconds (default: 30). |
 | `--allow-private-ips` | Allow private IPs in downloads. |
 | `--json` | Output results as JSON. |
 | `-v`, `--verbose` | Show failure details and increase logging verbosity. |
 | `-d`, `--debug` | Show debug output. |
+| `--no-color` | Disable colored output. |
+| `--output`, `-o` *FILE* | Write the output to *FILE* instead of stdout. |
+
+The spec version under test comes from `--base-url`: a `/v<semver>` suffix selects it, otherwise TEA 1.0.0 is assumed. To test a TEA 0.4.0 server, end the base URL in `/v0.4.0`.
 
 The command exits with code 0 if all checks pass, and code 1 if any check fails.
 
@@ -357,19 +364,24 @@ See the [conformance docs](conformance.md) for the full check reference and pyte
 |----------|-------------|
 | `TEA_BASE_URL` | TEA server base URL. Equivalent to `--base-url`. |
 | `TEA_TOKEN` | Bearer token. Equivalent to `--token`. Preferred over the command-line flag to avoid exposing the token in shell history. |
-| `TEA_AUTH` | Basic auth credentials as `USER:PASSWORD`. Equivalent to `--auth`. |
+| `TEA_AUTH` | Basic auth credentials as `USER:PASSWORD`: an API key on TEA 1.x. Equivalent to `--auth`. |
+| `NO_COLOR` | Disable colored output. Equivalent to `--no-color`. |
 
 ## Authentication
 
-`tea-cli` supports three authentication methods, all mutually exclusive:
+`tea-cli` supports two authentication methods, which are mutually exclusive:
 
 **Bearer token** (most common): Pass via `--token` or `TEA_TOKEN`. Requires HTTPS. The token is never sent to artifact download URLs (CDNs) — only to the TEA API server.
 
 **API key / HTTP basic auth:** Pass via `--auth USER:PASSWORD` or `TEA_AUTH`. Requires HTTPS. On a TEA 1.x server the pair is an API key (`KEY-ID:SECRET`): it is sent only to `POST /token`, and the access token it yields is sent to every other endpoint. A TEA 0.4.0 server receives it as HTTP basic auth on every request.
 
-**Discovery failover:** A TEI given without `--base-url` (`discover`, `inspect`, `download`) is resolved at each `.well-known/tea` endpoint in turn until one answers `/discovery`. An unreachable endpoint, a 5xx, a 404 that is not a TEA error or an invalid body moves on to the next one. A TEA error 404 (for example `OBJECT_UNKNOWN`), 401 or 403 stops there.
-
 Using credentials over plaintext HTTP raises an error. Use `--use-http` only for unauthenticated local development.
+
+## Discovery Failover
+
+A TEI given without `--base-url` (`discover`, `inspect`, `download`) is resolved at each `.well-known/tea` endpoint of its domain (or of `--domain`) in turn until one answers `/discovery`. TEA 1.0.0 endpoints are tried before 0.4.0 ones; a legacy URN TEI only goes to 0.4.0 endpoints. An unreachable endpoint, a 5xx, a 404 that is not a TEA error or an invalid body moves on to the next one. A TEA error 404 (for example `OBJECT_UNKNOWN`), 401 or 403 stops there.
+
+With `--base-url`, the TEI is sent to that server only.
 
 ## Examples
 
@@ -456,7 +468,8 @@ tea-cli get-product <product-uuid>
 | Code | Meaning |
 |------|---------|
 | `0` | Success |
-| `1` | Error (network failure, authentication error, not found, invalid input, etc.). The error message is printed to stderr. |
+| `1` | Error (network failure, authentication error, not found, invalid input, etc.). The error message is printed to stderr. `conformance` also exits with 1 when any check fails. |
+| `2` | Usage error (unknown option, missing argument). |
 
 ## See Also
 
