@@ -96,7 +96,10 @@ def shared_options(fn):  # type: ignore[no-untyped-def]
             click.option("--timeout", type=click.FloatRange(min=0.1), default=30.0, help="Request timeout in seconds"),
             click.option("--domain", default=None, help="Discover server from domain's .well-known/tea"),
             click.option(
-                "--auth", envvar="TEA_AUTH", default=None, help="Basic auth as USER:PASSWORD (prefer TEA_AUTH env var)"
+                "--auth",
+                envvar="TEA_AUTH",
+                default=None,
+                help="Basic auth as USER:PASSWORD, an API key on TEA 1.x (prefer TEA_AUTH env var)",
             ),
             click.option(
                 "--token",
@@ -412,7 +415,7 @@ Quick start:
 Environment variables:
   TEA_BASE_URL   TEA server base URL
   TEA_TOKEN      Bearer token for authentication
-  TEA_AUTH       Basic auth as USER:PASSWORD
+  TEA_AUTH       Basic auth as USER:PASSWORD (an API key on TEA 1.x)
 
 \b
 Exit codes:
@@ -1358,7 +1361,7 @@ def inspect(
 @click.option("--artifact-uuid", default=None, help="Artifact UUID")
 @click.option("--timeout", type=click.FloatRange(min=0.1), default=30.0, help="Request timeout in seconds")
 @click.option("--token", envvar="TEA_TOKEN", default=None, help="Bearer token")
-@click.option("--auth", envvar="TEA_AUTH", default=None, help="Basic auth as USER:PASSWORD")
+@click.option("--auth", envvar="TEA_AUTH", default=None, help="Basic auth as USER:PASSWORD, an API key on TEA 1.x")
 @click.option("--allow-private-ips", is_flag=True, help="Allow private IPs")
 @click.option("--json", "output_json", is_flag=True, help="Output results as JSON")
 @click.option("-v", "--verbose", is_flag=True, help="Show failure details and increase logging verbosity")
