@@ -341,10 +341,13 @@ with TeaClient.from_well_known("trust.sbomify.com") as client:
 from libtea import TeaClient
 
 # Bearer token
-client = TeaClient.from_well_known("trust.sbomify.com", token="your-token")
+client = TeaClient.from_well_known("tea.example.com", token="your-token")
 
 # API key (TEA 1.x): exchanged at POST /token, and the access token is sent instead
-client = TeaClient.from_well_known("trust.sbomify.com", basic_auth=("key-id", "key-secret"))
+client = TeaClient.from_well_known("tea.example.com", basic_auth=("key-id", "key-secret"))
+
+# Both work with from_tei too
+client, results = TeaClient.from_tei("tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1", token="your-token")
 ```
 
 On a TEA 1.x server `basic_auth` is an API key. The client sends it only to `POST /token` (the `client_credentials` grant over HTTP Basic, as the TEA auth baseline requires) and presents the access token it gets as the bearer token. A token rejected with an `invalid_token` challenge is replaced, and the request retried, once. A TEA 0.4.0 server receives `basic_auth` as HTTP Basic auth on every request.
@@ -407,10 +410,13 @@ These flags can be placed before or after the subcommand name. They appear under
 --verbose, -v      Show verbose output (libtea debug logs)
 --debug, -d        Show debug output (full HTTP firehose including urllib3)
 --allow-private-ips  Allow artifact downloads from private/internal IPs
+--no-input         Never prompt for input (for scripts and CI)
+--no-color         Disable colored output (also respects NO_COLOR)
+--output, -o FILE  Write formatted output to a file instead of stdout
 --version          Show version
 ```
 
-All commands also accept connection options: `--base-url`, `--domain`, `--token`, `--auth`, `--use-http`, `--port`.
+All commands also accept connection options: `--base-url`, `--domain`, `--token`, `--auth`, `--timeout`, `--use-http`, `--port`. A TEI given without `--base-url` (`discover`, `inspect`, `download`) is resolved with `TeaClient.from_tei`, failing over between the domain's `.well-known/tea` endpoints.
 
 ### Discover
 
@@ -533,7 +539,7 @@ tea-cli conformance --base-url https://tea.example.com/v1 --json
 |----------|-------------|
 | `TEA_BASE_URL` | TEA server base URL (alternative to `--base-url`) |
 | `TEA_TOKEN` | Bearer token (alternative to `--token`) |
-| `TEA_AUTH` | Basic auth as `USER:PASSWORD` (alternative to `--auth`) |
+| `TEA_AUTH` | `USER:PASSWORD` (alternative to `--auth`): an API key exchanged at `/token` on TEA 1.x, HTTP basic auth on 0.4.0 |
 
 ### Shell completion
 
@@ -643,7 +649,7 @@ Exception hierarchy:
 | `TeaValidationError` | Malformed server response |
 | `TeaInsecureTransportWarning` | Warning emitted when using plaintext HTTP |
 
-Using a bearer token over plaintext HTTP raises `ValueError` immediately — HTTPS is required for authenticated requests.
+Using a bearer token or `basic_auth` over plaintext HTTP raises `ValueError` immediately — HTTPS is required for authenticated requests.
 
 ## Upgrading
 
@@ -651,7 +657,7 @@ libtea now targets TEA 1.0.0 and still talks to 0.4.0 servers. These Python API 
 
 **Spec versions**
 
-- A base URL without a `/v<semver>` suffix (and no `spec_version=`) is now TEA 1.0.0, not 0.4.0. `TEA_SPEC_VERSION` is `"1.0.0"`. To keep talking to a 0.4.0 server, pass `spec_version="0.4.0"` or end the base URL in `/v0.4.0`.
+- A base URL without a `/v<semver>` suffix (and no `spec_version=`) is now TEA 1.0.0, not 0.4.0. `TEA_SPEC_VERSION` is `"1.0.0"`. To keep talking to a 0.4.0 server, pass `spec_version="0.4.0"` or end the base URL in `/v0.4.0`. `tea-cli --base-url`, `run_conformance` and the pytest plugin have no version option, so give them a base URL ending in `/v0.4.0`.
 - `TeaClient.from_well_known(version=None)` now negotiates: it prefers 1.0.0, falls back to 0.4.0, and fails over across both. It used to default to `"0.4.0"`. Pass `version="0.4.0"` to pin the old behaviour. Endpoints of another compatible version (for example `0.3.0`) are tried, with a warning, only after every endpoint advertising 1.0.0 or 0.4.0 exactly has failed; a prerelease such as `1.0.0-rc.1` does not count as 1.0.0. With the default `scheme="https"`, an `http://` endpoint listed in `.well-known` is rejected and the next one is tried. The API path uses the version spelling exactly as the server advertises it (for example `/v1.0.0+build.5`).
 - A base URL ending in `/v<semver>` with a major version other than 0 or 1 (for example `/v2.0.0`) now raises `ValueError`.
 - On a 1.x server `basic_auth` is now an API key exchanged at `POST /token`; it is no longer sent to resource endpoints. A server without a `/token` endpoint answers that exchange with an error, so code that used `basic_auth` against a 0.4.0 server behind an unversioned base URL needs `spec_version="0.4.0"`.
@@ -663,6 +669,7 @@ libtea now targets TEA 1.0.0 and still talks to 0.4.0 servers. These Python API 
 - TEIs are now `tei://<domain>/<type>/<identifier>`. `parse_tei` and the CLI still accept the legacy `urn:tei:<type>:<domain>:<identifier>` form, and `TeaClient.discover` sends whatever TEI you give it verbatim; use the legacy form with 0.4.0 servers. `TeaClient.from_tei` (and the CLI without `--base-url`) converts a `tei://` TEI to that form for a 0.4.0 endpoint. When the CLI discovers the server from a legacy-form TEI, it connects to a 0.4.0 endpoint, since only 0.4.0 defines that form.
 - `discover(tei=None, *, purl=None)` takes exactly one of the two, otherwise `TeaValidationError`. PURL lookup needs a 1.x server. On a 1.x server an empty discovery array also raises `TeaValidationError`; an unknown TEI is a 404.
 - `TeaClient.from_tei(tei)` is new and returns `(client, results)`. It fails over between `.well-known/tea` endpoints at the `/discovery` step, as TEA discovery requires, which `from_well_known` followed by `discover` does not. The CLI's `discover`, `inspect` and TEI `download` use it when no `--base-url` is given, so they no longer send a HEAD probe first.
+- Endpoint URLs in `.well-known/tea` must match the TEA schema: `http` or `https`, with no userinfo, query, fragment or trailing slash. A document that lists any other URL is rejected with `TeaDiscoveryError` (libtea 0.5.1 accepted it and stripped a trailing slash).
 
 **Pagination**
 
@@ -725,7 +732,8 @@ Optional:
 
 - Publisher API (blocked on the TEA spec)
 - Async client
-- Some TEA 1.0.0 consumer features: `ETag` revalidation, signature downloads, `sortField`/`sortOrder` and following `servers[].rootUrl`. See [docs/FUTURE.md](docs/FUTURE.md)
+- Some TEA 1.0.0 consumer features: `ETag` revalidation, signature downloads, `sortField`/`sortOrder`, following `servers[].rootUrl` and renewing an access token before it expires. See [docs/FUTURE.md](docs/FUTURE.md)
+- A spec-version option for `tea-cli` and the conformance suite (use a base URL ending in `/v0.4.0` instead)
 
 ## Development
 
@@ -741,7 +749,7 @@ uv build                       # Build wheel and sdist
 
 ## Versioning
 
-Versions are CalVer, `YY.M.PATCH`, matching the other sbomify projects: the two-digit year and month of the release, then a counter that restarts at 0 each month. Releases are tagged `vYY.M.PATCH` (for example `v26.11.0`). 26.11.0 follows 0.5.1, so version ordering still holds for pip and uv.
+Versions are CalVer, `YY.MM.MICRO`, like every sbomify project ([ADR-0002](https://github.com/sbomify/adr/blob/master/0002-adopt-calver-versioning.md)): the two-digit year, the month without zero padding, then a counter for releases within that month (`26.7.0` is the first release of July 2026). Releases are tagged `v<version>`. The first CalVer release follows 0.5.1, so version ordering still holds for pip and uv; a pin such as `libtea~=0.5` will not pick it up.
 
 ## License
 

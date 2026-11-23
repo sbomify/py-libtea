@@ -35,11 +35,14 @@ The library has a layered design with strict separation of concerns:
 
 ```
 __init__.py          Public API re-exports (all models, exceptions, client, discovery)
-client.py            TeaClient — high-level consumer API, spec version resolution, checksum verification
+client.py            TeaClient — high-level consumer API, spec version resolution, checksum verification,
+                     from_well_known / from_tei endpoint failover (_connect)
+protocols.py         TeaClientProtocol — method-only Protocol of TeaClient's public API, for test doubles
   ↓ uses
 _validation.py       Input validation helpers (path segments, page size, Pydantic wrappers)
-_http.py             TeaHttpClient — low-level requests wrapper, auth, streaming downloads
-                     Also: probe_endpoint() for endpoint failover
+_http.py             TeaHttpClient — low-level requests wrapper, auth (incl. the /token API key exchange),
+                     streaming downloads. Also: probe_endpoint() for endpoint failover
+_constants.py        Shared constants (package version for the User-Agent)
 _security.py         SSRF protection (_validate_download_url, DNS rebinding checks, internal IP detection)
 _hashing.py          Checksum hash builders (SHA-*, BLAKE2b-*, MD5)
 discovery.py         TEI parsing, .well-known/tea fetching, SemVer endpoint selection, redirect SSRF protection
@@ -100,5 +103,7 @@ Key spec files: `spec/openapi.yaml`, `discovery/readme.md`, `auth/readme.md`. Th
 
 ## Design Docs
 
+- `docs/cli.md` — `tea-cli` reference (keep in step with the click options in `cli.py`)
 - `docs/conformance.md` — Conformance suite usage and check reference
-- `docs/FUTURE.md` — Items blocked on external factors (Publisher API)
+- `docs/FUTURE.md` — Deferred items: Publisher API (blocked on the spec) and optional TEA 1.0.0 consumer features
+- `.claude/skills/cut-release/SKILL.md` — Release process (CalVer `YY.MM.MICRO`); maintainers cut releases

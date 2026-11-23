@@ -45,11 +45,11 @@ for check in result.checks:
 | `component_release_uuid` | `str \| None` | Explicit component release UUID |
 | `artifact_uuid` | `str \| None` | Explicit artifact UUID |
 | `token` | `str \| None` | Bearer token |
-| `basic_auth` | `tuple[str, str] \| None` | `(user, password)` tuple |
+| `basic_auth` | `tuple[str, str] \| None` | `(user, password)` tuple; on TEA 1.x an API key, exchanged at `POST /token` for a bearer token |
 | `timeout` | `float` | Request timeout in seconds (default: 30) |
 | `allow_private_ips` | `bool` | Allow private IPs in downloads (default: False) |
 
-The spec version under test comes from `base_url`: a `/v<semver>` suffix such as `/v0.4.0` selects that version, otherwise TEA 1.0.0 is assumed. Checks that differ between versions adapt to it (see the check reference).
+The spec version under test comes from `base_url`: a `/v<semver>` suffix such as `/v0.4.0` selects that version, otherwise TEA 1.0.0 is assumed. There is no separate version option, so test a 0.4.0 server with a base URL ending in `/v0.4.0`. Checks that differ between versions adapt to it (see the check reference).
 
 **Returns:** `ConformanceResult` with `.passed`, `.failed`, `.warned`, `.skipped` counts and `.checks` list.
 
@@ -206,7 +206,7 @@ Example GitHub Actions workflow:
 ```yaml
 - name: TEA conformance
   run: |
-    pip install libtea[conformance]
+    pip install "libtea[cli]"
     tea-cli conformance \
       --base-url "${{ secrets.TEA_BASE_URL }}" \
       --token "${{ secrets.TEA_TOKEN }}" \
