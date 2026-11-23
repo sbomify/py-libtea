@@ -65,7 +65,7 @@ tea-cli discover [--quiet | -q] --purl PURL --base-url URL
 
 | Argument | Description |
 |----------|-------------|
-| *TEI* | A TEI (e.g. `tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1`). The domain is auto-extracted for server discovery when `--base-url` and `--domain` are omitted. TEA 0.4.0 servers expect the legacy URN form, which is also accepted (see Upgrading in the README). |
+| *TEI* | A TEI (e.g. `tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1`). The domain is auto-extracted for server discovery when `--base-url` and `--domain` are omitted. TEA 0.4.0 servers expect the legacy URN form, which is also accepted (see Upgrading in the README); without `--base-url`, a `tei://` TEI is sent to a 0.4.0 server in that form. |
 
 **Options:**
 

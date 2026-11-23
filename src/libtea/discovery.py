@@ -169,6 +169,24 @@ def purl_from_tei(tei: str) -> str:
     return purl
 
 
+def _legacy_tei(tei: str) -> str | None:
+    """The TEA 0.4.0 form of a ``tei://`` TEI, ``urn:tei:<type>:<domain>:<identifier>``, or None if it has none.
+
+    0.4.0 defines only the :class:`TeiType` types and carries a ``purl`` identifier as the PURL itself. Other
+    identifiers are kept as they are: percent-escapes are neither added nor removed. Any other string is
+    returned unchanged.
+    """
+    if not tei.startswith(_TEI_URI_PREFIX):
+        return tei
+    try:
+        tei_type, domain, identifier = parse_tei(tei)
+        if tei_type == "purl":
+            identifier = purl_from_tei(tei)
+    except TeaDiscoveryError:
+        return None
+    return f"urn:tei:{tei_type}:{domain}:{identifier}" if tei_type in _VALID_TEI_TYPES else None
+
+
 def fetch_well_known(
     domain: str,
     *,

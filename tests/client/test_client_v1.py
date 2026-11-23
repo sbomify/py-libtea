@@ -757,6 +757,63 @@ class TestFromTei:
         assert client.is_legacy and len(results) == 1
         assert len(responses.calls) == 2
 
+    OLD_DISCOVERY = "https://old.example.com/v0.4.0/discovery"
+    OLD_FOUND = [
+        {
+            "productReleaseUuid": PRODUCT_RELEASE,
+            "servers": [{"rootUrl": "https://old.example.com", "versions": ["0.4.0"]}],
+        }
+    ]
+    URN = "urn:tei:uuid:example.com:d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
+
+    @staticmethod
+    def endpoints(*versions):
+        hosts = {"1.0.0": "https://new.example.com", "0.4.0": "https://old.example.com"}
+        endpoints = [{"url": hosts[v], "versions": [v]} for v in versions]
+        responses.get("https://example.com/.well-known/tea", json={"schemaVersion": 1, "endpoints": endpoints})
+
+    @pytest.mark.parametrize(
+        ("tei", "urn"),
+        [
+            (TEI, URN),
+            # 0.4.0 carries the PURL itself, not its Base64URL encoding
+            ("tei://example.com/purl/cGtnOnB5cGkvbGlidGVhQDAuNi4w", "urn:tei:purl:example.com:pkg:pypi/libtea@0.6.0"),
+            # percent-escapes are neither added nor removed
+            ("tei://example.com/hash/sha256:ab%3Dcd", "urn:tei:hash:example.com:sha256:ab%3Dcd"),
+        ],
+    )
+    @responses.activate
+    def test_uri_tei_sent_as_urn_to_0_4_0(self, tei, urn):
+        self.endpoints("0.4.0")
+        responses.get(self.OLD_DISCOVERY, json=self.OLD_FOUND)
+        client, results = TeaClient.from_tei(tei)
+        assert client.is_legacy and len(results) == 1
+        assert responses.calls[-1].request.params == {"tei": urn}
+
+    @responses.activate
+    def test_uri_tei_verbatim_to_1_x_and_urn_after_failover_to_0_4_0(self):
+        self.endpoints("1.0.0", "0.4.0")
+        responses.get("https://new.example.com/v1.0.0/discovery", status=503)
+        responses.get(self.OLD_DISCOVERY, json=self.OLD_FOUND)
+        TeaClient.from_tei(self.TEI)
+        discovery = [c.request for c in responses.calls if "/discovery" in c.request.url]
+        assert {r.params["tei"] for r in discovery if "new.example.com" in r.url} == {self.TEI}  # 503s retried
+        assert [r.params for r in discovery if "old.example.com" in r.url] == [{"tei": self.URN}]
+
+    @pytest.mark.parametrize(
+        "tei",
+        [
+            "tei://example.com/sku/12345",  # a type 0.4.0 does not define
+            "tei://example.com/purl/bm90LWEtcHVybA",  # a purl TEI that does not carry a PURL
+        ],
+    )
+    @responses.activate
+    def test_uri_tei_without_urn_form_skips_0_4_0(self, tei):
+        self.endpoints("0.4.0")
+        with pytest.raises(TeaDiscoveryError, match="no TEA 0.4.0 form"):
+            TeaClient.from_tei(tei)
+        assert len(responses.calls) == 1  # .well-known only
+
     @responses.activate
     def test_domain_override(self):
         self.well_known(domain="staging.example.com")
