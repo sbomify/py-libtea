@@ -1,4 +1,5 @@
 from unittest.mock import patch
+from urllib.parse import urlsplit
 
 import pytest
 import requests
@@ -796,9 +797,9 @@ class TestFromTei:
         responses.get("https://new.example.com/v1.0.0/discovery", status=503)
         responses.get(self.OLD_DISCOVERY, json=self.OLD_FOUND)
         TeaClient.from_tei(self.TEI)
-        discovery = [c.request for c in responses.calls if "/discovery" in c.request.url]
-        assert {r.params["tei"] for r in discovery if "new.example.com" in r.url} == {self.TEI}  # 503s retried
-        assert [r.params for r in discovery if "old.example.com" in r.url] == [{"tei": self.URN}]
+        sent = [(urlsplit(c.request.url).hostname, c.request.params["tei"]) for c in responses.calls[1:]]
+        assert set(sent) == {("new.example.com", self.TEI), ("old.example.com", self.URN)}  # 503s are retried
+        assert sent[-1] == ("old.example.com", self.URN)
 
     @pytest.mark.parametrize(
         "tei",
