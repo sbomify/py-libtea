@@ -31,6 +31,7 @@ from libtea._validation import (
 )
 from libtea.discovery import (
     _advertised_version,
+    _legacy_tei,
     fetch_well_known,
     parse_tei,
     select_best_endpoint,
@@ -247,10 +248,12 @@ class TeaClient:
         ``/discovery`` request is the probe. Per TEA discovery, an endpoint that is unreachable, answers
         5xx or a 404 that is not a TEA error, or returns an invalid body is skipped for the next one. A TEA
         error 404 (such as ``OBJECT_UNKNOWN``), a 401 or a 403 is an answer and ends discovery. A
-        ``urn:tei:`` TEI is only resolved at TEA 0.4.0 endpoints, the only version defining that form.
+        ``urn:tei:`` TEI is only resolved at TEA 0.4.0 endpoints, the only version defining that form. A
+        ``tei://`` TEI is sent to a TEA 0.4.0 endpoint in that form (a ``purl`` identifier decoded to the PURL
+        itself), and such an endpoint is skipped when 0.4.0 defines no form for the TEI's type.
 
         Args:
-            tei: TEI to resolve, sent verbatim.
+            tei: TEI to resolve, sent verbatim to TEA 1.x endpoints.
             domain: Resolve this domain's ``.well-known/tea`` instead of the TEI's (for example a test host).
             token, basic_auth, timeout, scheme, port, max_retries, backoff_factor, allow_private_ips, cache_ttl:
                 As for :meth:`from_well_known`.
@@ -363,8 +366,14 @@ class TeaClient:
                 continue
             if tei is None:
                 return client, []
+            sent = _legacy_tei(tei) if client.is_legacy else tei  # 0.4.0 defines only the urn:tei: form
+            if sent is None:
+                client.close()
+                logger.warning("Endpoint %s is TEA 0.4.0, which has no form for TEI %r, trying next", base_url, tei)
+                errors.append((base_url, TeaDiscoveryError(f"TEI {tei!r} has no TEA 0.4.0 form (urn:tei:)")))
+                continue
             try:
-                return client, client.discover(tei)
+                return client, client.discover(sent)
             except (TeaConnectionError, TeaServerError, TeaValidationError, TeaNotFoundError) as exc:
                 client.close()
                 if isinstance(exc, TeaNotFoundError) and exc.error_type is not None:

@@ -960,6 +960,7 @@ class TestCLITeiAutoDiscovery:
 
     @responses.activate
     def test_discover_auto_extracts_domain_from_tei_uri(self):
+        """A 0.4.0 endpoint only understands the URN form, so the tei:// TEI reaches it as one."""
         tei = "tei://example.com/uuid/d4d9f54a-abcf-11ee-ac79-1a52914d44b1"
         responses.get(
             "https://example.com/.well-known/tea",
@@ -968,10 +969,11 @@ class TestCLITeiAutoDiscovery:
                 "endpoints": [{"url": "https://api.example.com", "versions": ["0.4.0"]}],
             },
         )
-        responses.head("https://api.example.com/v0.4.0", status=200)
         responses.get(
             "https://api.example.com/v0.4.0/discovery",
-            match=[matchers.query_param_matcher({"tei": tei})],
+            match=[
+                matchers.query_param_matcher({"tei": "urn:tei:uuid:example.com:d4d9f54a-abcf-11ee-ac79-1a52914d44b1"})
+            ],
             json=[
                 {
                     "productReleaseUuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
@@ -2492,10 +2494,9 @@ class TestCLIUXImprovements:
             "https://example.com/.well-known/tea",
             json={"schemaVersion": 1, "endpoints": [{"url": "https://api.example.com", "versions": ["0.4.0"]}]},
         )
-        responses.head("https://api.example.com/v0.4.0", status=200)
         responses.get(
             "https://api.example.com/v0.4.0/discovery",
-            match=[matchers.query_param_matcher({"tei": tei})],
+            match=[matchers.query_param_matcher({"tei": f"urn:tei:uuid:example.com:{pr_uuid}"})],  # 0.4.0 form
             json=[{"productReleaseUuid": pr_uuid, "servers": [{"rootUrl": BASE_URL, "versions": ["1.0.0"]}]}],
         )
         responses.get(

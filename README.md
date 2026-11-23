@@ -135,7 +135,7 @@ with client:
     results = client.discover(purl="pkg:github/sbomify/sbomify")
 ```
 
-`from_tei` tries the endpoints `from_well_known` would, in the same order, and sends `/discovery` to each until one answers. An endpoint that is unreachable, answers 5xx or a 404 that is not a TEA error, or returns an invalid body is skipped. A TEA error 404 (such as `OBJECT_UNKNOWN`, raised as `TeaNotFoundError` with `error_type`), a 401 or a 403 is an answer and ends discovery. `domain=` resolves another domain's `.well-known/tea` instead of the TEI's.
+`from_tei` tries the endpoints `from_well_known` would, in the same order, and sends `/discovery` to each until one answers. An endpoint that is unreachable, answers 5xx or a 404 that is not a TEA error, or returns an invalid body is skipped. A TEA error 404 (such as `OBJECT_UNKNOWN`, raised as `TeaNotFoundError` with `error_type`), a 401 or a 403 is an answer and ends discovery. `domain=` resolves another domain's `.well-known/tea` instead of the TEI's. A TEA 0.4.0 endpoint only understands the legacy URN form, so a `tei://` TEI reaches it as `urn:tei:<type>:<domain>:<identifier>` (a `purl` identifier decoded to the PURL itself); an endpoint is skipped when 0.4.0 has no form for the TEI's type.
 
 On a client you already have, `discover` takes exactly one of `tei` and `purl`. The value is sent to the server verbatim, so pass a TEI in the form the server speaks: `tei://<domain>/<type>/<identifier>` for TEA 1.x, the legacy URN form for 0.4.0 servers (see [Upgrading](#upgrading)). On a 1.x server an unknown TEI is a 404 (`TeaNotFoundError`).
 
@@ -660,7 +660,7 @@ libtea now targets TEA 1.0.0 and still talks to 0.4.0 servers. These Python API 
 
 **Discovery and TEIs**
 
-- TEIs are now `tei://<domain>/<type>/<identifier>`. `parse_tei` and the CLI still accept the legacy `urn:tei:<type>:<domain>:<identifier>` form, and `TeaClient.discover` sends whatever TEI you give it verbatim; use the legacy form with 0.4.0 servers. When the CLI discovers the server from a legacy-form TEI, it connects to a 0.4.0 endpoint, since only 0.4.0 defines that form.
+- TEIs are now `tei://<domain>/<type>/<identifier>`. `parse_tei` and the CLI still accept the legacy `urn:tei:<type>:<domain>:<identifier>` form, and `TeaClient.discover` sends whatever TEI you give it verbatim; use the legacy form with 0.4.0 servers. `TeaClient.from_tei` (and the CLI without `--base-url`) converts a `tei://` TEI to that form for a 0.4.0 endpoint. When the CLI discovers the server from a legacy-form TEI, it connects to a 0.4.0 endpoint, since only 0.4.0 defines that form.
 - `discover(tei=None, *, purl=None)` takes exactly one of the two, otherwise `TeaValidationError`. PURL lookup needs a 1.x server. On a 1.x server an empty discovery array also raises `TeaValidationError`; an unknown TEI is a 404.
 - `TeaClient.from_tei(tei)` is new and returns `(client, results)`. It fails over between `.well-known/tea` endpoints at the `/discovery` step, as TEA discovery requires, which `from_well_known` followed by `discover` does not. The CLI's `discover`, `inspect` and TEI `download` use it when no `--base-url` is given, so they no longer send a HEAD probe first.
 
