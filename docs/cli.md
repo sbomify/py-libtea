@@ -44,7 +44,7 @@ Every command accepts the following options for server selection and authenticat
 
 | Option | Description |
 |--------|-------------|
-| `--base-url` *URL* | TEA server base URL (e.g. `https://trust.sbomify.com/tea/v0.4.0`, a TEA 0.4.0 server, or `https://tea.example.com/tea/v1.0.0`). A `/v<semver>` suffix selects the spec version; without one, TEA 1.0.0 is assumed. Can also be set via the `TEA_BASE_URL` environment variable. Mutually exclusive with `--domain`. |
+| `--base-url` *URL* | TEA server base URL (e.g. `https://trust.sbomify.com/tea/v1.0.0`, or `https://tea.example.com/tea/v0.4.0` for a TEA 0.4.0 server). A `/v<semver>` suffix selects the spec version; without one, TEA 1.0.0 is assumed. Can also be set via the `TEA_BASE_URL` environment variable. Mutually exclusive with `--domain`. |
 | `--domain` *DOMAIN* | Discover server from the domain's `.well-known/tea` endpoint. TEA 1.0.0 is preferred, falling back to 0.4.0. The domain can also be auto-extracted from a TEI argument. |
 | `--token` *TOKEN* | Bearer token for authentication. Prefer the `TEA_TOKEN` environment variable to avoid exposing the token in shell history. |
 | `--auth` *USER:PASSWORD* | HTTP basic authentication credentials: an API key on TEA 1.x, exchanged at `/token` (see [Authentication](#authentication)). Prefer the `TEA_AUTH` environment variable to avoid exposing credentials in shell history. Mutually exclusive with `--token`. |
@@ -457,7 +457,7 @@ Using environment variables to avoid repeating credentials:
 
 ```bash
 export TEA_TOKEN="your-bearer-token"
-export TEA_BASE_URL="https://trust.sbomify.com/tea/v0.4.0"
+export TEA_BASE_URL="https://trust.sbomify.com/tea/v1.0.0"
 tea-cli search-products --id-type PURL --id-value "pkg:github/sbomify/sbomify"
 tea-cli get-product <product-uuid>
 ```

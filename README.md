@@ -75,16 +75,16 @@ with client:
     print(pr.version, pr.product_name)
 ```
 
-Or connect directly to a known endpoint. The `/v<semver>` suffix selects the spec version; `trust.sbomify.com` is a working TEA 0.4.0 server:
+Or connect directly to a known endpoint. The `/v<semver>` suffix selects the spec version; `trust.sbomify.com` is a working TEA 1.0.0 server:
 
 ```python
 client = TeaClient(
-    base_url="https://trust.sbomify.com/tea/v0.4.0",
+    base_url="https://trust.sbomify.com/tea/v1.0.0",
     timeout=30.0,
 )
 
-# A TEA 1.0.0 server
-client = TeaClient(base_url="https://tea.example.com/tea/v1.0.0", timeout=30.0)
+# A TEA 0.4.0 server
+client = TeaClient(base_url="https://tea.example.com/tea/v0.4.0", timeout=30.0)
 ```
 
 `from_well_known` negotiates the spec version for you (TEA 1.0.0 first, then 0.4.0). You can also pin a version and set the timeout:
@@ -93,7 +93,7 @@ client = TeaClient(base_url="https://tea.example.com/tea/v1.0.0", timeout=30.0)
 client = TeaClient.from_well_known(
     "trust.sbomify.com",
     timeout=15.0,
-    version="0.4.0",  # default: None, i.e. negotiate 1.0.0 first, then 0.4.0
+    version="1.0.0",  # default: None, i.e. negotiate 1.0.0 first, then 0.4.0
 )
 ```
 
@@ -104,7 +104,7 @@ client = TeaClient.from_well_known(
 libtea speaks TEA 1.0.0 and 0.4.0. Each client knows which one it talks to, and its behaviour follows that version, never the shape of a response:
 
 ```python
-client = TeaClient("https://trust.sbomify.com/tea/v0.4.0")
+client = TeaClient("https://tea.example.com/tea/v0.4.0")
 client.spec_version  # "0.4.0"
 client.is_legacy  # True for 0.4.0, False for 1.x
 ```
@@ -358,7 +358,7 @@ Enable optional TTL-based caching to avoid repeated API calls:
 
 ```python
 # Cache GET responses for 5 minutes
-client = TeaClient("https://trust.sbomify.com/tea/v0.4.0", cache_ttl=300)
+client = TeaClient("https://trust.sbomify.com/tea/v1.0.0", cache_ttl=300)
 product = client.get_product("uuid")  # HTTP call
 product = client.get_product("uuid")  # served from cache
 
